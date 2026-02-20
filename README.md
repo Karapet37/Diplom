@@ -145,6 +145,9 @@ data/profile_exports/
 - `GET /api/project/model-advisors`
 - `POST /api/client/introspect`
 - `GET /api/project/db/schema`
+- `GET /api/control/state`
+- `POST /api/control/update`
+- `POST /api/control/reload`
 
 ## Living System API
 
@@ -305,6 +308,37 @@ Auth hardening behavior:
 - client IP for rate limiting/auth logs uses direct peer IP by default.
 - `X-Forwarded-For` is used only when `TRUST_PROXY_HEADERS=1` and source is trusted.
 
+## Runtime Control Plane
+
+Centralized runtime feature gates are available for whole-system control:
+
+- `GET /api/control/state`
+- `POST /api/control/update`
+- `POST /api/control/reload`
+
+Control env flags:
+
+```env
+CONTROL_PLANE_ENABLE=1
+CONTROL_READ_ONLY=0
+CONTROL_ALLOW_GRAPH_WRITES=1
+CONTROL_ALLOW_PROJECT_DEMO=1
+CONTROL_ALLOW_PROJECT_DAILY=1
+CONTROL_ALLOW_AUTORUNS_IMPORT=1
+CONTROL_ALLOW_CLIENT_INTROSPECTION=1
+CONTROL_ALLOW_LIVING_FILE_OPS=1
+CONTROL_ALLOW_KNOWLEDGE_MUTATIONS=1
+CONTROL_ALLOW_PROMPT_EXECUTION=1
+
+# Optional extra guard for control update/reload endpoints:
+CONTROL_ADMIN_KEY=replace_with_random_control_key
+```
+
+Behavior:
+- `CONTROL_READ_ONLY=1` blocks API write operations (`POST/PUT/PATCH/DELETE`) except auth token and control endpoints.
+- Per-feature flags block corresponding API groups with explicit reason.
+- If `AUTH_ENABLE=0`, control update/reload requires `CONTROL_ADMIN_KEY`.
+
 ## Security Hardening Report (Latest)
 
 Applied fixes:
@@ -318,6 +352,17 @@ Applied fixes:
 - Enforced translator GGUF responsibility:
   - `translator` role has no fallback to `general`,
   - translation prompt fails closed when translator model is missing.
+- Added runtime control-plane with read-only and subsystem gates (`/api/control/*`).
+
+Control update example:
+
+```bash
+curl -X POST http://127.0.0.1:8008/api/control/update \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "X-Control-Key: <CONTROL_ADMIN_KEY>" \
+  -d '{"read_only": true, "allow_project_demo": false, "allow_autoruns_import": false}'
+```
 
 ## Privacy Noise Plugin (Experimental)
 
@@ -389,6 +434,40 @@ Notes:
 - If `NGINX_TLS_ENABLE=1` but cert files are missing, container falls back to HTTP mode and logs warning.
 - Port `443` is published in `docker-compose.yml`.
 - Keep Prometheus/Grafana ports firewalled if they should not be public.
+
+### Temporary Public URL (For Demo)
+
+For quick external access from another computer without owning a domain:
+
+1. Start stack:
+
+```bash
+docker compose up -d --build
+```
+
+2. Set safe demo mode before sharing:
+
+```bash
+curl -X POST http://127.0.0.1:8008/api/control/update \
+  -H "Content-Type: application/json" \
+  -H "X-Control-Key: <CONTROL_ADMIN_KEY>" \
+  -d '{"read_only": true}'
+```
+
+3. Run a temporary tunnel:
+
+Option A (Cloudflare quick tunnel):
+```bash
+cloudflared tunnel --url http://127.0.0.1:8080
+```
+
+Option B (ngrok):
+```bash
+ngrok http 8080
+```
+
+Share the generated `https://...` URL.  
+Use strong auth secrets and disable demo URL when session ends.
 
 ## Tests
 

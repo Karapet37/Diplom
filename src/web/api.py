@@ -7,12 +7,14 @@ from pathlib import Path
 import platform
 from time import perf_counter
 from typing import Any
+import hmac
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
+from src.web.control_plane import RuntimeControlPlane
 from src.web.observability import RuntimeMetrics, is_inference_path
 from src.web.privacy_noise import PrivacyNoiseConfig, PrivacyNoisePlugin
 from src.web.security import (
@@ -276,6 +278,19 @@ class ClientIntrospectionRequest(BaseModel):
     client: dict[str, Any] = Field(default_factory=dict)
 
 
+class ControlPlaneUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    read_only: bool | None = None
+    allow_graph_writes: bool | None = None
+    allow_project_demo: bool | None = None
+    allow_project_daily: bool | None = None
+    allow_autoruns_import: bool | None = None
+    allow_client_introspection: bool | None = None
+    allow_living_file_ops: bool | None = None
+    allow_knowledge_mutations: bool | None = None
+    allow_prompt_execution: bool | None = None
+
+
 def _scan_modules() -> list[dict[str, Any]]:
     root = Path("src")
     buckets: dict[str, list[str]] = {}
@@ -310,6 +325,7 @@ def _scan_modules() -> list[dict[str, Any]]:
 def create_app() -> FastAPI:
     graph = GraphWorkspaceService(use_env_adapter=True)
     security = SecuritySettings.from_env()
+    control_plane = RuntimeControlPlane.from_env()
     metrics = RuntimeMetrics()
     privacy_noise = PrivacyNoisePlugin(PrivacyNoiseConfig.from_env())
     in_memory_limiter = InMemoryRateLimiter(security.rate_limit_per_minute)
@@ -333,6 +349,19 @@ def create_app() -> FastAPI:
             rate_limit_backend = "slowapi"
         else:
             rate_limit_backend = "in_memory"
+
+    def _assert_control_admin(request: Request) -> None:
+        admin_key = control_plane.admin_key()
+        if admin_key:
+            presented = str(request.headers.get("X-Control-Key", "") or "")
+            if not presented or not hmac.compare_digest(presented, admin_key):
+                raise HTTPException(status_code=403, detail="missing or invalid X-Control-Key")
+            return
+        if not security.auth_enable:
+            raise HTTPException(
+                status_code=503,
+                detail="control updates require AUTH_ENABLE=1 or CONTROL_ADMIN_KEY",
+            )
 
     @app.middleware("http")
     async def security_and_metrics_pipeline(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -381,6 +410,18 @@ def create_app() -> FastAPI:
                     return auth_error_response(f"invalid token: {exc}", status_code=401)
                 request.state.auth_claims = claims
 
+            allowed, reason = control_plane.allow_request(method=method, path=path)
+            if not allowed:
+                status_code = 423
+                return JSONResponse(
+                    status_code=423,
+                    content={
+                        "detail": "request blocked by control plane",
+                        "reason": reason,
+                        "path": path,
+                    },
+                )
+
             response = await call_next(request)
             status_code = int(getattr(response, "status_code", 200))
             return response
@@ -407,8 +448,32 @@ def create_app() -> FastAPI:
                 "rate_limit_enabled": security.rate_limit_enable,
                 "rate_limit_backend": rate_limit_backend,
             },
+            "control_plane": control_plane.snapshot(),
             "privacy_noise_enabled": privacy_noise.enabled(),
         }
+
+    @app.get("/api/control/state")
+    def control_state() -> dict[str, Any]:
+        return control_plane.snapshot()
+
+    @app.post("/api/control/update")
+    def control_update(payload: ControlPlaneUpdateRequest, request: Request) -> dict[str, Any]:
+        _assert_control_admin(request)
+        data = payload.model_dump(exclude_none=True)
+        if not data:
+            return {
+                "ok": True,
+                "changed": {},
+                "flags": control_plane.snapshot()["flags"],
+                "updated_at": control_plane.snapshot()["updated_at"],
+                "note": "no changes requested",
+            }
+        return control_plane.apply_patch(data)
+
+    @app.post("/api/control/reload")
+    def control_reload(request: Request) -> dict[str, Any]:
+        _assert_control_admin(request)
+        return control_plane.reload_from_env()
 
     @app.get("/metrics", response_class=PlainTextResponse)
     def metrics_endpoint() -> str:
