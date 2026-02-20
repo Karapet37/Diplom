@@ -1,0 +1,36 @@
+# Environment and local tooling
+.env
+.venv/
+.idea/
+
+# Python cache/build artifacts
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.pytest_cache/
+
+# Runtime data
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.db
+
+# Generated outputs
+reports/
+READMEREPORT.md
+data/profile_exports/
+models/*.gguf
+models/**/*.gguf
+
+# OS files
+.DS_Store
+
+# Web UI
+webapp/node_modules/
+webapp/dist/
+
+# TLS certificates (mounted into nginx container)
+infra/nginx/certs/*.pem
+infra/nginx/certs/*.key
+infra/nginx/certs/*.crt

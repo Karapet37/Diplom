@@ -11,6 +11,16 @@ Project scope is now intentionally minimal:
 
 Legacy agent/speech/personalizer modules were removed.
 
+## Project Report
+
+A full architecture and quality report is generated in:
+
+```text
+READMEREPORT.md
+```
+
+Note: this file is intentionally git-ignored for local reporting iterations.
+
 ## Architecture
 
 - `src/autonomous_graph/core.py`: node/edge model, operators (recursive generation, inference, propagation).
@@ -81,6 +91,11 @@ LOCAL_GGUF_MAX_LOADED=1
 LOCAL_GGUF_MAX_TOKENS=220
 ```
 
+Split GGUF note:
+- Use shard entrypoint only: `...-00001-of-0000N.gguf`.
+- If `LOCAL_GGUF_MODEL` points to `...-00002-of-...`, provider auto-remaps to shard `00001` when present.
+- Keep all shards in the same directory.
+
 Role-based auto-discovery also works from `models/gguf`:
 - `general`
 - `coder_architect`, `coder_reviewer`, `coder_refactor`, `coder_debug`
@@ -90,6 +105,7 @@ Role-based auto-discovery also works from `models/gguf`:
 Important:
 - `translate_text` prompt resolves only `translator` role GGUF.
 - Translation does not fallback to `general` model.
+- This local provider uses `llama_cpp` directly; Ollama is optional and not required.
 
 ## Profile -> Graph API
 
@@ -183,10 +199,11 @@ data/profile_exports/
 ## Demo Flow
 
 - Demo button now runs `watch_demo` scenario (`Alexa`) with LLM-first extraction and deterministic fallback.
-- Daily Mode (`/api/project/daily-mode`) creates AI diary entries, extracts goals/problems/wins, returns 3-5 recommendations and improvement scores.
-- User semantic dimensions can be updated via `/api/project/user-graph/update`:
+- Daily Mode (`/api/project/daily-mode`) creates AI diary entries, extracts goals/problems/wins, returns 3-5 recommendations and improvement scores, and can project journal text into `profile_update_json`.
+- User semantic dimensions can be updated via `/api/project/user-graph/update` using both structured lists and free-text narrative:
   - `fears`, `desires`, `goals`, `principles`, `opportunities`,
   - `abilities`, `access`, `knowledge`, `assets`.
+- Client introspection can be linked to user profile graph nodes (`observed_in_session`) during profile updates.
 - Foundation concepts are auto-seeded on startup when graph is empty:
 
 ```env
@@ -202,6 +219,7 @@ Project supports importing Sysinternals Autoruns exports into the semantic graph
 - source reference: https://learn.microsoft.com/en-us/sysinternals/downloads/autoruns
 - endpoint: `POST /api/project/autoruns/import`
 - parser supports CSV/TSV (`autoruns` GUI export or `autorunsc` text export)
+- fallback mode supports semantic auto-detection from client telemetry when CSV/TSV is not provided (`auto_detect=true`)
 
 Example:
 
@@ -222,6 +240,26 @@ Response includes:
 - semantic binding node IDs,
 - updated snapshot/metrics.
 
+Auto-detect example (no CSV text):
+
+```bash
+curl -s -X POST "http://127.0.0.1:8008/api/project/autoruns/import" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "",
+    "auto_detect": true,
+    "query": "show startup risks for browser updates",
+    "user_id": "web_user",
+    "session_id": "autoruns_session_2",
+    "host_label": "Web User",
+    "client": {
+      "platform": "Linux x86_64",
+      "user_agent": "Mozilla/5.0",
+      "language": "en-US"
+    }
+  }'
+```
+
 ## User Graph Update API
 
 ```bash
@@ -230,6 +268,12 @@ curl -s -X POST "http://127.0.0.1:8008/api/project/user-graph/update" \
   -d '{
     "user_id":"web_user",
     "display_name":"Web User",
+    "text":"My name is Alex. I grew up with mathematics and music, now I work as backend engineer, and I want to build resilient AI systems.",
+    "language":"en",
+    "session_id":"profile_web_user_1",
+    "use_llm_profile":true,
+    "include_client_profile":true,
+    "client":{"platform":"Linux x86_64","user_agent":"Mozilla/5.0","language":"en-US"},
     "fears":["failure","public speaking"],
     "desires":["freedom"],
     "goals":["ship product"],
@@ -241,6 +285,8 @@ curl -s -X POST "http://127.0.0.1:8008/api/project/user-graph/update" \
     "assets":["laptop","digital library"]
   }'
 ```
+
+Response contains `profile_update_json` for traceable `text -> structured graph update` behavior.
 
 ## Mini Coder Advisors + Translator
 
@@ -479,8 +525,8 @@ python3 -m unittest discover -s tests/unit -p 'test_*.py'
 
 ```bash
 git status
-git add docker-compose.yml infra/nginx/nginx-http.conf infra/nginx/nginx-https.conf infra/nginx/start-nginx.sh infra/nginx/certs/.gitkeep README.md .gitignore
-git commit -m "Add optional external HTTPS nginx mode for docker deployment"
+git add README.md .gitignore
+git commit -m "docs: refresh README and gitignore for current project behavior"
 git push origin <your-branch>
 ```
 
