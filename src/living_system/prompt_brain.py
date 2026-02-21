@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any
 
 from src.living_system.knowledge_sql import KnowledgeSQLStore
@@ -12,6 +13,119 @@ from src.living_system.models import OperationPolicy, PromptRun
 class _SafeDict(dict[str, Any]):
     def __missing__(self, key: str) -> str:
         return "{" + key + "}"
+
+
+_SECURITY_SEVERITY_SCORE = {
+    "low": 1,
+    "medium": 2,
+    "high": 3,
+    "critical": 4,
+}
+
+_SECURITY_RULES = (
+    {
+        "id": "shell_rm_rf",
+        "category": "destructive_command",
+        "severity": "critical",
+        "pattern": re.compile(r"(?i)\brm\s+-[^\n\r]{0,16}r[^\n\r]{0,16}f\b"),
+        "explanation": "Detected recursive force-delete shell command pattern.",
+    },
+    {
+        "id": "shell_mkfs",
+        "category": "destructive_command",
+        "severity": "critical",
+        "pattern": re.compile(r"(?i)\bmkfs(?:\.[a-z0-9_]+)?\b"),
+        "explanation": "Detected filesystem formatting command.",
+    },
+    {
+        "id": "shell_dd_raw_disk",
+        "category": "destructive_command",
+        "severity": "critical",
+        "pattern": re.compile(
+            r"(?i)\bdd\s+if=[^\n\r]{0,80}\bof=/dev/(?:sd[a-z]\d*|nvme\d+n\d+(?:p\d+)?)\b"
+        ),
+        "explanation": "Detected raw disk write command.",
+    },
+    {
+        "id": "shell_curl_pipe_shell",
+        "category": "remote_execution",
+        "severity": "high",
+        "pattern": re.compile(r"(?i)\bcurl\b[^\n\r]{0,240}\|\s*(?:bash|sh|zsh)\b"),
+        "explanation": "Detected remote script execution via curl pipe.",
+    },
+    {
+        "id": "shell_wget_pipe_shell",
+        "category": "remote_execution",
+        "severity": "high",
+        "pattern": re.compile(r"(?i)\bwget\b[^\n\r]{0,240}\|\s*(?:bash|sh|zsh)\b"),
+        "explanation": "Detected remote script execution via wget pipe.",
+    },
+    {
+        "id": "shell_fork_bomb",
+        "category": "process_abuse",
+        "severity": "critical",
+        "pattern": re.compile(r":\(\)\s*\{\s*:\|\:&\s*;\s*\}\s*;:"),
+        "explanation": "Detected fork bomb pattern.",
+    },
+    {
+        "id": "shell_killall_force",
+        "category": "process_termination",
+        "severity": "high",
+        "pattern": re.compile(r"(?i)\b(?:killall|pkill)\b[^\n\r]{0,80}\s(?:-9|--signal=9)\b"),
+        "explanation": "Detected forceful process termination command.",
+    },
+    {
+        "id": "windows_taskkill_force",
+        "category": "process_termination",
+        "severity": "high",
+        "pattern": re.compile(r"(?i)\btaskkill\b[^\n\r]{0,120}\s/f\b"),
+        "explanation": "Detected forceful Windows process termination command.",
+    },
+    {
+        "id": "shell_shutdown_reboot",
+        "category": "system_disruption",
+        "severity": "high",
+        "pattern": re.compile(r"(?i)\b(?:shutdown|reboot|halt|poweroff)\b"),
+        "explanation": "Detected system shutdown/reboot command pattern.",
+    },
+    {
+        "id": "powershell_encoded_command",
+        "category": "obfuscated_execution",
+        "severity": "high",
+        "pattern": re.compile(r"(?i)\bpowershell(?:\.exe)?\b[^\n\r]{0,180}-(?:enc|encodedcommand)\b"),
+        "explanation": "Detected obfuscated PowerShell encoded command invocation.",
+    },
+)
+
+_SECURITY_DECISION_PROCEED = {
+    "proceed",
+    "allow",
+    "approve",
+    "force",
+    "override",
+    "execute_anyway",
+    "do_anyway",
+    "yes",
+    "run",
+    "continue",
+    "все равно сделать",
+    "всё равно сделать",
+    "разрешить",
+    "выполнить",
+}
+
+_SECURITY_DECISION_CANCEL = {
+    "cancel",
+    "deny",
+    "reject",
+    "abort",
+    "skip",
+    "no",
+    "stop",
+    "не делать",
+    "отмена",
+    "запретить",
+}
 
 
 class PromptBrain:
@@ -252,6 +366,118 @@ class PromptBrain:
     def context_for_session(self, session_id: str) -> dict[str, Any]:
         return dict(self.session_context.get(session_id, {}))
 
+    @staticmethod
+    def _normalize_security_decision(decision: str) -> str:
+        token = " ".join(str(decision or "").strip().lower().split())
+        if not token:
+            return ""
+        if token in _SECURITY_DECISION_PROCEED:
+            return "proceed"
+        if token in _SECURITY_DECISION_CANCEL:
+            return "cancel"
+        return ""
+
+    @staticmethod
+    def _best_severity(levels: list[str]) -> str:
+        if not levels:
+            return "none"
+        ranked = sorted(
+            levels,
+            key=lambda item: _SECURITY_SEVERITY_SCORE.get(str(item).lower(), 0),
+            reverse=True,
+        )
+        return str(ranked[0]).lower()
+
+    @staticmethod
+    def _snippet(text: str, start: int, end: int, radius: int = 64) -> str:
+        lo = max(0, int(start) - radius)
+        hi = min(len(text), int(end) + radius)
+        return text[lo:hi].replace("\n", " ").strip()
+
+    def _scan_prompt_security(
+        self,
+        *,
+        prompt_name: str,
+        variables: dict[str, Any],
+        rendered: str,
+        security_decision: str,
+    ) -> dict[str, Any]:
+        scan_parts = [f"prompt:{prompt_name}", rendered]
+        for key, value in sorted(variables.items(), key=lambda item: str(item[0])):
+            scan_parts.append(f"{key}: {value}")
+        scan_text = "\n".join(scan_parts)
+        matches: list[dict[str, Any]] = []
+
+        for rule in _SECURITY_RULES:
+            found = rule["pattern"].search(scan_text)
+            if found is None:
+                continue
+            matches.append(
+                {
+                    "id": str(rule["id"]),
+                    "category": str(rule["category"]),
+                    "severity": str(rule["severity"]),
+                    "explanation": str(rule["explanation"]),
+                    "snippet": self._snippet(scan_text, found.start(), found.end()),
+                }
+            )
+
+        decision = self._normalize_security_decision(security_decision)
+        if not matches:
+            return {
+                "status": "clear",
+                "allow_execution": True,
+                "decision": decision,
+                "risk_level": "none",
+                "matches": [],
+                "explanation": "",
+                "options": [],
+            }
+
+        risk_level = self._best_severity([str(item.get("severity", "low")) for item in matches])
+        options = [
+            {"id": "proceed", "label": "Все равно сделать"},
+            {"id": "cancel", "label": "Не делать"},
+        ]
+
+        if decision == "proceed":
+            return {
+                "status": "overridden",
+                "allow_execution": True,
+                "decision": decision,
+                "risk_level": risk_level,
+                "matches": matches,
+                "explanation": (
+                    "Potentially harmful command/process patterns detected, "
+                    "but execution is explicitly overridden."
+                ),
+                "options": options,
+            }
+
+        if decision == "cancel":
+            return {
+                "status": "cancelled",
+                "allow_execution": False,
+                "decision": decision,
+                "risk_level": risk_level,
+                "matches": matches,
+                "explanation": "Execution cancelled by user decision after security scan.",
+                "options": options,
+            }
+
+        return {
+            "status": "needs_confirmation",
+            "allow_execution": False,
+            "decision": decision,
+            "risk_level": risk_level,
+            "matches": matches,
+            "explanation": (
+                "Potentially harmful command/process patterns detected. "
+                "Execution is paused pending explicit user decision."
+            ),
+            "options": options,
+        }
+
     def run_prompt(
         self,
         *,
@@ -259,6 +485,7 @@ class PromptBrain:
         variables: dict[str, Any],
         user_id: str = "",
         session_id: str = "",
+        security_decision: str = "",
     ) -> dict[str, Any]:
         language = str(variables.get("language", "en") or "en").strip() or "en"
         prompt = self.store.get_prompt(name=prompt_name, language_code=language)
@@ -273,6 +500,53 @@ class PromptBrain:
             "session_memory": str(session_memory),
         }
         rendered = str(prompt["template_text"]).format_map(_SafeDict(payload))
+        security = self._scan_prompt_security(
+            prompt_name=prompt_name,
+            variables=variables,
+            rendered=rendered,
+            security_decision=security_decision,
+        )
+
+        if not bool(security.get("allow_execution", False)):
+            status = str(security.get("status", "needs_confirmation"))
+            if status == "cancelled":
+                output = "Prompt execution cancelled by user choice."
+                confidence = 1.0
+                result_status = "cancelled_by_user"
+            else:
+                output = (
+                    "Security scanner paused execution due to potentially harmful commands/processes. "
+                    "Set security_decision='proceed' to override or 'cancel' to reject."
+                )
+                confidence = 0.0
+                result_status = "blocked_for_confirmation"
+
+            run_payload = dict(payload)
+            run_payload["_security"] = {
+                "decision": str(security.get("decision", "")),
+                "status": str(security.get("status", "")),
+                "risk_level": str(security.get("risk_level", "")),
+                "matches": list(security.get("matches", [])),
+            }
+            run = PromptRun(
+                prompt_id=int(prompt["prompt_id"]),
+                input_payload=run_payload,
+                output_text=output,
+                confidence=confidence,
+                user_id=user_id,
+            )
+            run_id = self.store.record_prompt_run(run)
+            return {
+                "run_id": run_id,
+                "prompt": prompt,
+                "rendered": rendered,
+                "output": output,
+                "confidence": confidence,
+                "status": result_status,
+                "blocked": True,
+                "requires_confirmation": result_status == "blocked_for_confirmation",
+                "security": security,
+            }
 
         llm_callable = self._resolve_prompt_llm(prompt_name=prompt_name)
         if llm_callable is None:
@@ -296,9 +570,16 @@ class PromptBrain:
                 output = f"LLM inference failed: {exc}"
                 confidence = 0.1
 
+        run_payload = dict(payload)
+        run_payload["_security"] = {
+            "decision": str(security.get("decision", "")),
+            "status": str(security.get("status", "")),
+            "risk_level": str(security.get("risk_level", "")),
+            "matches": list(security.get("matches", [])),
+        }
         run = PromptRun(
             prompt_id=int(prompt["prompt_id"]),
-            input_payload=payload,
+            input_payload=run_payload,
             output_text=output,
             confidence=confidence,
             user_id=user_id,
@@ -315,6 +596,10 @@ class PromptBrain:
             "rendered": rendered,
             "output": output,
             "confidence": confidence,
+            "status": "ok",
+            "blocked": False,
+            "requires_confirmation": False,
+            "security": security,
         }
 
     def _validate_file_content(self, content: str) -> int:

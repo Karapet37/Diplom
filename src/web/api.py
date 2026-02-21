@@ -162,6 +162,8 @@ class LivingPromptRunRequest(BaseModel):
     variables: dict[str, Any] = Field(default_factory=dict)
     user_id: str = ""
     session_id: str = ""
+    security_decision: str = ""
+    force_execute: bool = False
 
 
 class LivingProjectMapRequest(BaseModel):

@@ -154,6 +154,9 @@ Role-based auto-discovery also works from `models/gguf`:
 
 Current workspace configuration (`.env` in this repository):
 - `general` -> `models/gguf/textGen/mistral-7b-instruct-v0.3-q4_k_m.gguf` (recommended default)
+- `analyst` -> `models/gguf/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf`
+- `creative` -> `models/gguf/textGen/h2o-danube3-4b-chat-Q5_K_M.gguf`
+- `planner` -> `models/gguf/textGen/mistral-7b-instruct-v0.3-q4_k_m.gguf`
 - `coder_architect` -> `models/gguf/coder/qwen2.5-coder-7b-instruct-q4_k_m-00001-of-00002.gguf`
 - `coder_reviewer` -> `models/gguf/coder/qwen2.5-coder-7b-instruct-q4_k_m-00001-of-00002.gguf`
 - `coder_refactor` -> `models/gguf/coder/qwen2.5-coder-7b-instruct-q4_k_m-00001-of-00002.gguf`
@@ -167,7 +170,9 @@ Additional local `textGen` models available in this repository:
 - `models/gguf/textGen/llama-2-7b-chat.Q4_K_M.gguf`
 
 Suggested usage profile:
-- `mistral-7b-instruct-v0.3` for `general` and planning-heavy tasks.
+- `mistral-7b-instruct-v0.3` for `general` and `planner`.
+- `qwen2.5-7b-instruct` for `analyst`.
+- `h2o-danube3-4b-chat` for `creative`.
 - `qwen2.5-coder-7b-instruct` for all `coder_*` roles.
 
 Important:
@@ -440,7 +445,7 @@ curl -s -X POST "http://127.0.0.1:8008/api/project/user-graph/update" \
 
 Response contains `profile_update_json` for traceable `text -> structured graph update` behavior.
 
-## Mini Coder Advisors + Translator
+## Role-Based Prompt Brain
 
 - Advisor catalog endpoint:
   - `GET /api/project/model-advisors`
@@ -452,6 +457,11 @@ Response contains `profile_update_json` for traceable `text -> structured graph 
   - `coder_refactor_advisor`
   - `coder_debug_advisor`
   - `translate_text`
+- Backend role routing is active for living prompts:
+  - `code_architect` -> `coder_architect`
+  - `code_patch` -> `coder_refactor`
+  - `translate_text` -> `translator` (strict, no fallback)
+  - non-mapped prompts -> `general`
 
 Translator special case:
 - MADLAD GGUF is used as translator-priority when detected.
@@ -462,6 +472,60 @@ Translator special case:
 - Or explicit env override:
   - `LOCAL_TRANSLATOR_GGUF_MODEL=/absolute/path/model-q4k.gguf`
 - If translator model is missing, translation returns configuration error instead of using non-translator model.
+
+## Prompt Security Scanner (`/api/living/prompt/run`)
+
+Living prompt execution now includes a backend scanner for harmful command/process patterns before LLM inference.
+
+Detected examples:
+- destructive shell commands (`rm -rf`, `mkfs`, raw-disk `dd`)
+- remote execution pipes (`curl|bash`, `wget|sh`)
+- process abuse/termination (`fork bomb`, force `killall/pkill/taskkill`)
+- disruptive system commands (`shutdown`, `reboot`, `poweroff`)
+- obfuscated PowerShell encoded command invocations
+
+API request fields:
+- `security_decision`: `proceed` or `cancel`
+- `force_execute`: boolean alias for `proceed` (when `security_decision` is empty)
+
+Scanner response statuses:
+- `blocked_for_confirmation`: risky input detected, waiting for explicit decision
+- `cancelled_by_user`: user rejected execution
+- `ok`: execution allowed (clear scan or explicit override)
+
+Response includes:
+- `security.status`, `security.risk_level`, `security.matches[]`, `security.explanation`
+- options list with `proceed` / `cancel` for UI confirmation dialog
+
+Example (blocked until confirmation):
+
+```bash
+curl -s -X POST "http://127.0.0.1:8008/api/living/prompt/run" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt_name": "code_patch",
+    "variables": {
+      "language": "en",
+      "task": "run rm -rf /tmp/cache and restart workers",
+      "target_file": "ops.sh",
+      "constraints": "none"
+    },
+    "user_id": "web_user",
+    "session_id": "scan_demo"
+  }'
+```
+
+Example (explicit override):
+
+```bash
+curl -s -X POST "http://127.0.0.1:8008/api/living/prompt/run" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt_name": "code_patch",
+    "variables": {"language":"en","task":"maintenance command","target_file":"ops.sh","constraints":"none"},
+    "security_decision": "proceed"
+  }'
+```
 
 ## Security and Rate Limiting
 
@@ -547,6 +611,10 @@ Applied fixes:
   - blocked null-byte payloads,
   - added write size limit (`OperationPolicy.max_file_bytes`, default `1_000_000`),
   - blocked writes to symlink targets.
+- Added prompt security scanner for `/api/living/prompt/run`:
+  - blocks risky command/process patterns pending explicit user decision,
+  - supports explicit `security_decision` (`proceed`/`cancel`) and `force_execute`,
+  - returns structured explanations and match snippets for UI review.
 - Enforced translator GGUF responsibility:
   - `translator` role has no fallback to `general`,
   - translation prompt fails closed when translator model is missing.

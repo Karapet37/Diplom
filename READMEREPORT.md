@@ -87,6 +87,15 @@ Operational deployment՝
 - Ավելացվել է `Verified Archive Chat` հոսքը՝
   - chat-ում վերջնական պատասխանը conversational ձևով է (ոչ թե raw JSON),
   - JSON update-ները գնում են առանձին review/edit փուլ՝ նորից verify անելու համար։
+- `living_system/prompt_brain`-ում backend մակարդակով միացվել է prompt -> role routing-ը՝
+  - `code_architect` -> `coder_architect`,
+  - `code_patch` -> `coder_refactor`,
+  - `translate_text` -> `translator`,
+  - մնացած prompt-ները -> `general`։
+- Ավելացվել է `Prompt Security Scanner` (`POST /api/living/prompt/run`)՝
+  - հայտնաբերում է վտանգավոր command/process pattern-ներ,
+  - կանգնեցնում է inference-ը մինչև user decision,
+  - վերադարձնում է explanation + match snippet-ներ + `proceed/cancel` ընտրանքներ։
 - `project_user_graph_update` և `project_llm_debate` endpoint-ներում ավելացվել են `personalization` և `feedback_items`։
 - Debate prompt pipeline-ը հիմա ներառում է personalization context (`style/depth/risk/tone` + role defaults)։
 - Frontend-ում ավելացվել է `Personalization Studio` և persistent local profile (`localStorage`)։
@@ -176,7 +185,16 @@ Operational deployment՝
 - Համակարգը վերադարձնում է conversational assistant reply, իսկ structural update-ները տալիս է review բլոկով։
 - `POST /api/project/archive/review`-ով օգտատերը խմբագրում/վերավերացնում է update-ները և հետո կիրառում graph branch-ում։
 
-6. Live դիտարկում
+6. Living prompt-ների անվտանգ գործարկում
+
+- Եթե օգտագործվում է `POST /api/living/prompt/run`, backend scanner-ը նախ ստուգում է վտանգավոր հրամանները։
+- Եթե ռիսկ է հայտնաբերվում, պատասխանում ստացվում է `blocked_for_confirmation` կարգավիճակ։
+- Օգտատերը ընտրում է՝
+  - `security_decision: "proceed"` (`force_execute: true`)՝ «ամեն դեպքում կատարել»,
+  - `security_decision: "cancel"`՝ «չկատարել»։
+- Պատասխանում միշտ վերադառնում է `security` բլոկ (`risk_level`, `matches`, `explanation`)՝ audit/review-ի համար։
+
+7. Live դիտարկում
 
 - `GET /api/graph/snapshot` և `WS /api/graph/ws`-ով օգտատերը real-time տեսնում է graph-ի փոփոխությունները։
 - Սա թույլ է տալիս անմիջապես հասկանալ, թե որ reasoning chain-ն է աշխատել, որը՝ ոչ։
@@ -199,11 +217,24 @@ Operational deployment՝
   - `LOCAL_GGUF_MAX_LOADED=1`
 
 Առաջարկվող role strategy՝
-- `mistral`՝ general/planning reasoning-ի համար,
+- `mistral`՝ general/planner reasoning-ի համար,
+- `qwen2.5`՝ analyst reasoning-ի համար,
+- `h2o-danube3`՝ creative ideation-ի համար,
 - `qwen2.5-coder`՝ coding role-ների համար,
 - `MADLAD`՝ translator role-ի համար։
 
 Ակտիվ role mapping-ը runtime-ում ստուգվում է `GET /api/project/model-advisors` endpoint-ով։
+
+### 7.2 Prompt Security Scanner API նշումներ
+
+- Endpoint՝ `POST /api/living/prompt/run`
+- Նոր request fields՝
+  - `security_decision` (`proceed|cancel`)
+  - `force_execute` (`true|false`, shortcut for `proceed`)
+- Հիմնական response statuses՝
+  - `ok`
+  - `blocked_for_confirmation`
+  - `cancelled_by_user`
 
 ## 8. Առաջարկվող Quality Gates
 
@@ -211,12 +242,14 @@ Operational deployment՝
 
 - `PYTHONPATH=. pytest -q tests/unit/test_graph_workspace.py`
 - `PYTHONPATH=. pytest -q tests/unit/test_project_unified.py tests/unit/test_control_plane.py tests/unit/test_autoruns_import.py`
+- `PYTHONPATH=. pytest -q tests/unit/test_living_system.py`
 - `npm --prefix webapp run build`
 - manual API checks՝
   - `/api/project/daily-mode`,
   - `/api/project/user-graph/update`,
   - `/api/project/llm/debate`,
-  - `/api/project/autoruns/import`։
+  - `/api/project/autoruns/import`,
+  - `/api/living/prompt/run` (scanner decision flow)։
 
 ## 9. Գործնական եզրակացություն
 

@@ -90,6 +90,7 @@ class PromptBrainLayer(Protocol):
         variables: dict[str, Any],
         user_id: str = "",
         session_id: str = "",
+        security_decision: str = "",
     ) -> dict[str, Any]:
         ...
 

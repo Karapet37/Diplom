@@ -5537,11 +5537,15 @@ class GraphWorkspaceService:
         variables = dict(self._safe_json_loads(payload.get("variables"), {}) or {})
         user_id = str(payload.get("user_id", "") or "").strip()
         session_id = str(payload.get("session_id", "") or "").strip()
+        security_decision = str(payload.get("security_decision", "") or "").strip()
+        if not security_decision and self._to_bool(payload.get("force_execute", False)):
+            security_decision = "proceed"
         return self._living_required().run_prompt(
             prompt_name=prompt_name,
             variables=variables,
             user_id=user_id,
             session_id=session_id,
+            security_decision=security_decision,
         )
 
     def living_project_map(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:

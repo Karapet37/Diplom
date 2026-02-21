@@ -304,12 +304,14 @@ class LivingSystemEngine:
         variables: dict[str, Any],
         user_id: str = "",
         session_id: str = "",
+        security_decision: str = "",
     ) -> dict[str, Any]:
         return self.prompt_brain.run_prompt(
             prompt_name=prompt_name,
             variables=variables,
             user_id=user_id,
             session_id=session_id,
+            security_decision=security_decision,
         )
 
     def project_map(self, *, max_files: int = 600) -> dict[str, Any]:

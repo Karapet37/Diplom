@@ -46,6 +46,15 @@ Project now supports explicit GGUF selection per request:
 - user-facing answer is conversational (`assistant_reply`), not raw JSON.
 - structured archive updates are reviewed separately via `POST /api/project/archive/review`.
 
+Recommended explicit role assignment in current workspace:
+
+- `LOCAL_GGUF_MODEL` -> `models/gguf/textGen/mistral-7b-instruct-v0.3-q4_k_m.gguf`
+- `LOCAL_ANALYST_GGUF_MODEL` -> `models/gguf/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf`
+- `LOCAL_CREATIVE_GGUF_MODEL` -> `models/gguf/textGen/h2o-danube3-4b-chat-Q5_K_M.gguf`
+- `LOCAL_PLANNER_GGUF_MODEL` -> `models/gguf/textGen/mistral-7b-instruct-v0.3-q4_k_m.gguf`
+- `LOCAL_CODER_*_GGUF_MODEL` -> `models/gguf/coder/qwen2.5-coder-7b-instruct-q4_k_m-00001-of-00002.gguf`
+- `LOCAL_TRANSLATOR_GGUF_MODEL` -> `models/translator/model-q4k.gguf`
+
 ## Explicit env overrides
 
 - `LOCAL_GGUF_MODEL=/absolute/path/to/general.gguf`
