@@ -39,16 +39,6 @@ Legacy agent/speech/personalizer modules were removed.
 - UI language set expanded and ordered:
   - Armenian, Russian, English, French, Spanish, Portuguese, Arabic, Hindi, Chinese, Japanese.
 
-## Project Report
-
-A full architecture and quality report is generated in:
-
-```text
-READMEREPORT.md
-```
-
-Note: this file is intentionally git-ignored for local reporting iterations.
-
 ## Architecture
 
 - `src/autonomous_graph/core.py`: node/edge model, operators (recursive generation, inference, propagation).
