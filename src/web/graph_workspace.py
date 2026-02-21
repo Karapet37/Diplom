@@ -288,6 +288,49 @@ _RELATION_TYPE_HINTS: tuple[str, ...] = (
     "neutral_association",
 )
 
+_DEBATE_ROLES_ALLOWED: tuple[str, ...] = (
+    "general",
+    "analyst",
+    "creative",
+    "planner",
+    "coder_architect",
+    "coder_reviewer",
+    "coder_refactor",
+    "coder_debug",
+)
+
+_DEBATE_DEFAULT_ROLES: dict[str, str] = {
+    "proposer": "creative",
+    "critic": "analyst",
+    "judge": "planner",
+}
+
+_PERSONALIZATION_STYLE_ALLOWED: tuple[str, ...] = (
+    "adaptive",
+    "concise",
+    "balanced",
+    "deep",
+)
+
+_PERSONALIZATION_DEPTH_ALLOWED: tuple[str, ...] = (
+    "quick",
+    "balanced",
+    "deep",
+)
+
+_PERSONALIZATION_RISK_ALLOWED: tuple[str, ...] = (
+    "low",
+    "medium",
+    "high",
+)
+
+_PERSONALIZATION_TONE_ALLOWED: tuple[str, ...] = (
+    "neutral",
+    "direct",
+    "empathetic",
+    "challenging",
+)
+
 _GLOBAL_CONCEPT_CATALOG: dict[int, dict[str, Any]] = {
     202: {
         "name": "music",
@@ -348,6 +391,222 @@ _FOUNDATIONAL_DOMAIN_RELATIONS: tuple[tuple[str, str, str, float], ...] = (
 )
 
 _FOUNDATIONAL_DOMAIN_DETAILS: dict[str, dict[str, Any]] = {
+    "Mathematics": {
+        "description": (
+            "Foundational domain: Mathematics. Studies quantity, structure, change, space, uncertainty and proof; "
+            "provides formal language for precise reasoning across sciences and engineering."
+        ),
+        "history_intro": (
+            "From Babylonian and Egyptian arithmetic through Greek axiomatic geometry, mathematics expanded with "
+            "algebra, calculus, probability, modern logic and abstract structures in the 19th-20th centuries."
+        ),
+        "connections": [
+            "Physics",
+            "Computer Science",
+            "Economics",
+            "Philosophy (logic)",
+            "Engineering",
+        ],
+        "usage": [
+            "Modeling and simulation",
+            "Cryptography and security",
+            "Data analysis and statistics",
+            "Optimization and control systems",
+            "Machine learning foundations",
+        ],
+    },
+    "Physics": {
+        "description": (
+            "Foundational domain: Physics. Explains matter, energy, motion and interactions from subatomic to "
+            "cosmological scales using theory, experiment and mathematical models."
+        ),
+        "history_intro": (
+            "Classical mechanics and electromagnetism were unified in early modern science; relativity and quantum "
+            "theory transformed 20th-century understanding of space, time and microscopic behavior."
+        ),
+        "connections": [
+            "Mathematics",
+            "Engineering",
+            "Computer Science (simulation)",
+            "Chemistry",
+            "Philosophy of science",
+        ],
+        "usage": [
+            "Energy systems and electronics",
+            "Materials and semiconductor design",
+            "Medical imaging technologies",
+            "Space and satellite systems",
+            "Climate and environmental modeling",
+        ],
+    },
+    "Biology": {
+        "description": (
+            "Foundational domain: Biology. Studies living systems, from molecular mechanisms and cells to organisms, "
+            "ecosystems and evolution."
+        ),
+        "history_intro": (
+            "Natural history evolved into modern biology through cell theory, Darwinian evolution, Mendelian genetics "
+            "and molecular biology, then expanded with genomics and systems biology."
+        ),
+        "connections": [
+            "Chemistry",
+            "Medicine",
+            "Psychology and neuroscience",
+            "Ecology and environmental science",
+            "Computer Science (bioinformatics)",
+        ],
+        "usage": [
+            "Healthcare and diagnostics",
+            "Drug discovery and biotechnology",
+            "Agriculture and food systems",
+            "Conservation and ecosystem management",
+            "Public health planning",
+        ],
+    },
+    "Computer Science": {
+        "description": (
+            "Foundational domain: Computer Science. Studies computation, algorithms, data, software systems and "
+            "machine intelligence."
+        ),
+        "history_intro": (
+            "From formal computability theory and early programmable machines, the field expanded into operating systems, "
+            "networks, databases, software engineering, AI and modern distributed platforms."
+        ),
+        "connections": [
+            "Mathematics",
+            "Linguistics (NLP)",
+            "Psychology (cognition models)",
+            "Economics (digital markets)",
+            "Engineering",
+        ],
+        "usage": [
+            "Software and web platforms",
+            "Cybersecurity and infrastructure",
+            "Data platforms and analytics",
+            "Automation and robotics",
+            "AI systems and decision support",
+        ],
+    },
+    "Philosophy": {
+        "description": (
+            "Foundational domain: Philosophy. Examines knowledge, reality, reasoning, ethics and meaning; clarifies "
+            "assumptions and conceptual frameworks behind all disciplines."
+        ),
+        "history_intro": (
+            "Developed from ancient Greek, Indian and Chinese traditions, then advanced through medieval scholasticism, "
+            "modern rationalism/empiricism and contemporary analytic and continental schools."
+        ),
+        "connections": [
+            "Theology",
+            "Mathematics (logic and foundations)",
+            "Psychology (mind and cognition)",
+            "Sociology (ethics and institutions)",
+            "Computer Science (AI ethics)",
+        ],
+        "usage": [
+            "Ethical decision frameworks",
+            "Argument analysis and critical thinking",
+            "Policy and governance principles",
+            "Scientific methodology critique",
+            "AI alignment and responsible design",
+        ],
+    },
+    "Psychology": {
+        "description": (
+            "Foundational domain: Psychology. Studies behavior, cognition, emotion, motivation and mental health at "
+            "individual and group levels."
+        ),
+        "history_intro": (
+            "Emerging from philosophy and physiology, psychology became an experimental science in the 19th century and "
+            "later integrated behaviorist, cognitive, social and clinical approaches."
+        ),
+        "connections": [
+            "Biology and neuroscience",
+            "Sociology",
+            "Linguistics",
+            "Economics (behavioral economics)",
+            "Computer Science (human-computer interaction)",
+        ],
+        "usage": [
+            "Mental health interventions",
+            "Education and learning design",
+            "Workplace and team performance",
+            "Product UX and behavior modeling",
+            "Personal development and coaching",
+        ],
+    },
+    "Sociology": {
+        "description": (
+            "Foundational domain: Sociology. Studies social structures, institutions, norms and collective behavior in "
+            "communities and societies."
+        ),
+        "history_intro": (
+            "Formed in the 19th century as industrialization changed social life; major traditions include structural, "
+            "interpretive and critical approaches to institutions and inequality."
+        ),
+        "connections": [
+            "Psychology",
+            "Economics",
+            "Political science",
+            "Anthropology",
+            "Linguistics (discourse and identity)",
+        ],
+        "usage": [
+            "Public policy analysis",
+            "Community and organizational design",
+            "Risk and inequality assessment",
+            "Media and culture research",
+            "Social impact evaluation",
+        ],
+    },
+    "Theology": {
+        "description": (
+            "Foundational domain: Theology. Studies religious beliefs, doctrines, interpretation traditions and "
+            "spiritual worldviews."
+        ),
+        "history_intro": (
+            "Built through scriptural interpretation and philosophical reflection in Abrahamic and other traditions; "
+            "modern theology engages comparative religion and contemporary ethical questions."
+        ),
+        "connections": [
+            "Philosophy",
+            "History",
+            "Sociology of religion",
+            "Linguistics (text interpretation)",
+            "Ethics",
+        ],
+        "usage": [
+            "Moral and spiritual reflection",
+            "Comparative religion studies",
+            "Cultural and historical interpretation",
+            "Dialogue across worldviews",
+            "Community guidance frameworks",
+        ],
+    },
+    "Economics": {
+        "description": (
+            "Foundational domain: Economics. Studies production, exchange, incentives, resource allocation and market "
+            "dynamics under scarcity."
+        ),
+        "history_intro": (
+            "From classical political economy through marginal analysis and macroeconomics, the field diversified into "
+            "game theory, econometrics, behavioral and institutional economics."
+        ),
+        "connections": [
+            "Mathematics and statistics",
+            "Sociology",
+            "Political science",
+            "Psychology (decision making)",
+            "Computer Science (platform economics)",
+        ],
+        "usage": [
+            "Business strategy and forecasting",
+            "Policy and regulation analysis",
+            "Market and pricing models",
+            "Development and welfare planning",
+            "Resource optimization decisions",
+        ],
+    },
     "Linguistics": {
         "description": (
             "Foundational domain: Linguistics. Studies language structure and meaning across sounds, words, "
@@ -372,7 +631,31 @@ _FOUNDATIONAL_DOMAIN_DETAILS: dict[str, dict[str, Any]] = {
             "Cross-cultural communication",
             "Knowledge representation",
         ],
-    }
+    },
+    "Arts": {
+        "description": (
+            "Foundational domain: Arts. Studies and practices creative expression through sound, image, movement, text "
+            "and performance, shaping symbolic meaning and human experience."
+        ),
+        "history_intro": (
+            "From prehistoric visual symbols and oral performance to classical, modern and digital art forms, artistic "
+            "practice has co-evolved with technologies, institutions and cultural identities."
+        ),
+        "connections": [
+            "Psychology (emotion and perception)",
+            "Sociology (culture and identity)",
+            "Linguistics (poetics and narrative)",
+            "Technology (digital media)",
+            "Philosophy (aesthetics)",
+        ],
+        "usage": [
+            "Education and cultural literacy",
+            "Therapy and wellbeing support",
+            "Creative industries and media",
+            "Communication and storytelling",
+            "Public space and community identity",
+        ],
+    },
 }
 
 _DAILY_GOAL_HINTS: tuple[str, ...] = (
@@ -508,6 +791,7 @@ class GraphWorkspaceService:
         *,
         use_env_adapter: bool = True,
         profile_llm_fn: Callable[[str], str] | None = None,
+        role_llm_resolver: Callable[[str], Callable[[str], str] | None] | None = None,
         enable_living_system: bool = True,
         living_system_db_path: str = "data/living_system.db",
         workspace_root: str = ".",
@@ -515,6 +799,9 @@ class GraphWorkspaceService:
         engine = build_graph_engine_from_env() if use_env_adapter else None
         self.api = GraphAPI(engine)
         self.profile_llm_fn = profile_llm_fn if profile_llm_fn is not None else self._build_profile_llm_fn()
+        self.role_llm_resolver = (
+            role_llm_resolver if role_llm_resolver is not None else self._build_role_llm_resolver()
+        )
         self.living_system = (
             LivingSystemEngine(
                 db_path=living_system_db_path,
@@ -536,6 +823,14 @@ class GraphWorkspaceService:
             return build_local_llm_fn()
         except Exception:
             return None
+
+    @staticmethod
+    def _build_role_llm_resolver() -> Callable[[str], Callable[[str], str] | None] | None:
+        try:
+            from src.utils.local_llm_provider import build_role_llm_fn
+        except Exception:
+            return None
+        return build_role_llm_fn
 
     @staticmethod
     def _env_flag(name: str, default: bool = True) -> bool:
@@ -1109,6 +1404,285 @@ class GraphWorkspaceService:
             return list(value)
         return []
 
+    @staticmethod
+    def _debate_role(role: Any, *, fallback: str) -> str:
+        token = re.sub(r"[^a-z0-9_]+", "_", str(role or "").strip().lower())
+        if token in _DEBATE_ROLES_ALLOWED:
+            return token
+        return fallback
+
+    @staticmethod
+    def _confidence(value: Any, default: float = 0.55) -> float:
+        try:
+            return max(0.0, min(1.0, float(value)))
+        except Exception:
+            return max(0.0, min(1.0, float(default)))
+
+    @staticmethod
+    def _to_title(text: str, *, fallback: str, limit: int = 72) -> str:
+        source = " ".join(str(text or "").strip().split())
+        if not source:
+            return fallback
+        chunk = source[:limit].strip()
+        if len(source) > limit:
+            chunk = f"{chunk}..."
+        return chunk
+
+    @staticmethod
+    def _pick_allowed_token(value: Any, *, allowed: tuple[str, ...], default: str) -> str:
+        token = re.sub(r"[^a-z0-9_]+", "_", str(value or "").strip().lower()).strip("_")
+        if token in allowed:
+            return token
+        return str(default or "")
+
+    def _sanitize_personalization(self, payload: Any) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        if not root:
+            return {}
+
+        llm_roles_raw = self._as_mapping(root.get("llm_roles") or root.get("roles"))
+        llm_roles = {
+            "proposer": self._debate_role(
+                llm_roles_raw.get("proposer"),
+                fallback=_DEBATE_DEFAULT_ROLES["proposer"],
+            ),
+            "critic": self._debate_role(
+                llm_roles_raw.get("critic"),
+                fallback=_DEBATE_DEFAULT_ROLES["critic"],
+            ),
+            "judge": self._debate_role(
+                llm_roles_raw.get("judge"),
+                fallback=_DEBATE_DEFAULT_ROLES["judge"],
+            ),
+        }
+
+        focus_goals = self._dedupe_strings(
+            self._to_list_of_strings(root.get("focus_goals") or root.get("goals")),
+            limit=24,
+        )
+        domain_focus = self._dedupe_strings(
+            self._to_list_of_strings(root.get("domain_focus") or root.get("domains")),
+            limit=24,
+        )
+        avoid_topics = self._dedupe_strings(
+            self._to_list_of_strings(root.get("avoid_topics") or root.get("avoid")),
+            limit=24,
+        )
+        memory_notes = " ".join(str(root.get("memory_notes", "") or "").split()).strip()
+        language_preference = " ".join(str(root.get("language", "") or "").split()).strip()
+
+        out: dict[str, Any] = {
+            "response_style": self._pick_allowed_token(
+                root.get("response_style") or root.get("style"),
+                allowed=_PERSONALIZATION_STYLE_ALLOWED,
+                default="adaptive",
+            ),
+            "reasoning_depth": self._pick_allowed_token(
+                root.get("reasoning_depth") or root.get("depth"),
+                allowed=_PERSONALIZATION_DEPTH_ALLOWED,
+                default="balanced",
+            ),
+            "risk_tolerance": self._pick_allowed_token(
+                root.get("risk_tolerance") or root.get("risk"),
+                allowed=_PERSONALIZATION_RISK_ALLOWED,
+                default="medium",
+            ),
+            "tone": self._pick_allowed_token(
+                root.get("tone"),
+                allowed=_PERSONALIZATION_TONE_ALLOWED,
+                default="neutral",
+            ),
+            "llm_roles": llm_roles,
+        }
+        if focus_goals:
+            out["focus_goals"] = focus_goals
+        if domain_focus:
+            out["domain_focus"] = domain_focus
+        if avoid_topics:
+            out["avoid_topics"] = avoid_topics
+        if memory_notes:
+            out["memory_notes"] = memory_notes[:1200]
+        if language_preference:
+            out["language"] = language_preference[:24]
+        return out
+
+    def _normalize_feedback_items(self, value: Any) -> list[dict[str, Any]]:
+        rows = self._as_list(value)
+        out: list[dict[str, Any]] = []
+        for item in rows[:24]:
+            if isinstance(item, str):
+                message = " ".join(item.split()).strip()
+                if not message:
+                    continue
+                out.append(
+                    {
+                        "message": message[:260],
+                        "score": 0.0,
+                        "decision": "",
+                        "target": "",
+                    }
+                )
+                continue
+
+            mapped = self._as_mapping(item)
+            if not mapped:
+                continue
+            message = " ".join(str(mapped.get("message", "") or "").split()).strip()
+            target = " ".join(str(mapped.get("target", "") or "").split()).strip()
+            decision = re.sub(
+                r"[^a-z_]+",
+                "_",
+                str(mapped.get("decision", "") or "").strip().lower(),
+            ).strip("_")
+            score = self._confidence(
+                mapped.get("score", mapped.get("rating", mapped.get("value", 0.0))),
+                0.0,
+            )
+            if not message and not target and not decision:
+                continue
+            out.append(
+                {
+                    "message": message[:260],
+                    "score": score,
+                    "decision": decision[:32],
+                    "target": target[:96],
+                }
+            )
+        return out
+
+    def _personalization_prompt_context(self, personalization: Mapping[str, Any] | None) -> str:
+        prefs = self._as_mapping(personalization)
+        if not prefs:
+            return ""
+
+        parts: list[str] = ["Personalization profile:"]
+        parts.append(f"- response_style: {prefs.get('response_style', 'adaptive')}")
+        parts.append(f"- reasoning_depth: {prefs.get('reasoning_depth', 'balanced')}")
+        parts.append(f"- risk_tolerance: {prefs.get('risk_tolerance', 'medium')}")
+        parts.append(f"- tone: {prefs.get('tone', 'neutral')}")
+
+        for key in ("focus_goals", "domain_focus", "avoid_topics"):
+            rows = self._to_list_of_strings(prefs.get(key))
+            if rows:
+                parts.append(f"- {key}: {', '.join(rows[:6])}")
+
+        roles = self._as_mapping(prefs.get("llm_roles"))
+        if roles:
+            parts.append(
+                "- llm_roles: proposer={proposer}, critic={critic}, judge={judge}".format(
+                    proposer=str(roles.get("proposer", _DEBATE_DEFAULT_ROLES["proposer"])),
+                    critic=str(roles.get("critic", _DEBATE_DEFAULT_ROLES["critic"])),
+                    judge=str(roles.get("judge", _DEBATE_DEFAULT_ROLES["judge"])),
+                )
+            )
+
+        memory_notes = " ".join(str(prefs.get("memory_notes", "") or "").split()).strip()
+        if memory_notes:
+            parts.append(f"- memory_notes: {memory_notes[:360]}")
+        return "\n".join(parts)
+
+    @staticmethod
+    def _split_sentences(text: str, *, limit: int = 6) -> list[str]:
+        parts = re.split(r"[.!?\n]+", str(text or ""))
+        out: list[str] = []
+        for item in parts:
+            token = " ".join(item.split()).strip()
+            if not token:
+                continue
+            out.append(token)
+            if len(out) >= limit:
+                break
+        return out
+
+    def _resolve_debate_llm(self, role: str) -> Callable[[str], str] | None:
+        if self.role_llm_resolver is not None:
+            try:
+                fn = self.role_llm_resolver(role)
+                if fn is not None:
+                    return fn
+            except Exception:
+                pass
+        if role == "general":
+            return self.profile_llm_fn
+        return self.profile_llm_fn
+
+    def _fallback_hypotheses(self, *, topic: str, count: int) -> list[dict[str, Any]]:
+        seeds = self._split_sentences(topic, limit=max(3, count * 2))
+        if not seeds:
+            seeds = [str(topic or "Define a practical plan").strip() or "Define a practical plan"]
+
+        out: list[dict[str, Any]] = []
+        for index in range(max(1, count)):
+            base = seeds[index % len(seeds)]
+            claim = (
+                base
+                if len(base) > 12
+                else f"{base}. Convert it into measurable actions and graph checks."
+            )
+            out.append(
+                {
+                    "index": index + 1,
+                    "title": self._to_title(claim, fallback=f"Hypothesis {index + 1}"),
+                    "claim": claim,
+                    "rationale": "Deterministic fallback hypothesis (role model unavailable).",
+                    "confidence": self._confidence(0.52 + (0.05 * (index % 3)), 0.55),
+                }
+            )
+        return out[: max(1, count)]
+
+    def _fallback_critique(self, *, hypothesis: Mapping[str, Any]) -> dict[str, Any]:
+        claim = str(hypothesis.get("claim", "") or "")
+        issues: list[str] = []
+        if len(claim) < 40:
+            issues.append("Hypothesis is underspecified and needs measurable constraints.")
+        if "always" in claim.lower() or "never" in claim.lower():
+            issues.append("Contains absolute language; likely brittle across contexts.")
+        if not issues:
+            issues.append("No direct contradiction detected; validate with empirical checks.")
+        risk_score = 0.42 if len(issues) == 1 else 0.58
+        return {
+            "issues": issues,
+            "contradictions": [item for item in issues if "contradiction" in item.lower()],
+            "risk_score": self._confidence(risk_score, 0.5),
+            "confidence": self._confidence(0.6, 0.6),
+            "recommendation": "revise" if risk_score >= 0.55 else "accept_with_checks",
+        }
+
+    def _fallback_verdict(
+        self,
+        *,
+        hypotheses: list[dict[str, Any]],
+        critiques: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        best_index = 0
+        best_score = -1.0
+        ranking: list[dict[str, Any]] = []
+        for idx, hypothesis in enumerate(hypotheses):
+            confidence = self._confidence(hypothesis.get("confidence", 0.5), 0.5)
+            risk = self._confidence((critiques[idx] if idx < len(critiques) else {}).get("risk_score", 0.5), 0.5)
+            score = max(0.0, min(1.0, (0.72 * confidence) + (0.28 * (1.0 - risk))))
+            ranking.append(
+                {
+                    "index": idx + 1,
+                    "score": round(score, 4),
+                }
+            )
+            if score > best_score:
+                best_index = idx
+                best_score = score
+        ranking.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
+        chosen = hypotheses[best_index] if hypotheses else {"title": "", "claim": ""}
+        return {
+            "selected_index": best_index + 1,
+            "decision": str(chosen.get("claim", "") or ""),
+            "consensus": (
+                "Fallback judge selected the highest confidence/lowest risk hypothesis. "
+                "Review manually before operational changes."
+            ),
+            "confidence": self._confidence(best_score, 0.55),
+            "ranking": ranking,
+        }
+
     def _normalize_person_concept_payload(
         self,
         root: Mapping[str, Any],
@@ -1606,6 +2180,314 @@ class GraphWorkspaceService:
             "node_ids_by_dimension": node_ids_by_dimension,
         }
 
+    def _extract_history_fragments(self, text: str, *, limit: int = 5) -> list[str]:
+        source = str(text or "").strip()
+        if not source:
+            return []
+        history_hints = (
+            "childhood",
+            "детств",
+            "истори",
+            "background",
+            "family",
+            "семья",
+            "школ",
+            "универс",
+            "опыт",
+        )
+        rows: list[str] = []
+        for sentence in self._split_daily_sentences(source):
+            lowered = sentence.casefold()
+            if any(hint in lowered for hint in history_hints):
+                rows.append(sentence)
+        if not rows:
+            rows = self._split_daily_sentences(source)[:2]
+        return self._dedupe_limited(rows, limit=max(1, int(limit)))
+
+    @staticmethod
+    def _merge_dimensions(
+        base: Mapping[str, Any] | None,
+        extra: Mapping[str, Any] | None,
+    ) -> dict[str, list[str]]:
+        out: dict[str, list[str]] = {}
+        for key in _USER_DIMENSION_BINDINGS:
+            out[key] = []
+            base_rows = base.get(key) if isinstance(base, Mapping) else []
+            extra_rows = extra.get(key) if isinstance(extra, Mapping) else []
+            for source in (base_rows, extra_rows):
+                if isinstance(source, (list, tuple, set)):
+                    for item in source:
+                        token = " ".join(str(item or "").split()).strip()
+                        if token:
+                            out[key].append(token)
+                else:
+                    token = " ".join(str(source or "").split()).strip()
+                    if token:
+                        out[key].append(token)
+            # Deduplicate case-insensitively.
+            seen: set[str] = set()
+            deduped: list[str] = []
+            for item in out[key]:
+                marker = item.casefold()
+                if marker in seen:
+                    continue
+                seen.add(marker)
+                deduped.append(item)
+            out[key] = deduped
+        return out
+
+    def _infer_user_update_json_from_text(
+        self,
+        *,
+        text: str,
+        display_name: str,
+        language: str,
+        use_llm_profile: bool,
+    ) -> dict[str, Any]:
+        source_text = str(text or "").strip()
+        if not source_text:
+            return {
+                "source": "none",
+                "confidence": 0.0,
+                "llm_error": "",
+                "profile": {},
+                "personality": {},
+                "dimensions": {key: [] for key in _USER_DIMENSION_BINDINGS},
+                "history_fragments": [],
+            }
+
+        entity: dict[str, Any] = {}
+        personality: dict[str, Any] = {}
+        source = "heuristic"
+        confidence = 0.56
+        llm_error = ""
+
+        if use_llm_profile and self.profile_llm_fn is not None:
+            try:
+                inferred = self.infer_profile_from_text(
+                    {
+                        "text": source_text,
+                        "entity_type_hint": "human",
+                        "create_graph": False,
+                        "save_json": False,
+                    }
+                )
+                normalized = self._as_mapping(inferred.get("profile_json"))
+                entity = self._as_mapping(normalized.get("entity"))
+                personality = self._as_mapping(normalized.get("personality"))
+                source = "llm"
+                confidence = 0.82
+            except Exception as exc:
+                llm_error = str(exc)
+
+        first_name = str(entity.get("first_name", "") or "").strip()
+        last_name = str(entity.get("last_name", "") or "").strip()
+        if not first_name:
+            first_name, inferred_last = self._infer_name_from_text(source_text)
+            if not last_name:
+                last_name = inferred_last
+
+        summary = str(entity.get("description", "") or "").strip()
+        if not summary:
+            summary = source_text[:420]
+        summary = " ".join(summary.split()).strip()
+
+        history_fragments = self._extract_history_fragments(source_text, limit=6)
+        history_summary = " ".join(history_fragments).strip()
+
+        profile_patch: dict[str, Any] = {
+            "name": str(entity.get("name", "") or display_name or "").strip() or display_name,
+            "first_name": first_name,
+            "last_name": last_name,
+            "description": summary,
+            "profile_text": source_text,
+            "history": history_summary,
+            "language": str(language or "en").strip() or "en",
+            "updated_via": source,
+        }
+
+        dimensions = self._extract_user_dimensions(
+            {
+                "text": source_text,
+                "profile_text": source_text,
+                "profile": {
+                    "text": source_text,
+                },
+                "personality": personality,
+            }
+        )
+
+        return {
+            "source": source,
+            "confidence": confidence,
+            "llm_error": llm_error,
+            "profile": profile_patch,
+            "personality": personality,
+            "dimensions": dimensions,
+            "history_fragments": history_fragments,
+        }
+
+    @staticmethod
+    def _autoruns_auto_rows_from_profile(profile: Mapping[str, Any], *, query: str = "") -> list[dict[str, Any]]:
+        os_name = str(((profile.get("device") or {}).get("os", "") if isinstance(profile, Mapping) else "") or "")
+        browser = str(((profile.get("device") or {}).get("browser", "") if isinstance(profile, Mapping) else "") or "")
+        platform_name = os_name.casefold()
+        query_text = " ".join(str(query or "").split()).strip()
+
+        def row(
+            name: str,
+            location: str,
+            *,
+            category: str,
+            description: str,
+            publisher: str,
+            image_path: str,
+            launch: str,
+            verified: str,
+            signer: str,
+            virus_total: str,
+            enabled: bool = True,
+        ) -> dict[str, Any]:
+            return {
+                "entry_name": name,
+                "entry_location": location,
+                "enabled": enabled,
+                "category": category,
+                "profile": "current_user",
+                "description": description,
+                "publisher": publisher,
+                "image_path": image_path,
+                "launch_string": launch,
+                "timestamp_utc": "",
+                "signer": signer,
+                "verified": verified,
+                "virus_total": virus_total,
+                "sha1": "",
+                "md5": "",
+                "source_query": query_text,
+                "source_mode": "client_process_inference",
+            }
+
+        if "windows" in platform_name:
+            return [
+                row(
+                    "OneDrive",
+                    r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+                    category="Logon",
+                    description="Cloud sync startup entry detected by platform profile.",
+                    publisher="Microsoft Corporation",
+                    image_path=r"C:\Program Files\Microsoft OneDrive\OneDrive.exe",
+                    launch=r"\"C:\Program Files\Microsoft OneDrive\OneDrive.exe\"",
+                    verified="Signed",
+                    signer="Microsoft Corporation",
+                    virus_total="0/74",
+                ),
+                row(
+                    "SecurityHealthSystray",
+                    r"HKLM\Software\Microsoft\Windows\CurrentVersion\Run",
+                    category="Logon",
+                    description="Windows security tray service.",
+                    publisher="Microsoft Corporation",
+                    image_path=r"C:\Windows\System32\SecurityHealthSystray.exe",
+                    launch=r"C:\Windows\System32\SecurityHealthSystray.exe",
+                    verified="Signed",
+                    signer="Microsoft Corporation",
+                    virus_total="0/74",
+                ),
+                row(
+                    "BrowserUpdateAgent",
+                    "Scheduled Tasks",
+                    category="Scheduled Tasks",
+                    description=f"Updater task inferred from browser profile: {browser or 'Unknown Browser'}.",
+                    publisher=browser or "Unknown",
+                    image_path=r"C:\Program Files\Browser\updater.exe",
+                    launch=r"C:\Program Files\Browser\updater.exe --startup-task",
+                    verified="Unknown",
+                    signer="",
+                    virus_total="0/74",
+                ),
+            ]
+        if "linux" in platform_name:
+            return [
+                row(
+                    "systemd --user session",
+                    "~/.config/systemd/user",
+                    category="User Services",
+                    description="User-level systemd services inferred from Linux session.",
+                    publisher="systemd",
+                    image_path="/usr/lib/systemd/systemd",
+                    launch="/usr/lib/systemd/systemd --user",
+                    verified="Signed",
+                    signer="Linux Distribution",
+                    virus_total="0/74",
+                ),
+                row(
+                    "desktop autostart",
+                    "~/.config/autostart",
+                    category="Desktop Autostart",
+                    description="Desktop autostart entries potentially active for current user profile.",
+                    publisher="Desktop Environment",
+                    image_path="~/.config/autostart/*.desktop",
+                    launch="xdg-autostart",
+                    verified="Unknown",
+                    signer="",
+                    virus_total="0/74",
+                ),
+                row(
+                    "browser background service",
+                    "~/.config",
+                    category="Background Service",
+                    description=f"Background browser task inferred from detected browser: {browser or 'Unknown Browser'}.",
+                    publisher=browser or "Unknown",
+                    image_path="~/.config/browser/background",
+                    launch="browser --background",
+                    verified="Unknown",
+                    signer="",
+                    virus_total="0/74",
+                ),
+            ]
+        if "android" in platform_name:
+            return [
+                row(
+                    "BOOT_COMPLETED receiver",
+                    "Android Manifest",
+                    category="Boot Receiver",
+                    description="App component that can react on device boot.",
+                    publisher="Android Application",
+                    image_path="apk://manifest/BOOT_COMPLETED",
+                    launch="android.intent.action.BOOT_COMPLETED",
+                    verified="Unknown",
+                    signer="",
+                    virus_total="0/74",
+                ),
+                row(
+                    "Foreground service restart",
+                    "WorkManager / Service",
+                    category="Service",
+                    description="Persistent foreground/background restart behavior inferred for Android app context.",
+                    publisher="Android Application",
+                    image_path="apk://service/foreground",
+                    launch="startForegroundService",
+                    verified="Unknown",
+                    signer="",
+                    virus_total="0/74",
+                ),
+            ]
+        return [
+            row(
+                "session startup task",
+                "session profile",
+                category="Startup",
+                description="Generic startup behavior inferred from client telemetry.",
+                publisher="Unknown",
+                image_path="unknown",
+                launch="startup",
+                verified="Unknown",
+                signer="",
+                virus_total="0/74",
+            )
+        ]
+
     @staticmethod
     def _autoruns_row_label(row: Mapping[str, Any]) -> str:
         entry_name = str(row.get("entry_name", "") or "").strip()
@@ -2067,6 +2949,12 @@ class GraphWorkspaceService:
     def list_node_types(self) -> list[str]:
         return sorted(self.api.engine.node_types.keys())
 
+    def add_graph_event_listener(self, listener: Callable[[Any], None]) -> None:
+        self.api.engine.add_event_listener(listener)
+
+    def remove_graph_event_listener(self, listener: Callable[[Any], None]) -> None:
+        self.api.engine.remove_event_listener(listener)
+
     def create_node(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         node_type = str(payload.get("node_type", "generic") or "generic").strip().lower() or "generic"
         attributes = dict(self._safe_json_loads(payload.get("attributes"), {}) or {})
@@ -2280,6 +3168,12 @@ class GraphWorkspaceService:
             {
                 "node_id": node.id,
                 "node_type": node.type,
+                "node": {
+                    "id": node.id,
+                    "type": node.type,
+                    "attributes": dict(node.attributes),
+                    "state": dict(node.state),
+                },
             },
         )
         return {
@@ -2302,6 +3196,16 @@ class GraphWorkspaceService:
             raise ValueError(f"node {node_id} not found")
 
         before_edges = len(self.api.engine.store.edges)
+        removed_edge_rows = [
+            {
+                "from": int(edge.from_node),
+                "to": int(edge.to_node),
+                "relation_type": str(edge.relation_type),
+                "direction": str(edge.direction),
+            }
+            for edge in self.api.engine.store.edges
+            if edge.from_node == node_id or edge.to_node == node_id
+        ]
         self.api.engine.store.edges = [
             edge
             for edge in self.api.engine.store.edges
@@ -2315,6 +3219,7 @@ class GraphWorkspaceService:
                 "node_id": node_id,
                 "node_type": node.type,
                 "removed_edges": removed_edges,
+                "removed_edge_refs": removed_edge_rows,
             },
         )
         return {
@@ -2949,7 +3854,13 @@ class GraphWorkspaceService:
             "recommendation_node_ids": recommendation_ids,
         }
 
-    def project_daily_mode(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def project_daily_mode(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        request_headers: Mapping[str, Any] | None = None,
+        request_ip: str = "",
+    ) -> dict[str, Any]:
         text = str(payload.get("text", "") or "").strip()
         if not text:
             raise ValueError("text is required")
@@ -2961,6 +3872,10 @@ class GraphWorkspaceService:
         auto_snapshot = self._to_bool(payload.get("auto_snapshot", True))
         recommendation_count = max(3, min(5, self._to_int(payload.get("recommendation_count", 4), 4)))
         run_knowledge = self._to_bool(payload.get("run_knowledge_analysis", True))
+        apply_profile_update = self._to_bool(payload.get("apply_profile_update", True))
+        use_llm_profile = self._to_bool(payload.get("use_llm_profile", True))
+        include_client_profile = self._to_bool(payload.get("include_client_profile", False))
+        client_payload = self._as_mapping(payload.get("client"))
 
         signals = self._extract_daily_signals(text)
         goals = list(signals.get("goals", []) or [])
@@ -2987,6 +3902,32 @@ class GraphWorkspaceService:
 
         living_result: dict[str, Any] = {}
         knowledge_result: dict[str, Any] = {}
+        profile_update: dict[str, Any] = {}
+        profile_update_error = ""
+
+        if apply_profile_update:
+            try:
+                profile_update = self.project_user_graph_update(
+                    {
+                        "user_id": user_id,
+                        "display_name": display_name,
+                        "text": text,
+                        "language": language,
+                        "session_id": session_id,
+                        "use_llm_profile": use_llm_profile,
+                        "include_client_profile": include_client_profile,
+                        "client": client_payload,
+                        "profile_text": text,
+                        "goals": goals,
+                        "fears": problems,
+                        "knowledge": wins,
+                    },
+                    request_headers=request_headers,
+                    request_ip=request_ip,
+                )
+            except Exception as exc:
+                profile_update_error = str(exc)
+
         if self.living_system is not None:
             living_result = self.living_process(
                 {
@@ -3038,27 +3979,72 @@ class GraphWorkspaceService:
             "recommendations": recommendations,
             "improvement_scores": scores,
             "graph_binding": graph_binding,
+            "profile_update": profile_update,
+            "profile_update_json": self._as_mapping(profile_update.get("profile_update_json")),
+            "profile_update_error": profile_update_error,
             "living": living_result,
             "knowledge": knowledge_result,
             "project_status": project_status,
         }
 
     @staticmethod
-    def _default_demo_narrative(persona_name: str) -> str:
+    def _default_demo_narrative(persona_name: str, language: str = "ru") -> str:
         name = str(persona_name or "Alexa").strip() or "Alexa"
+        lang = str(language or "en").strip().lower()
+        if lang.startswith("ru"):
+            return (
+                f"Меня зовут {name}. Я инженер автономных систем и создатель небольшого AI-сервиса. "
+                "В детстве я рос в семье преподавателей, любил музыку и математику, участвовал в кружке робототехники. "
+                "Сейчас я доволен тем, что могу строить полезные продукты и помогать людям учиться быстрее. "
+                "Я хочу создать устойчивую платформу знаний, усилить приватность пользователей и выйти на международный рынок."
+            )
+        if lang.startswith("hy"):
+            return (
+                f"Իմ անունը {name} է։ Ես ինքնավար համակարգերի ինժեներ եմ և փոքր AI ծառայության ստեղծող։ "
+                "Մանկության տարիներին մեծացել եմ ուսուցիչների ընտանիքում, սիրել եմ երաժշտություն ու մաթեմատիկա, "
+                "մասնակցել եմ ռոբոտաշինության խմբակին։ Հիմա գոհ եմ, որ կարող եմ օգտակար պրոդուկտներ կառուցել և մարդկանց օգնել "
+                "ավելի արագ սովորել։ Ցանկանում եմ ստեղծել կայուն գիտելիքային հարթակ, ուժեղացնել օգտատերերի գաղտնիությունը "
+                "և դուրս գալ միջազգային շուկա։"
+            )
+        if lang.startswith("zh"):
+            return (
+                f"我叫{name}。我是自治系统工程师，也是一个小型 AI 服务的创建者。"
+                "我在教师家庭中长大，喜欢音乐和数学，小时候参加过机器人社团。"
+                "现在我很满意自己能构建有用的产品并帮助人们更快学习。"
+                "我希望打造一个可持续的知识平台，强化用户隐私，并进入国际市场。"
+            )
+        if lang.startswith("es"):
+            return (
+                f"Me llamo {name}. Soy ingeniero de sistemas autónomos y creador de un pequeño servicio de IA. "
+                "En mi infancia crecí en una familia de docentes, me gustaban la música y las matemáticas, y participé "
+                "en un club de robótica. Hoy me satisface poder construir productos útiles y ayudar a las personas a aprender "
+                "más rápido. Quiero crear una plataforma de conocimiento sostenible, reforzar la privacidad de los usuarios "
+                "y llegar al mercado internacional."
+            )
+        if lang.startswith("pt"):
+            return (
+                f"Meu nome é {name}. Sou engenheiro de sistemas autônomos e criador de um pequeno serviço de IA. "
+                "Na infância cresci em uma família de professores, gostava de música e matemática e participei de um clube "
+                "de robótica. Hoje fico satisfeito por conseguir construir produtos úteis e ajudar pessoas a aprender mais rápido. "
+                "Quero criar uma plataforma de conhecimento sustentável, fortalecer a privacidade dos usuários e entrar no mercado internacional."
+            )
         return (
-            f"Меня зовут {name}. Я инженер автономных систем и создатель небольшого AI-сервиса. "
-            "В детстве я рос в семье преподавателей, любил музыку и математику, участвовал в кружке робототехники. "
-            "Сейчас я доволен тем, что могу строить полезные продукты и помогать людям учиться быстрее. "
-            "Я хочу создать устойчивую платформу знаний, усилить приватность пользователей и выйти на международный рынок."
+            f"My name is {name}. I am an autonomous systems engineer and creator of a small AI service. "
+            "As a child, I grew up in a family of teachers, loved music and mathematics, and joined a robotics club. "
+            "Now I am satisfied that I can build useful products and help people learn faster. "
+            "I want to create a resilient knowledge platform, strengthen user privacy, and enter the international market."
         )
 
     def watch_demo(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
         data = dict(payload or {})
         persona_name = str(data.get("persona_name", "Alexa") or "Alexa").strip() or "Alexa"
+        language = str(data.get("language", "ru") or "ru").strip() or "ru"
         reset_graph = self._to_bool(data.get("reset_graph", True))
         use_llm = self._to_bool(data.get("use_llm", True))
-        narrative = str(data.get("narrative", "") or "").strip() or self._default_demo_narrative(persona_name)
+        narrative = (
+            str(data.get("narrative", "") or "").strip()
+            or self._default_demo_narrative(persona_name=persona_name, language=language)
+        )
 
         if reset_graph:
             self.clear()
@@ -3328,15 +4314,163 @@ class GraphWorkspaceService:
             **self.snapshot_payload(),
         }
 
-    def project_user_graph_update(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def project_user_graph_update(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        request_headers: Mapping[str, Any] | None = None,
+        request_ip: str = "",
+    ) -> dict[str, Any]:
         user_id = str(payload.get("user_id", "default_user") or "default_user").strip() or "default_user"
         display_name = str(payload.get("display_name", user_id) or user_id).strip() or user_id
-        dimensions = self._extract_user_dimensions(payload)
+        language = str(payload.get("language", "en") or "en").strip() or "en"
+        session_id = str(payload.get("session_id", "") or "").strip()
+        text = str(payload.get("text", "") or "").strip()
+        use_llm_profile = self._to_bool(payload.get("use_llm_profile", True))
+        include_client_profile = self._to_bool(payload.get("include_client_profile", True))
+
+        explicit_profile = self._as_mapping(payload.get("profile"))
+        explicit_dimensions = self._extract_user_dimensions(payload)
+        personalization = self._sanitize_personalization(payload.get("personalization"))
+        feedback_items = self._normalize_feedback_items(payload.get("feedback_items"))
+        if personalization:
+            explicit_dimensions = self._merge_dimensions(
+                explicit_dimensions,
+                {
+                    "goals": self._to_list_of_strings(personalization.get("focus_goals")),
+                    "knowledge": self._to_list_of_strings(personalization.get("domain_focus")),
+                },
+            )
+        inferred_update = self._infer_user_update_json_from_text(
+            text=text,
+            display_name=display_name,
+            language=language,
+            use_llm_profile=use_llm_profile,
+        )
+        inferred_dimensions = self._as_mapping(inferred_update.get("dimensions"))
+        dimensions = self._merge_dimensions(explicit_dimensions, inferred_dimensions)
         profile_node = self._ensure_user_profile_node(user_id=user_id, display_name=display_name)
+
+        inferred_profile = self._as_mapping(inferred_update.get("profile"))
+
+        def _pick_text(*values: Any) -> str:
+            for value in values:
+                token = " ".join(str(value or "").split()).strip()
+                if token:
+                    return token
+            return ""
+
+        profile_node.attributes["name"] = _pick_text(
+            payload.get("name"),
+            explicit_profile.get("name"),
+            inferred_profile.get("name"),
+            display_name,
+            user_id,
+        )
+        profile_node.attributes["display_name"] = display_name
+        profile_node.attributes["language"] = language
+
+        first_name = _pick_text(
+            payload.get("first_name"),
+            explicit_profile.get("first_name"),
+            inferred_profile.get("first_name"),
+        )
+        last_name = _pick_text(
+            payload.get("last_name"),
+            explicit_profile.get("last_name"),
+            inferred_profile.get("last_name"),
+        )
+        description = _pick_text(
+            payload.get("description"),
+            explicit_profile.get("description"),
+            inferred_profile.get("description"),
+        )
+        history = _pick_text(
+            payload.get("history"),
+            explicit_profile.get("history"),
+            inferred_profile.get("history"),
+        )
+        profile_text = _pick_text(
+            payload.get("profile_text"),
+            explicit_profile.get("profile_text"),
+            text,
+            inferred_profile.get("profile_text"),
+        )
+
+        if first_name:
+            profile_node.attributes["first_name"] = first_name
+        if last_name:
+            profile_node.attributes["last_name"] = last_name
+        if description:
+            profile_node.attributes["description"] = description
+        if history:
+            profile_node.attributes["history"] = history
+        if profile_text:
+            profile_node.attributes["profile_text"] = profile_text
+
+        profile_node.attributes["profile_update_source"] = str(
+            inferred_update.get("source", "heuristic") or "heuristic"
+        )
+        profile_node.attributes["profile_update_confidence"] = round(
+            self._to_float(inferred_update.get("confidence", 0.0), 0.0),
+            4,
+        )
+        llm_error = str(inferred_update.get("llm_error", "") or "").strip()
+        if llm_error:
+            profile_node.attributes["profile_update_error"] = llm_error
+
+        if personalization:
+            profile_node.attributes["personalization"] = personalization
+            profile_node.attributes["response_style"] = str(
+                personalization.get("response_style", "adaptive")
+            )
+            profile_node.attributes["reasoning_depth"] = str(
+                personalization.get("reasoning_depth", "balanced")
+            )
+            profile_node.attributes["risk_tolerance"] = str(
+                personalization.get("risk_tolerance", "medium")
+            )
+            profile_node.attributes["tone"] = str(personalization.get("tone", "neutral"))
+            if personalization.get("memory_notes"):
+                profile_node.attributes["memory_notes"] = str(
+                    personalization.get("memory_notes", "")
+                )[:1200]
 
         for key, values in dimensions.items():
             if values:
                 profile_node.attributes[key] = list(values)
+
+        feedback_summary = {
+            "new_items": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "stored_total": self._to_int(profile_node.attributes.get("feedback_total"), 0),
+        }
+        if feedback_items:
+            accepted = 0
+            rejected = 0
+            for row in feedback_items:
+                decision = str(row.get("decision", "") or "").strip()
+                score = self._confidence(row.get("score", 0.0), 0.0)
+                if decision in {"accept", "accepted", "like", "liked"} or score >= 0.66:
+                    accepted += 1
+                if decision in {"reject", "rejected", "dislike", "discard"} or score <= 0.34:
+                    rejected += 1
+
+            prev_total = self._to_int(profile_node.attributes.get("feedback_total"), 0)
+            prev_accepted = self._to_int(profile_node.attributes.get("feedback_accepted"), 0)
+            prev_rejected = self._to_int(profile_node.attributes.get("feedback_rejected"), 0)
+            profile_node.attributes["feedback_total"] = prev_total + len(feedback_items)
+            profile_node.attributes["feedback_accepted"] = prev_accepted + accepted
+            profile_node.attributes["feedback_rejected"] = prev_rejected + rejected
+            profile_node.attributes["feedback_last_at"] = float(time.time())
+            profile_node.attributes["feedback_recent"] = feedback_items[-8:]
+            feedback_summary = {
+                "new_items": len(feedback_items),
+                "accepted": accepted,
+                "rejected": rejected,
+                "stored_total": int(profile_node.attributes["feedback_total"]),
+            }
         profile_node.attributes["updated_at"] = float(time.time())
 
         binding = self._bind_user_dimensions(
@@ -3345,6 +4479,53 @@ class GraphWorkspaceService:
             logic_rule="user_profile_update",
         )
         non_empty = {key: values for key, values in dimensions.items() if values}
+        profile_update_json = {
+            "source": str(inferred_update.get("source", "heuristic") or "heuristic"),
+            "confidence": round(self._to_float(inferred_update.get("confidence", 0.0), 0.0), 4),
+            "llm_error": llm_error,
+            "profile": {
+                "name": str(profile_node.attributes.get("name", "") or "").strip(),
+                "first_name": str(profile_node.attributes.get("first_name", "") or "").strip(),
+                "last_name": str(profile_node.attributes.get("last_name", "") or "").strip(),
+                "description": str(profile_node.attributes.get("description", "") or "").strip(),
+                "history": str(profile_node.attributes.get("history", "") or "").strip(),
+                "profile_text": str(profile_node.attributes.get("profile_text", "") or "").strip(),
+                "language": str(profile_node.attributes.get("language", "") or language),
+            },
+            "dimensions": non_empty,
+            "personalization": personalization,
+            "feedback_summary": feedback_summary,
+            "history_fragments": self._as_list(inferred_update.get("history_fragments")),
+        }
+
+        client_binding: dict[str, Any] = {}
+        client_profile: dict[str, Any] = {}
+        client_profile_error = ""
+        if include_client_profile:
+            try:
+                client_result = self.capture_client_profile(
+                    {
+                        "session_id": session_id,
+                        "user_id": user_id,
+                        "client": self._as_mapping(payload.get("client")),
+                    },
+                    request_headers=request_headers or {},
+                    request_ip=str(request_ip or ""),
+                )
+                client_profile = self._as_mapping(client_result.get("profile"))
+                client_binding = self._as_mapping(client_result.get("semantic_binding"))
+                session_node_id = self._to_int(client_binding.get("session_node_id"), 0)
+                if session_node_id > 0:
+                    self._connect_nodes(
+                        from_node=int(profile_node.id),
+                        to_node=session_node_id,
+                        relation_type="observed_in_session",
+                        weight=0.84,
+                        logic_rule="user_profile_update",
+                    )
+            except Exception as exc:
+                client_profile_error = str(exc)
+
         return {
             "user_profile": {
                 "user_id": user_id,
@@ -3353,27 +4534,83 @@ class GraphWorkspaceService:
                 "dimensions": non_empty,
             },
             "binding": binding,
+            "profile_update_json": profile_update_json,
+            "client_profile": client_profile,
+            "client_semantic_binding": client_binding,
+            "client_profile_error": client_profile_error,
+            "personalization_applied": bool(personalization),
+            "feedback_summary": feedback_summary,
             **self.snapshot_payload(),
         }
 
-    def project_autoruns_import(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def project_autoruns_import(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        request_headers: Mapping[str, Any] | None = None,
+        request_ip: str = "",
+    ) -> dict[str, Any]:
         raw_text = str(payload.get("text", "") or "").strip()
-        if not raw_text:
-            raise ValueError("text is required")
-
+        auto_detect = self._to_bool(payload.get("auto_detect", True))
         delimiter = str(payload.get("delimiter", "") or "").strip()
+        query = str(payload.get("query", "") or "").strip()
+        language = str(payload.get("language", "en") or "en").strip() or "en"
         user_id = str(payload.get("user_id", "default_user") or "default_user").strip() or "default_user"
         session_id = str(payload.get("session_id", "autoruns_session") or "autoruns_session").strip() or "autoruns_session"
         host_label = str(payload.get("host_label", "") or "").strip() or user_id
         max_rows = max(1, min(5000, self._to_int(payload.get("max_rows", 1000), 1000)))
+        client_payload = self._as_mapping(payload.get("client"))
 
-        parsed_rows = parse_autoruns_text(raw_text, delimiter=delimiter)
-        if not parsed_rows:
-            raise ValueError("autoruns payload could not be parsed")
-        rows = parsed_rows[:max_rows]
+        parsed_rows = parse_autoruns_text(raw_text, delimiter=delimiter) if raw_text else []
+        mode = "parsed_text"
+        source_label = "sysinternals_autoruns"
+        client_profile: dict[str, Any] = {}
+        client_semantic_binding: dict[str, Any] = {}
+        client_profile_error = ""
+
+        if parsed_rows:
+            rows = parsed_rows[:max_rows]
+        else:
+            if raw_text and not auto_detect:
+                raise ValueError("autoruns payload could not be parsed")
+            if not raw_text and not auto_detect:
+                raise ValueError("text is required when auto_detect is false")
+
+            mode = "auto_detected"
+            source_label = "semantic_client_autoruns_inference"
+            try:
+                client_capture = self.capture_client_profile(
+                    {
+                        "session_id": session_id,
+                        "user_id": user_id,
+                        "client": client_payload,
+                    },
+                    request_headers=request_headers or {},
+                    request_ip=str(request_ip or ""),
+                )
+                client_profile = self._as_mapping(client_capture.get("profile"))
+                client_semantic_binding = self._as_mapping(client_capture.get("semantic_binding"))
+            except Exception as exc:
+                client_profile_error = str(exc)
+                client_profile = build_client_profile(
+                    request_headers=request_headers or {},
+                    request_client_ip=str(request_ip or ""),
+                    payload={
+                        "session_id": session_id,
+                        "user_id": user_id,
+                        "client": client_payload,
+                    },
+                )
+            rows = self._autoruns_auto_rows_from_profile(
+                client_profile,
+                query=(query or raw_text),
+            )[:max_rows]
+            if not rows:
+                raise ValueError("autoruns auto-detect produced no entries")
 
         now = float(time.time())
-        checksum = int(zlib.crc32(raw_text.encode("utf-8")) & 0xFFFFFFFF)
+        checksum_basis = raw_text or json.dumps(rows, ensure_ascii=False, sort_keys=True)
+        checksum = int(zlib.crc32(checksum_basis.encode("utf-8")) & 0xFFFFFFFF)
         scan_id = f"{user_id}:{session_id}:{checksum:08x}"
 
         profile_node = self._ensure_user_profile_node(user_id=user_id, display_name=host_label)
@@ -3389,10 +4626,13 @@ class GraphWorkspaceService:
                 "name": f"Autoruns Scan {session_id}",
                 "created_at": now,
                 "rows_total": len(rows),
+                "query": query,
+                "language": language,
+                "mode": mode,
             },
         )
         scan_node.attributes["rows_total"] = len(rows)
-        scan_node.attributes["source"] = "sysinternals_autoruns"
+        scan_node.attributes["source"] = source_label
         scan_node.attributes["updated_at"] = now
 
         self._connect_nodes(
@@ -3402,9 +4642,18 @@ class GraphWorkspaceService:
             weight=0.91,
             logic_rule="autoruns_import",
         )
+        session_node_id = self._to_int(client_semantic_binding.get("session_node_id"), 0)
+        if session_node_id > 0:
+            self._connect_nodes(
+                from_node=int(profile_node.id),
+                to_node=session_node_id,
+                relation_type="observed_in_session",
+                weight=0.82,
+                logic_rule="autoruns_import",
+            )
 
         created_nodes = 0
-        created_edges = 1
+        created_edges = 1 + (1 if session_node_id > 0 else 0)
         risk_counts = {"low": 0, "medium": 0, "high": 0}
         vt_positive_count = 0
         top_risky: list[dict[str, Any]] = []
@@ -3550,6 +4799,8 @@ class GraphWorkspaceService:
                 "session_id": session_id,
                 "user_id": user_id,
                 "host_label": host_label,
+                "mode": mode,
+                "source": source_label,
                 "rows_parsed": len(parsed_rows),
                 "rows_processed": len(rows),
             },
@@ -3565,6 +4816,9 @@ class GraphWorkspaceService:
                 "entry_node_ids": entry_node_ids,
                 "risk_node_ids": risk_node_ids,
             },
+            "client_profile": client_profile,
+            "client_semantic_binding": client_semantic_binding,
+            "client_profile_error": client_profile_error,
             "created_nodes_estimate": created_nodes,
             "created_edges_estimate": created_edges,
             **self.snapshot_payload(),
@@ -3821,6 +5075,7 @@ class GraphWorkspaceService:
                 "user_dimension_graph": True,
                 "autoruns_import": True,
                 "model_advisors": True,
+                "llm_role_debate": True,
             },
         }
 
@@ -3849,6 +5104,382 @@ class GraphWorkspaceService:
             "advisors": advisor_payload,
             "prompts": prompt_catalog,
             "timestamp": time.time(),
+        }
+
+    def project_llm_debate(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        topic = str(payload.get("topic", "") or payload.get("text", "") or "").strip()
+        if not topic:
+            raise ValueError("topic is required")
+
+        user_id = str(payload.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(payload.get("session_id", "") or "").strip()
+        hypothesis_count = max(1, min(6, self._to_int(payload.get("hypothesis_count", 3), 3)))
+        attach_to_graph = self._to_bool(payload.get("attach_to_graph", True))
+        personalization = self._sanitize_personalization(payload.get("personalization"))
+        personalization_roles = self._as_mapping(personalization.get("llm_roles"))
+        feedback_items = self._normalize_feedback_items(payload.get("feedback_items"))
+
+        proposer_input = payload.get("proposer_role")
+        critic_input = payload.get("critic_role")
+        judge_input = payload.get("judge_role")
+        if not str(proposer_input or "").strip():
+            proposer_input = personalization_roles.get("proposer")
+        if not str(critic_input or "").strip():
+            critic_input = personalization_roles.get("critic")
+        if not str(judge_input or "").strip():
+            judge_input = personalization_roles.get("judge")
+
+        proposer_role = self._debate_role(
+            proposer_input,
+            fallback=_DEBATE_DEFAULT_ROLES["proposer"],
+        )
+        critic_role = self._debate_role(
+            critic_input,
+            fallback=_DEBATE_DEFAULT_ROLES["critic"],
+        )
+        judge_role = self._debate_role(
+            judge_input,
+            fallback=_DEBATE_DEFAULT_ROLES["judge"],
+        )
+
+        personalization_context = self._personalization_prompt_context(personalization)
+
+        proposer_llm = self._resolve_debate_llm(proposer_role)
+        critic_llm = self._resolve_debate_llm(critic_role)
+        judge_llm = self._resolve_debate_llm(judge_role)
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "debate_started",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "topic": topic,
+                "hypothesis_count": hypothesis_count,
+                "roles": {
+                    "proposer": proposer_role,
+                    "critic": critic_role,
+                    "judge": judge_role,
+                },
+                "personalization_enabled": bool(personalization),
+            },
+        )
+
+        proposer_prompt = (
+            "You are a hypothesis proposer for graph-based reasoning.\n"
+            f"Task: {topic}\n"
+            f"{personalization_context}\n"
+            f"Generate {hypothesis_count} distinct hypotheses.\n"
+            "Return JSON only:\n"
+            "{\n"
+            '  "hypotheses": [\n'
+            '    {"title":"", "claim":"", "rationale":"", "confidence":0.0}\n'
+            "  ]\n"
+            "}\n"
+            "Constraints: confidence in [0,1], concise and actionable claims."
+        )
+
+        hypotheses: list[dict[str, Any]] = []
+        proposer_raw = ""
+        if proposer_llm is not None:
+            try:
+                proposer_raw = str(proposer_llm(proposer_prompt) or "").strip()
+            except Exception:
+                proposer_raw = ""
+        parsed_proposer = self._extract_json_from_llm_output(proposer_raw)
+        if isinstance(parsed_proposer, Mapping):
+            raw_hypotheses = self._as_list(parsed_proposer.get("hypotheses"))
+            for idx, item in enumerate(raw_hypotheses):
+                row = self._as_mapping(item)
+                claim = str(row.get("claim", "") or row.get("hypothesis", "") or "").strip()
+                if not claim:
+                    continue
+                hypotheses.append(
+                    {
+                        "index": idx + 1,
+                        "title": self._to_title(
+                            str(row.get("title", "") or claim),
+                            fallback=f"Hypothesis {idx + 1}",
+                        ),
+                        "claim": claim,
+                        "rationale": str(row.get("rationale", "") or "").strip(),
+                        "confidence": self._confidence(row.get("confidence", 0.6), 0.6),
+                    }
+                )
+        if not hypotheses:
+            hypotheses = self._fallback_hypotheses(topic=topic, count=hypothesis_count)
+
+        hypotheses = hypotheses[:hypothesis_count]
+        for idx, hypothesis in enumerate(hypotheses):
+            self.api.engine._record_event(  # noqa: SLF001
+                "debate_hypothesis_generated",
+                {
+                    "index": idx + 1,
+                    "title": str(hypothesis.get("title", "") or ""),
+                    "confidence": self._confidence(hypothesis.get("confidence", 0.55), 0.55),
+                },
+            )
+
+        critiques: list[dict[str, Any]] = []
+        for idx, hypothesis in enumerate(hypotheses):
+            critic_prompt = (
+                "You are a contradiction and risk critic.\n"
+                f"Task: {topic}\n"
+                f"{personalization_context}\n"
+                f"Hypothesis #{idx + 1}: {hypothesis.get('claim', '')}\n"
+                "Return JSON only:\n"
+                "{\n"
+                '  "issues":[""],\n'
+                '  "contradictions":[""],\n'
+                '  "risk_score":0.0,\n'
+                '  "confidence":0.0,\n'
+                '  "recommendation":"accept|revise|reject"\n'
+                "}\n"
+                "risk_score/confidence in [0,1]."
+            )
+            critic_raw = ""
+            if critic_llm is not None:
+                try:
+                    critic_raw = str(critic_llm(critic_prompt) or "").strip()
+                except Exception:
+                    critic_raw = ""
+            parsed_critic = self._extract_json_from_llm_output(critic_raw)
+            if isinstance(parsed_critic, Mapping):
+                parsed_row = self._as_mapping(parsed_critic)
+                critique = {
+                    "issues": self._to_list_of_strings(parsed_row.get("issues")) or ["No issue provided."],
+                    "contradictions": self._to_list_of_strings(parsed_row.get("contradictions")),
+                    "risk_score": self._confidence(parsed_row.get("risk_score", 0.5), 0.5),
+                    "confidence": self._confidence(parsed_row.get("confidence", 0.6), 0.6),
+                    "recommendation": str(parsed_row.get("recommendation", "revise") or "revise").strip(),
+                }
+            else:
+                critique = self._fallback_critique(hypothesis=hypothesis)
+            critiques.append(critique)
+            self.api.engine._record_event(  # noqa: SLF001
+                "debate_hypothesis_criticized",
+                {
+                    "index": idx + 1,
+                    "risk_score": self._confidence(critique.get("risk_score", 0.5), 0.5),
+                    "recommendation": str(critique.get("recommendation", "revise") or "revise"),
+                },
+            )
+
+        judge_prompt = (
+            "You are the final judge for a multi-role LLM debate.\n"
+            f"Task: {topic}\n"
+            f"{personalization_context}\n"
+            f"Hypotheses: {json.dumps(hypotheses, ensure_ascii=False)}\n"
+            f"Critiques: {json.dumps(critiques, ensure_ascii=False)}\n"
+            "Return JSON only:\n"
+            "{\n"
+            '  "selected_index":1,\n'
+            '  "decision":"",\n'
+            '  "consensus":"",\n'
+            '  "confidence":0.0,\n'
+            '  "ranking":[{"index":1,"score":0.0}]\n'
+            "}\n"
+            "confidence/score in [0,1]."
+        )
+        judge_raw = ""
+        if judge_llm is not None:
+            try:
+                judge_raw = str(judge_llm(judge_prompt) or "").strip()
+            except Exception:
+                judge_raw = ""
+        parsed_judge = self._extract_json_from_llm_output(judge_raw)
+        if isinstance(parsed_judge, Mapping):
+            mapped_judge = self._as_mapping(parsed_judge)
+            ranking_rows: list[dict[str, Any]] = []
+            for item in self._as_list(mapped_judge.get("ranking")):
+                row = self._as_mapping(item)
+                rank_idx = self._to_int(row.get("index"), 0)
+                if rank_idx <= 0:
+                    continue
+                ranking_rows.append(
+                    {
+                        "index": rank_idx,
+                        "score": self._confidence(row.get("score", 0.5), 0.5),
+                    }
+                )
+            verdict = {
+                "selected_index": max(1, min(len(hypotheses), self._to_int(mapped_judge.get("selected_index", 1), 1))),
+                "decision": str(mapped_judge.get("decision", "") or "").strip(),
+                "consensus": str(mapped_judge.get("consensus", "") or "").strip(),
+                "confidence": self._confidence(mapped_judge.get("confidence", 0.6), 0.6),
+                "ranking": ranking_rows,
+            }
+            if not verdict["decision"] and hypotheses:
+                verdict["decision"] = str(hypotheses[verdict["selected_index"] - 1].get("claim", "") or "")
+        else:
+            verdict = self._fallback_verdict(hypotheses=hypotheses, critiques=critiques)
+
+        feedback_summary = {
+            "items": len(feedback_items),
+            "accepted": 0,
+            "rejected": 0,
+        }
+        if feedback_items:
+            accepted = 0
+            rejected = 0
+            for row in feedback_items:
+                decision = str(row.get("decision", "") or "").strip()
+                score = self._confidence(row.get("score", 0.0), 0.0)
+                if decision in {"accept", "accepted", "like", "liked"} or score >= 0.66:
+                    accepted += 1
+                if decision in {"reject", "rejected", "dislike", "discard"} or score <= 0.34:
+                    rejected += 1
+            feedback_summary = {
+                "items": len(feedback_items),
+                "accepted": accepted,
+                "rejected": rejected,
+            }
+
+        graph_binding: dict[str, Any] = {
+            "attached": False,
+            "debate_node_id": 0,
+            "hypothesis_node_ids": [],
+            "critique_node_ids": [],
+            "judge_node_id": 0,
+        }
+        if attach_to_graph:
+            debate_node = self.api.engine.create_node(
+                "llm_debate_session",
+                attributes={
+                    "name": self._to_title(topic, fallback="LLM Debate Session", limit=90),
+                    "topic": topic,
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "roles": {
+                        "proposer": proposer_role,
+                        "critic": critic_role,
+                        "judge": judge_role,
+                    },
+                    "personalization": personalization,
+                    "feedback_summary": feedback_summary,
+                },
+                state={"confidence": self._confidence(verdict.get("confidence", 0.6), 0.6)},
+            )
+            graph_binding["attached"] = True
+            graph_binding["debate_node_id"] = int(debate_node.id)
+
+            hypothesis_node_ids: list[int] = []
+            critique_node_ids: list[int] = []
+            for idx, hypothesis in enumerate(hypotheses):
+                branch_token = f"debate:{debate_node.id}:h{idx + 1}"
+                hypothesis_node = self.api.engine.create_node(
+                    "llm_hypothesis",
+                    attributes={
+                        "branch_id": branch_token,
+                        "title": str(hypothesis.get("title", "") or f"Hypothesis {idx + 1}"),
+                        "claim": str(hypothesis.get("claim", "") or ""),
+                        "rationale": str(hypothesis.get("rationale", "") or ""),
+                        "proposer_role": proposer_role,
+                    },
+                    state={"confidence": self._confidence(hypothesis.get("confidence", 0.5), 0.5)},
+                )
+                hypothesis_node_ids.append(int(hypothesis_node.id))
+                self._connect_nodes(
+                    from_node=debate_node.id,
+                    to_node=hypothesis_node.id,
+                    relation_type="debate_branch",
+                    weight=self._confidence(hypothesis.get("confidence", 0.5), 0.5),
+                    logic_rule="llm_debate_proposer",
+                    metadata={
+                        "index": idx + 1,
+                        "branch_id": branch_token,
+                    },
+                )
+
+                critique = critiques[idx] if idx < len(critiques) else {}
+                critique_node = self.api.engine.create_node(
+                    "llm_critique",
+                    attributes={
+                        "branch_id": branch_token,
+                        "issues": self._to_list_of_strings(critique.get("issues")),
+                        "contradictions": self._to_list_of_strings(critique.get("contradictions")),
+                        "recommendation": str(critique.get("recommendation", "revise") or "revise"),
+                        "critic_role": critic_role,
+                    },
+                    state={
+                        "risk": self._confidence(critique.get("risk_score", 0.5), 0.5),
+                        "confidence": self._confidence(critique.get("confidence", 0.6), 0.6),
+                    },
+                )
+                critique_node_ids.append(int(critique_node.id))
+                self._connect_nodes(
+                    from_node=hypothesis_node.id,
+                    to_node=critique_node.id,
+                    relation_type="criticized_by",
+                    weight=max(0.0, 1.0 - self._confidence(critique.get("risk_score", 0.5), 0.5)),
+                    logic_rule="llm_debate_critic",
+                    metadata={"index": idx + 1},
+                )
+
+            judge_node = self.api.engine.create_node(
+                "llm_judgement",
+                attributes={
+                    "decision": str(verdict.get("decision", "") or ""),
+                    "consensus": str(verdict.get("consensus", "") or ""),
+                    "judge_role": judge_role,
+                    "ranking": self._as_list(verdict.get("ranking")),
+                },
+                state={"confidence": self._confidence(verdict.get("confidence", 0.6), 0.6)},
+            )
+            graph_binding["judge_node_id"] = int(judge_node.id)
+            graph_binding["hypothesis_node_ids"] = hypothesis_node_ids
+            graph_binding["critique_node_ids"] = critique_node_ids
+            self._connect_nodes(
+                from_node=debate_node.id,
+                to_node=judge_node.id,
+                relation_type="judged_by",
+                weight=self._confidence(verdict.get("confidence", 0.6), 0.6),
+                logic_rule="llm_debate_judge",
+                metadata={"selected_index": int(verdict.get("selected_index", 1) or 1)},
+            )
+            selected_index = max(1, min(len(hypothesis_node_ids), int(verdict.get("selected_index", 1) or 1)))
+            if hypothesis_node_ids:
+                selected_hypothesis_node_id = hypothesis_node_ids[selected_index - 1]
+                self._connect_nodes(
+                    from_node=judge_node.id,
+                    to_node=selected_hypothesis_node_id,
+                    relation_type="selects",
+                    weight=self._confidence(verdict.get("confidence", 0.6), 0.6),
+                    logic_rule="llm_debate_selection",
+                    metadata={"selected_index": selected_index},
+                )
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "debate_completed",
+            {
+                "hypothesis_count": len(hypotheses),
+                "selected_index": int(verdict.get("selected_index", 1) or 1),
+                "confidence": self._confidence(verdict.get("confidence", 0.6), 0.6),
+                "attached_to_graph": bool(graph_binding.get("attached", False)),
+                "personalization_enabled": bool(personalization),
+            },
+        )
+
+        return {
+            "topic": topic,
+            "user_id": user_id,
+            "session_id": session_id,
+            "personalization": personalization,
+            "feedback_summary": feedback_summary,
+            "roles": {
+                "proposer": proposer_role,
+                "critic": critic_role,
+                "judge": judge_role,
+            },
+            "role_models_available": {
+                "proposer": proposer_llm is not None,
+                "critic": critic_llm is not None,
+                "judge": judge_llm is not None,
+            },
+            "hypotheses": hypotheses,
+            "critiques": critiques,
+            "verdict": verdict,
+            "graph_binding": graph_binding,
+            **self.snapshot_payload(),
         }
 
     def project_pipeline(self, payload: Mapping[str, Any]) -> dict[str, Any]:

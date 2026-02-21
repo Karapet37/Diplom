@@ -104,6 +104,59 @@ class LocalLlmProviderTests(unittest.TestCase):
                 fn = provider.build_role_llm_fn("translator")
                 self.assertIsNone(fn)
 
+    def test_split_gguf_discovery_uses_only_entrypoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            gguf = root / "gguf"
+            gguf.mkdir(parents=True, exist_ok=True)
+            first = gguf / "qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
+            second = gguf / "qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf"
+            first.write_text("", encoding="utf-8")
+            second.write_text("", encoding="utf-8")
+
+            with patch.dict("os.environ", {"LOCAL_MODELS_DIR": str(gguf)}, clear=False), patch.object(
+                provider, "_iter_model_dirs", return_value=[gguf]
+            ):
+                discovered = provider._discover_gguf_paths()
+
+        paths = [str(item).replace("\\", "/") for item in discovered]
+        self.assertEqual(len(paths), 1)
+        self.assertIn("00001-of-00002.gguf", paths[0])
+        self.assertTrue(all("00002-of-00002.gguf" not in item for item in paths))
+
+    def test_explicit_split_second_shard_is_remapped_to_first(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            gguf = root / "gguf"
+            gguf.mkdir(parents=True, exist_ok=True)
+            first = gguf / "qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
+            second = gguf / "qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf"
+            first.write_text("", encoding="utf-8")
+            second.write_text("", encoding="utf-8")
+
+            with patch.dict("os.environ", {"LOCAL_GGUF_MODEL": str(second)}, clear=False):
+                resolved = provider._get_model_path()
+
+        self.assertIsNotNone(resolved)
+        self.assertIn("00001-of-00002.gguf", str(resolved))
+
+    def test_discovery_ignores_llama_cpp_internal_vocab_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            good = root / "models" / "gguf" / "mistral-7b-instruct.gguf"
+            bad = root / "models" / "gguf" / "llama.cpp" / "models" / "ggml-vocab-refact.gguf"
+            good.parent.mkdir(parents=True, exist_ok=True)
+            bad.parent.mkdir(parents=True, exist_ok=True)
+            good.write_text("", encoding="utf-8")
+            bad.write_text("", encoding="utf-8")
+
+            with patch.object(provider, "_iter_model_dirs", return_value=[root / "models" / "gguf"]):
+                discovered = provider._discover_gguf_paths()
+
+        paths = [str(item).replace("\\", "/").lower() for item in discovered]
+        self.assertEqual(len(paths), 1)
+        self.assertIn("mistral-7b-instruct.gguf", paths[0])
+
 
 if __name__ == "__main__":
     unittest.main()

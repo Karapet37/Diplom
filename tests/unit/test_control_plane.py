@@ -36,6 +36,19 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertFalse(allowed_introspect)
         self.assertEqual(reason_introspect, "client_introspection_disabled")
 
+    def test_prompt_execution_gate_blocks_project_llm_debate(self):
+        plane = RuntimeControlPlane(
+            flags=ControlPlaneFlags(
+                allow_prompt_execution=False,
+            )
+        )
+        allowed, reason = plane.allow_request(
+            method="POST",
+            path="/api/project/llm/debate",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "prompt_execution_disabled")
+
     def test_apply_patch_updates_known_flags_and_ignores_unknown(self):
         plane = RuntimeControlPlane(flags=ControlPlaneFlags())
         out = plane.apply_patch(

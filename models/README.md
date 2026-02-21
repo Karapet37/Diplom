@@ -1,5 +1,7 @@
 # Local GGUF Models
 
+Repository: `https://github.com/Karapet37/Diplom`
+
 Primary discovery path:
 
 - `models/gguf`
@@ -12,6 +14,8 @@ Role resolver can also scan `models/`, but `models/gguf` is preferred.
 2. Otherwise resolver auto-discovers `*.gguf` files and assigns advisor roles.
 3. Translator role is strict: translation uses only `translator` role model (no fallback to `general`).
 4. If translator model is missing, translation prompt returns configuration error instead of using non-translator LLM.
+5. Split GGUF is supported by entrypoint only: use `...-00001-of-0000N.gguf`.
+6. Non-entry shards like `...-00002-of-0000N.gguf` are auto-remapped to shard `00001` when possible.
 
 ## Advisor roles and filename hints
 
@@ -55,6 +59,19 @@ Resolver treats `madlad400` as translator-priority inside translator role.
 - `LOCAL_GGUF_TEMPERATURE=0.25`
 - `LOCAL_GGUF_MAX_TOKENS=220`
 - `LOCAL_GGUF_MAX_LOADED=2`
+
+## Split GGUF notes
+
+- If your model files are split:
+  - `qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf`
+  - `qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf`
+- Set env path to shard `00001` (or let resolver auto-remap from shard `00002`).
+- Keep all shards in the same folder with unchanged names.
+
+## Ollama
+
+- Current local provider uses `llama_cpp` directly (`.gguf`) and does not require Ollama.
+- Ollama can be added as a separate backend, but it is not required for this path.
 
 ## Notes
 

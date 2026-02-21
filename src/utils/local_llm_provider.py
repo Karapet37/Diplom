@@ -86,6 +86,11 @@ _MADLAD_HINTS: tuple[str, ...] = (
     "madlad-400",
     "madlad",
 )
+_GGUF_SPLIT_RE = re.compile(r"^(?P<base>.+)-(?P<part>\d{5})-of-(?P<total>\d{5})\.gguf$", flags=re.IGNORECASE)
+_IGNORED_GGUF_HINTS: tuple[str, ...] = (
+    "/llama.cpp/",
+    "ggml-vocab",
+)
 
 
 def _warn(message: str) -> None:
@@ -107,6 +112,45 @@ def _contains_any(token: str, hints: tuple[str, ...]) -> bool:
 
 def _path_token(path: Path) -> str:
     return str(path.resolve()).replace("\\", "/").lower()
+
+
+def _split_info(path: Path) -> tuple[str, int, int] | None:
+    match = _GGUF_SPLIT_RE.match(path.name)
+    if not match:
+        return None
+    base = str(match.group("base") or "")
+    try:
+        part = int(match.group("part") or "0")
+        total = int(match.group("total") or "0")
+    except Exception:
+        return None
+    if not base or part <= 0 or total <= 0:
+        return None
+    return (base, part, total)
+
+
+def _resolve_entrypoint(path: Path) -> Path | None:
+    """
+    Normalize GGUF path to a valid load entrypoint.
+
+    For split GGUF, only shard `00001-of-xxxxx` should be used as model_path.
+    If a non-first shard is provided, auto-map to first shard when available.
+    """
+    info = _split_info(path)
+    if info is None:
+        return path if path.exists() and path.is_file() else None
+    base, part, total = info
+    first = path.with_name(f"{base}-00001-of-{total:05d}.gguf")
+    if part == 1:
+        return path if path.exists() and path.is_file() else None
+    if first.exists() and first.is_file():
+        return first
+    return None
+
+
+def _is_candidate_gguf(path: Path) -> bool:
+    token = _path_token(path)
+    return not any(hint in token for hint in _IGNORED_GGUF_HINTS)
 
 
 def _iter_model_dirs() -> list[Path]:
@@ -132,8 +176,21 @@ def _iter_model_dirs() -> list[Path]:
 
 def _discover_gguf_paths() -> list[Path]:
     rows: list[Path] = []
+    seen: set[str] = set()
     for root in _iter_model_dirs():
-        rows.extend(path for path in root.rglob("*.gguf") if path.is_file())
+        for path in root.rglob("*.gguf"):
+            if not path.is_file():
+                continue
+            if not _is_candidate_gguf(path):
+                continue
+            entrypoint = _resolve_entrypoint(path)
+            if entrypoint is None:
+                continue
+            token = _path_token(entrypoint)
+            if token in seen:
+                continue
+            seen.add(token)
+            rows.append(entrypoint)
     rows.sort(key=lambda item: _path_token(item))
     return rows
 
@@ -170,10 +227,22 @@ def _resolve_model_role_paths() -> dict[str, str]:
         if not explicit:
             continue
         path = Path(explicit).expanduser()
-        if path.exists() and path.is_file():
-            if role == ROLE_TRANSLATOR and path.suffix.casefold() != ".gguf":
-                continue
-            role_map[role] = str(path)
+        normalized = _resolve_entrypoint(path)
+        if normalized is None:
+            if path.exists() and path.is_file():
+                _warn(
+                    f"[local_llm_provider] WARN: ignored non-entrypoint GGUF for {role}: {path}. "
+                    "Use shard 00001-of-N for split models."
+                )
+            continue
+        if role == ROLE_TRANSLATOR and normalized.suffix.casefold() != ".gguf":
+            continue
+        if normalized != path:
+            _warn(
+                f"[local_llm_provider] INFO: remapped {role} model from split shard {path.name} "
+                f"to entrypoint {normalized.name}."
+            )
+        role_map[role] = str(normalized)
 
     # 2) Auto discovery.
     models = _discover_gguf_paths()
@@ -268,8 +337,19 @@ def _get_model_path() -> str | None:
     explicit = str(os.getenv("LOCAL_GGUF_MODEL", "") or "").strip()
     if explicit:
         path = Path(explicit).expanduser()
-        if path.exists():
-            return str(path)
+        normalized = _resolve_entrypoint(path)
+        if normalized is not None:
+            if normalized != path:
+                _warn(
+                    f"[local_llm_provider] INFO: LOCAL_GGUF_MODEL remapped from {path.name} "
+                    f"to split entrypoint {normalized.name}."
+                )
+            return str(normalized)
+        if path.exists() and path.is_file():
+            _warn(
+                f"[local_llm_provider] WARN: LOCAL_GGUF_MODEL points to non-entrypoint split shard: {path}. "
+                "Use shard 00001-of-N."
+            )
 
     role_map = _resolve_model_role_paths()
     return role_map.get(ROLE_GENERAL)

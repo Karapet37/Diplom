@@ -2,6 +2,8 @@
 
 Graph-first frontend for the Autonomous Graph Workspace.
 
+Repository: `https://github.com/Karapet37/Diplom`
+
 ## New Overview Tools
 
 - `User Semantic Graph`: update personal dimensions in graph

@@ -1,0 +1,32 @@
+.git
+.gitignore
+.idea
+.venv
+__pycache__
+*.pyc
+
+# Local runtime and generated data
+data
+runtime
+reports
+*.db
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+
+# Heavy local model artifacts
+models/gguf
+models/translator
+models/*.gguf
+models/**/*.gguf
+
+# Frontend build/cache (frontend is built in dedicated Docker stage)
+webapp/node_modules
+webapp/dist
+
+# Root node modules (not used by backend image)
+node_modules
+
+# Local notebooks/tests are not needed in production runtime image
+notebooks
+tests

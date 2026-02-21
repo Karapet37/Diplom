@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 import platform
+from threading import Lock
 from time import perf_counter
 from typing import Any
 import hmac
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
@@ -231,6 +233,7 @@ class ProjectBootstrapRequest(BaseModel):
 class ProjectDemoWatchRequest(BaseModel):
     persona_name: str = "Alexa"
     narrative: str = ""
+    language: str = "ru"
     reset_graph: bool = True
     use_llm: bool = True
 
@@ -244,14 +247,39 @@ class ProjectDailyModeRequest(BaseModel):
     auto_snapshot: bool = True
     recommendation_count: int = 4
     run_knowledge_analysis: bool = True
+    apply_profile_update: bool = True
+    use_llm_profile: bool = True
+    include_client_profile: bool = False
+    client: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectLLMDebateRequest(BaseModel):
+    topic: str
+    user_id: str = "default_user"
+    session_id: str = ""
+    hypothesis_count: int = 3
+    attach_to_graph: bool = True
+    proposer_role: str = "creative"
+    critic_role: str = "analyst"
+    judge_role: str = "planner"
+    personalization: dict[str, Any] = Field(default_factory=dict)
+    feedback_items: list[dict[str, Any] | str] = Field(default_factory=list)
 
 
 class ProjectUserGraphUpdateRequest(BaseModel):
     user_id: str = "default_user"
     display_name: str = "Default User"
+    text: str = ""
+    language: str = "en"
+    session_id: str = ""
+    use_llm_profile: bool = True
+    include_client_profile: bool = True
+    client: dict[str, Any] = Field(default_factory=dict)
     profile_text: str = ""
     profile: dict[str, Any] = Field(default_factory=dict)
     personality: dict[str, Any] = Field(default_factory=dict)
+    personalization: dict[str, Any] = Field(default_factory=dict)
+    feedback_items: list[dict[str, Any] | str] = Field(default_factory=list)
     fears: list[str] | str | None = None
     desires: list[str] | str | None = None
     goals: list[str] | str | None = None
@@ -264,7 +292,11 @@ class ProjectUserGraphUpdateRequest(BaseModel):
 
 
 class ProjectAutorunsImportRequest(BaseModel):
-    text: str
+    text: str = ""
+    auto_detect: bool = True
+    query: str = ""
+    language: str = "en"
+    client: dict[str, Any] = Field(default_factory=dict)
     delimiter: str = ""
     user_id: str = "default_user"
     session_id: str = "autoruns_session"
@@ -322,6 +354,61 @@ def _scan_modules() -> list[dict[str, Any]]:
     return modules
 
 
+class GraphEventHub:
+    """Process-local websocket broadcaster for graph runtime events."""
+
+    def __init__(self) -> None:
+        self._connections: set[WebSocket] = set()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._lock = Lock()
+
+    def bind_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+
+    async def connect(self, websocket: WebSocket) -> None:
+        await websocket.accept()
+        with self._lock:
+            self._connections.add(websocket)
+
+    async def disconnect(self, websocket: WebSocket) -> None:
+        with self._lock:
+            self._connections.discard(websocket)
+
+    async def _broadcast(self, payload: dict[str, Any]) -> None:
+        with self._lock:
+            connections = list(self._connections)
+        if not connections:
+            return
+        stale: list[WebSocket] = []
+        for websocket in connections:
+            try:
+                await websocket.send_json(payload)
+            except Exception:
+                stale.append(websocket)
+        if stale:
+            with self._lock:
+                for websocket in stale:
+                    self._connections.discard(websocket)
+
+    def publish_graph_event(self, event: Any) -> None:
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            return
+        payload = {
+            "type": "graph_event",
+            "event": {
+                "id": int(getattr(event, "id", 0)),
+                "event_type": str(getattr(event, "event_type", "") or ""),
+                "timestamp": float(getattr(event, "timestamp", 0.0) or 0.0),
+                "payload": dict(getattr(event, "payload", {}) or {}),
+            },
+        }
+        try:
+            asyncio.run_coroutine_threadsafe(self._broadcast(payload), loop)
+        except Exception:
+            return
+
+
 def create_app() -> FastAPI:
     graph = GraphWorkspaceService(use_env_adapter=True)
     security = SecuritySettings.from_env()
@@ -329,6 +416,8 @@ def create_app() -> FastAPI:
     metrics = RuntimeMetrics()
     privacy_noise = PrivacyNoisePlugin(PrivacyNoiseConfig.from_env())
     in_memory_limiter = InMemoryRateLimiter(security.rate_limit_per_minute)
+    event_hub = GraphEventHub()
+    graph.add_graph_event_listener(event_hub.publish_graph_event)
 
     app = FastAPI(
         title="Autonomous Graph Workspace API",
@@ -349,6 +438,14 @@ def create_app() -> FastAPI:
             rate_limit_backend = "slowapi"
         else:
             rate_limit_backend = "in_memory"
+
+    @app.on_event("startup")
+    async def register_event_loop() -> None:
+        event_hub.bind_event_loop(asyncio.get_running_loop())
+
+    @app.on_event("shutdown")
+    async def detach_graph_listener() -> None:
+        graph.remove_graph_event_listener(event_hub.publish_graph_event)
 
     def _assert_control_admin(request: Request) -> None:
         admin_key = control_plane.admin_key()
@@ -552,6 +649,28 @@ def create_app() -> FastAPI:
     ) -> dict[str, Any]:
         return {"events": graph.list_events(limit=limit, event_type=event_type)}
 
+    @app.websocket("/api/graph/ws")
+    async def graph_events_ws(websocket: WebSocket) -> None:
+        await event_hub.connect(websocket)
+        try:
+            snapshot_payload = graph.snapshot_payload()
+            await websocket.send_json(
+                {
+                    "type": "hello",
+                    "snapshot": snapshot_payload.get("snapshot", {}),
+                    "metrics": snapshot_payload.get("metrics", {}),
+                    "events": graph.list_events(limit=100),
+                }
+            )
+            while True:
+                message = await websocket.receive_text()
+                if str(message or "").strip().lower() == "ping":
+                    await websocket.send_json({"type": "pong"})
+        except WebSocketDisconnect:
+            return
+        finally:
+            await event_hub.disconnect(websocket)
+
     @app.post("/api/graph/node")
     def graph_create_node(payload: NodeCreateRequest) -> dict[str, Any]:
         try:
@@ -651,23 +770,42 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/project/daily-mode")
-    def project_daily_mode(payload: ProjectDailyModeRequest) -> dict[str, Any]:
+    def project_daily_mode(payload: ProjectDailyModeRequest, request: Request) -> dict[str, Any]:
         try:
-            return graph.project_daily_mode(payload.model_dump())
+            return graph.project_daily_mode(
+                payload.model_dump(),
+                request_headers=request.headers,
+                request_ip=extract_client_ip(request, settings=security),
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/llm/debate")
+    def project_llm_debate(payload: ProjectLLMDebateRequest) -> dict[str, Any]:
+        try:
+            return graph.project_llm_debate(payload.model_dump())
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/project/user-graph/update")
-    def project_user_graph_update(payload: ProjectUserGraphUpdateRequest) -> dict[str, Any]:
+    def project_user_graph_update(payload: ProjectUserGraphUpdateRequest, request: Request) -> dict[str, Any]:
         try:
-            return graph.project_user_graph_update(payload.model_dump())
+            return graph.project_user_graph_update(
+                payload.model_dump(),
+                request_headers=request.headers,
+                request_ip=extract_client_ip(request, settings=security),
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/project/autoruns/import")
-    def project_autoruns_import(payload: ProjectAutorunsImportRequest) -> dict[str, Any]:
+    def project_autoruns_import(payload: ProjectAutorunsImportRequest, request: Request) -> dict[str, Any]:
         try:
-            return graph.project_autoruns_import(payload.model_dump())
+            return graph.project_autoruns_import(
+                payload.model_dump(),
+                request_headers=request.headers,
+                request_ip=extract_client_ip(request, settings=security),
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

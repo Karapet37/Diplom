@@ -1,0 +1,7 @@
+llama-cpp-python
+fastapi
+uvicorn
+python-multipart
+neo4j
+slowapi
+prometheus-fastapi-instrumentator

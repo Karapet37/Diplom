@@ -2,6 +2,11 @@
 
 Graph-first platform for modeling autonomous logical systems.
 
+## Repository
+
+- GitHub: `https://github.com/Karapet37/Diplom`
+- Main branch remote: `origin` -> `Karapet37/Diplom`
+
 Project scope is now intentionally minimal:
 - graph engine (`src/autonomous_graph`),
 - web API (`src/web`),
@@ -139,6 +144,7 @@ data/profile_exports/
 - `GET /api/graph/snapshot`
 - `GET /api/graph/node-types`
 - `GET /api/graph/events`
+- `WS /api/graph/ws`
 - `POST /api/graph/node`
 - `POST /api/graph/node/update`
 - `POST /api/graph/node/delete`
@@ -156,6 +162,7 @@ data/profile_exports/
 - `POST /api/graph/profile/infer`
 - `POST /api/project/demo/watch`
 - `POST /api/project/daily-mode`
+- `POST /api/project/llm/debate`
 - `POST /api/project/user-graph/update`
 - `POST /api/project/autoruns/import`
 - `GET /api/project/model-advisors`
@@ -212,6 +219,15 @@ AUTOGRAPH_BOOTSTRAP_LIVING_FOUNDATION=1
 ```
 
 If local `.gguf` is unavailable, demo still works via fallback persona synthesis.
+
+WebSocket stream notes:
+- First frame: `{"type":"hello","snapshot":...,"metrics":...,"events":[...]}`
+- Runtime frames: `{"type":"graph_event","event":{"event_type":"...", ...}}`
+- Simulation now emits progress milestones:
+  - `simulation_started`
+  - `simulation_phase` (e.g. recursive generation)
+  - `simulation_infer_round`
+  - `simulation_completed`
 
 ## Sysinternals Autoruns Integration
 
