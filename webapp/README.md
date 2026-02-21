@@ -9,11 +9,37 @@ Repository: `https://github.com/Karapet37/Diplom`
 - `User Semantic Graph`: update personal dimensions in graph
   - fears, desires, goals, principles, opportunities
   - abilities, access, knowledge, assets
+- `Personalization Studio`:
+  - response style, reasoning depth, risk tolerance, tone,
+  - default LLM roles (proposer/critic/judge),
+  - focus goals/domain focus/avoid topics/memory notes,
+  - localStorage persistence + auto-apply toggles for Daily/UserGraph/Debate actions.
 - `Sysinternals Autoruns Import`: paste Autoruns CSV/TSV export and bind startup/process telemetry into semantic graph
 - `Daily Mode`: diary -> recommendations + scores + graph binding
 - `Mini Coders / Advisors`: shows detected GGUF advisor roles and prompt catalog
+- `Graph Explainability UX`:
+  - reasoning path variants per selected node,
+  - dependency closure highlight on hover,
+  - edge reasoning panel,
+  - edge change timeline from stream events,
+  - animated live edge updates.
 - `Translator advisor` is strict GGUF role (no fallback to general model)
 - Overview now uses section pages (pagination) instead of one long vertical scroll
+
+## UI Languages
+
+Current UI language order:
+
+1. Armenian (`hy`)
+2. Russian (`ru`)
+3. English (`en`)
+4. French (`fr`)
+5. Spanish (`es`)
+6. Portuguese (`pt`)
+7. Arabic (`ar`)
+8. Hindi (`hi`)
+9. Chinese (`zh`)
+10. Japanese (`ja`)
 
 ## Run
 

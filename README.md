@@ -16,6 +16,23 @@ Project scope is now intentionally minimal:
 
 Legacy agent/speech/personalizer modules were removed.
 
+## What Is New In This Revision
+
+- Personalization profile is now first-class:
+  - response style, reasoning depth, risk tolerance, tone,
+  - focus goals/domain focus/avoid topics,
+  - memory notes and default debate roles.
+- `LLM Role Debate` now accepts personalization context and uses it in proposer/critic/judge prompts.
+- User profile updates accept personalization and explicit feedback items.
+- UI now has `Personalization Studio` with local persistence and auto-apply toggles.
+- Graph UX improvements:
+  - reasoning path variants,
+  - edge reasoning panel,
+  - edge change timeline,
+  - live edge update effects via WebSocket stream.
+- UI language set expanded and ordered:
+  - Armenian, Russian, English, French, Spanish, Portuguese, Arabic, Hindi, Chinese, Japanese.
+
 ## Project Report
 
 A full architecture and quality report is generated in:
@@ -228,6 +245,60 @@ WebSocket stream notes:
   - `simulation_phase` (e.g. recursive generation)
   - `simulation_infer_round`
   - `simulation_completed`
+
+## Personalization Payloads
+
+`POST /api/project/user-graph/update` supports:
+
+```json
+{
+  "user_id": "web_user",
+  "display_name": "Web User",
+  "text": "Free-text profile narrative",
+  "personalization": {
+    "response_style": "balanced",
+    "reasoning_depth": "deep",
+    "risk_tolerance": "medium",
+    "tone": "direct",
+    "focus_goals": ["ship product", "improve focus"],
+    "domain_focus": ["architecture", "security"],
+    "avoid_topics": ["generic motivation"],
+    "memory_notes": "Prefer short actionable plans",
+    "llm_roles": {
+      "proposer": "creative",
+      "critic": "analyst",
+      "judge": "planner"
+    }
+  },
+  "feedback_items": [
+    {"message": "Concrete plans work best", "score": 0.9, "decision": "accept"},
+    {"message": "Avoid long theory", "score": 0.2, "decision": "reject"}
+  ]
+}
+```
+
+`POST /api/project/llm/debate` supports:
+
+```json
+{
+  "topic": "Improve runtime reasoning transparency",
+  "hypothesis_count": 3,
+  "personalization": {
+    "response_style": "concise",
+    "reasoning_depth": "balanced",
+    "risk_tolerance": "low",
+    "tone": "neutral",
+    "llm_roles": {
+      "proposer": "creative",
+      "critic": "analyst",
+      "judge": "planner"
+    }
+  },
+  "feedback_items": [
+    {"message": "Prefer practical solutions", "score": 0.8, "decision": "accept"}
+  ]
+}
+```
 
 ## Sysinternals Autoruns Integration
 

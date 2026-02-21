@@ -28,6 +28,14 @@ Current auto-mapping by filename/path tokens:
 - `planner`: `planner`, `plan`, `instruct`
 - `general`: best non-translator model (prefers instruct/general-purpose families)
 
+These advisor roles are now used directly by the UI debate/personalization flow:
+
+- `proposer` -> usually `creative`
+- `critic` -> usually `analyst`
+- `judge` -> usually `planner`
+
+Personalization profile can override these defaults per request via `personalization.llm_roles`.
+
 ## Explicit env overrides
 
 - `LOCAL_GGUF_MODEL=/absolute/path/to/general.gguf`

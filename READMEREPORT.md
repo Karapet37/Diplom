@@ -153,3 +153,17 @@ Operational deployment՝
 - մաքուր repository state,
 - codified integration contracts,
 - repeatable `CI` և release routine։
+
+## 9. Latest Implemented Additions (Current Revision)
+
+- Personalization added to project-level flows:
+  - `project_user_graph_update` now accepts `personalization` + `feedback_items`,
+  - `project_llm_debate` now accepts `personalization` + `feedback_items`.
+- Debate prompt pipeline now includes personalization context (style/depth/risk/tone + role defaults).
+- Frontend gained `Personalization Studio` and persistent local profile.
+- UI language matrix expanded to include `fr`, `ar`, `hi`, `ja` with explicit ordering.
+- Graph explainability UI strengthened:
+  - reasoning trace variants,
+  - edge reasoning panel,
+  - edge history timeline,
+  - live edge stream visual effects.
