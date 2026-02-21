@@ -291,6 +291,50 @@ class ProjectUserGraphUpdateRequest(BaseModel):
     assets: list[str] | str | None = None
 
 
+class ProjectHallucinationReportRequest(BaseModel):
+    user_id: str = "default_user"
+    session_id: str = ""
+    prompt: str = ""
+    llm_answer: str = ""
+    correct_answer: str = ""
+    source: str = ""
+    tags: list[str] | str | None = None
+    severity: str = "medium"
+    confidence: float = 0.8
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectHallucinationCheckRequest(BaseModel):
+    user_id: str = "default_user"
+    prompt: str = ""
+    llm_answer: str = ""
+    top_k: int = 3
+
+
+class ProjectArchiveVerifiedChatRequest(BaseModel):
+    user_id: str = "default_user"
+    session_id: str = ""
+    message: str = ""
+    context: str = ""
+    model_path: str = ""
+    model_role: str = "general"
+    apply_to_graph: bool = True
+    verification_mode: str = "strict"
+    top_k: int = 3
+
+
+class ProjectArchiveReviewApplyRequest(BaseModel):
+    user_id: str = "default_user"
+    session_id: str = ""
+    message: str = ""
+    context: str = ""
+    summary: str = ""
+    archive_updates: list[dict[str, Any]] | dict[str, Any] | str = Field(default_factory=list)
+    verification_mode: str = "strict"
+    apply_to_graph: bool = True
+    top_k: int = 3
+
+
 class ProjectAutorunsImportRequest(BaseModel):
     text: str = ""
     auto_detect: bool = True
@@ -784,6 +828,34 @@ def create_app() -> FastAPI:
     def project_llm_debate(payload: ProjectLLMDebateRequest) -> dict[str, Any]:
         try:
             return graph.project_llm_debate(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/hallucination/report")
+    def project_hallucination_report(payload: ProjectHallucinationReportRequest) -> dict[str, Any]:
+        try:
+            return graph.project_hallucination_report(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/hallucination/check")
+    def project_hallucination_check(payload: ProjectHallucinationCheckRequest) -> dict[str, Any]:
+        try:
+            return graph.project_hallucination_check(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/archive/chat")
+    def project_archive_chat(payload: ProjectArchiveVerifiedChatRequest) -> dict[str, Any]:
+        try:
+            return graph.project_archive_verified_chat(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/archive/review")
+    def project_archive_review(payload: ProjectArchiveReviewApplyRequest) -> dict[str, Any]:
+        try:
+            return graph.project_archive_review_apply(payload.model_dump())
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

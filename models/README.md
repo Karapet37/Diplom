@@ -36,6 +36,16 @@ These advisor roles are now used directly by the UI debate/personalization flow:
 
 Personalization profile can override these defaults per request via `personalization.llm_roles`.
 
+## Direct model-path usage (archive chat)
+
+Project now supports explicit GGUF selection per request:
+
+- `POST /api/project/archive/chat` can receive `model_path` (for example:
+  - `models/gguf/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf`
+  - `models/gguf/textGen/h2o-danube3-4b-chat-Q5_K_M.gguf`)
+- user-facing answer is conversational (`assistant_reply`), not raw JSON.
+- structured archive updates are reviewed separately via `POST /api/project/archive/review`.
+
 ## Explicit env overrides
 
 - `LOCAL_GGUF_MODEL=/absolute/path/to/general.gguf`

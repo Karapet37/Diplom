@@ -49,6 +49,45 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertEqual(reason, "prompt_execution_disabled")
 
+    def test_graph_writes_gate_blocks_hallucination_report(self):
+        plane = RuntimeControlPlane(
+            flags=ControlPlaneFlags(
+                allow_graph_writes=False,
+            )
+        )
+        allowed, reason = plane.allow_request(
+            method="POST",
+            path="/api/project/hallucination/report",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "graph_writes_disabled")
+
+    def test_prompt_execution_gate_blocks_archive_chat(self):
+        plane = RuntimeControlPlane(
+            flags=ControlPlaneFlags(
+                allow_prompt_execution=False,
+            )
+        )
+        allowed, reason = plane.allow_request(
+            method="POST",
+            path="/api/project/archive/chat",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "prompt_execution_disabled")
+
+    def test_graph_writes_gate_blocks_archive_review(self):
+        plane = RuntimeControlPlane(
+            flags=ControlPlaneFlags(
+                allow_graph_writes=False,
+            )
+        )
+        allowed, reason = plane.allow_request(
+            method="POST",
+            path="/api/project/archive/review",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "graph_writes_disabled")
+
     def test_apply_patch_updates_known_flags_and_ignores_unknown(self):
         plane = RuntimeControlPlane(flags=ControlPlaneFlags())
         out = plane.apply_patch(

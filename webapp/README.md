@@ -17,6 +17,10 @@ Repository: `https://github.com/Karapet37/Diplom`
 - `Sysinternals Autoruns Import`: paste Autoruns CSV/TSV export and bind startup/process telemetry into semantic graph
 - `Daily Mode`: diary -> recommendations + scores + graph binding
 - `Mini Coders / Advisors`: shows detected GGUF advisor roles and prompt catalog
+- `Verified Archive Chat`:
+  - chat reply is conversational for the user,
+  - archive conclusions are shown in a separate review editor as JSON,
+  - edited draft can be re-checked and applied.
 - `Graph Explainability UX`:
   - reasoning path variants per selected node,
   - dependency closure highlight on hover,
@@ -79,6 +83,11 @@ If present, FastAPI serves it at `/`.
 
 - `POST /api/project/daily-mode`
 - `POST /api/project/user-graph/update`
+- `POST /api/project/llm/debate`
+- `POST /api/project/hallucination/report`
+- `POST /api/project/hallucination/check`
+- `POST /api/project/archive/chat`
+- `POST /api/project/archive/review`
 - `POST /api/project/autoruns/import`
 - `GET /api/project/model-advisors`
 - `POST /api/client/introspect`

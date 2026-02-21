@@ -80,6 +80,13 @@ Operational deployment՝
 
 - Իրականացվել է personal semantic graph-ի աշխատանքային հոսք։
 - Ավելացվել է `LLM role debate` մեխանիզմ՝ proposer/critic/judge դերերով։
+- Ավելացվել է `Hallucination Hunter` verification branch-ը՝
+  - սխալ պատասխանների գրանցմամբ,
+  - ճիշտ պատասխանների պահպանմամբ,
+  - կրկնվող սխալների կանխման guard check-երով։
+- Ավելացվել է `Verified Archive Chat` հոսքը՝
+  - chat-ում վերջնական պատասխանը conversational ձևով է (ոչ թե raw JSON),
+  - JSON update-ները գնում են առանձին review/edit փուլ՝ նորից verify անելու համար։
 - `project_user_graph_update` և `project_llm_debate` endpoint-ներում ավելացվել են `personalization` և `feedback_items`։
 - Debate prompt pipeline-ը հիմա ներառում է personalization context (`style/depth/risk/tone` + role defaults)։
 - Frontend-ում ավելացվել է `Personalization Studio` և persistent local profile (`localStorage`)։
@@ -137,43 +144,66 @@ Operational deployment՝
 5. `Privacy/compliance`
 - Client introspection-ի համար անհրաժեշտ է հստակ deployment policy և user notice։
 
-## 7. Ինչպես օգտագործել (օգտագործման ուղեցույց)
+## 7. Ինչպես է հաճախորդը օգտագործում պատրաստի համակարգը
 
-1. Backend-ի գործարկում
+1. Անձնական graph-ի ստեղծում
 
-```bash
-python3 start.py --host 127.0.0.1 --port 8008
-```
+- Օգտատերը գրում է իր կոնտեքստը (նպատակներ, խնդիրներ, ռեսուրսներ, սահմանափակումներ)։
+- Համակարգը `POST /api/project/user-graph/update`-ով կառուցում է personal semantic graph։
+- Արդյունքում տեսանելի են nodes/edges-ը և reasoning path-երը։
 
-2. Frontend-ի գործարկում
+2. Սցենարի մուտքագրում և գործողությունների մոդելավորում
 
-```bash
-cd webapp
-npm install
-npm run dev
-```
+- Օգտատերը տալիս է կոնկրետ իրավիճակ (օր.` «ինչպես կատարել անցում նոր կարիերայի ուղղության»)։
+- `POST /api/project/llm/debate`-ը ստեղծում է proposer/critic/judge տարբերակներ։
+- Graph-ում ձևավորվում են վարկածներ, հակափաստարկներ և եզրակացություն՝ առանձին ճյուղերով։
 
-3. Առողջության ստուգում
+3. Վերլուծություն և պլանի բարելավում
 
-```bash
-curl http://127.0.0.1:8008/api/health
-curl http://127.0.0.1:8008/metrics
-```
+- `POST /api/project/daily-mode`-ով համակարգը գնահատում է ընթացիկ վիճակը, ռիսկերը և առաջընթացը։
+- Օգտատերը համեմատում է տարբեր պլաններ, տեսնում dependency-ները և ընտրում հաջորդ քայլերը։
+- Feedback-ը պահվում է, որպեսզի հաջորդ խորհուրդները լինեն ավելի անհատական։
 
-4. Հիմնական endpoint-ներ, որոնցով սովորաբար աշխատում են
+4. «Hallucination Hunter» ցիկլ
 
-- `POST /api/project/daily-mode`
-- `POST /api/project/user-graph/update`
-- `POST /api/project/llm/debate`
-- `POST /api/project/autoruns/import`
-- `POST /api/client/introspect`
-- `GET /api/graph/snapshot`
-- `WS /api/graph/ws`
+- Եթե պատասխանում հայտնվում է սխալ պնդում, այն գրանցվում է `POST /api/project/hallucination/report`-ով։
+- Համակարգը պահում է սխալ տարբերակը, ճշգրիտ տարբերակը և աղբյուրը graph-ի առանձին verification branch-ում։
+- Նույնատիպ հարցի ժամանակ `POST /api/project/hallucination/check`-ը տալիս է guard hints՝ կրկնվող սխալը կանխելու համար։
 
-5. LLM model-ների օգտագործում
+5. Archive chat + review ցիկլ
 
-- Տեղադրել `GGUF` model-ները `models/gguf` պանակում։
-- Անհրաժեշտության դեպքում սահմանել `.env` փոփոխականներ (`LOCAL_GGUF_MODEL`, `LOCAL_MODELS_DIR` և այլն)։
+- `POST /api/project/archive/chat`-ով օգտատերը գրում է բնական լեզվով հարցը և ընտրում model path/role։
+- Համակարգը վերադարձնում է conversational assistant reply, իսկ structural update-ները տալիս է review բլոկով։
+- `POST /api/project/archive/review`-ով օգտատերը խմբագրում/վերավերացնում է update-ները և հետո կիրառում graph branch-ում։
+
+6. Live դիտարկում
+
+- `GET /api/graph/snapshot` և `WS /api/graph/ws`-ով օգտատերը real-time տեսնում է graph-ի փոփոխությունները։
+- Սա թույլ է տալիս անմիջապես հասկանալ, թե որ reasoning chain-ն է աշխատել, որը՝ ոչ։
+
+### 7.1 Ընթացիկ GGUF model-ները (այս կոնֆիգուրացիայում)
+
+- `general` (`LOCAL_GGUF_MODEL`):
+  - `models/gguf/textGen/mistral-7b-instruct-v0.3-q4_k_m.gguf` (recommended default)
+- `coder_architect`, `coder_reviewer`, `coder_refactor`, `coder_debug`:
+  - `models/gguf/coder/qwen2.5-coder-7b-instruct-q4_k_m-00001-of-00002.gguf`
+- `translator` (`LOCAL_TRANSLATOR_GGUF_MODEL`):
+  - `models/translator/model-q4k.gguf` (`MADLAD` class translator profile)
+- `textGen` պանակում հասանելի լրացուցիչ model-ներ:
+  - `models/gguf/textGen/GLM-4.7-Flash-Q5_K_M.gguf`
+  - `models/gguf/textGen/h2o-danube3-4b-chat-Q5_K_M.gguf`
+  - `models/gguf/textGen/llama-2-7b-chat.Q4_K_M.gguf`
+- Context tuning:
+  - `LOCAL_GGUF_N_CTX=8192`
+  - `LOCAL_TRANSLATOR_N_CTX=8192`
+  - `LOCAL_GGUF_MAX_LOADED=1`
+
+Առաջարկվող role strategy՝
+- `mistral`՝ general/planning reasoning-ի համար,
+- `qwen2.5-coder`՝ coding role-ների համար,
+- `MADLAD`՝ translator role-ի համար։
+
+Ակտիվ role mapping-ը runtime-ում ստուգվում է `GET /api/project/model-advisors` endpoint-ով։
 
 ## 8. Առաջարկվող Quality Gates
 

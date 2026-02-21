@@ -157,6 +157,23 @@ class LocalLlmProviderTests(unittest.TestCase):
         self.assertEqual(len(paths), 1)
         self.assertIn("mistral-7b-instruct.gguf", paths[0])
 
+    def test_build_model_llm_fn_supports_explicit_split_model_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            gguf = root / "gguf"
+            gguf.mkdir(parents=True, exist_ok=True)
+            first = gguf / "qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
+            second = gguf / "qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf"
+            first.write_text("", encoding="utf-8")
+            second.write_text("", encoding="utf-8")
+
+            with patch.object(provider, "Llama", _FakeLlama):
+                fn = provider.build_model_llm_fn(str(second))
+                self.assertTrue(callable(fn))
+                out = fn("return json")
+                self.assertIsInstance(out, str)
+                self.assertIn(str(first), provider._PATH_LLM_FN)
+
 
 if __name__ == "__main__":
     unittest.main()

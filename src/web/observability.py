@@ -183,6 +183,7 @@ INFERENCE_PATHS: tuple[str, ...] = (
     "/api/graph/simulate",
     "/api/living/process",
     "/api/living/prompt/run",
+    "/api/project/archive/chat",
 )
 
 

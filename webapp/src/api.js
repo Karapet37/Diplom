@@ -206,6 +206,34 @@ export function runProjectLLMDebate(payload = {}) {
   });
 }
 
+export function runProjectArchiveChat(payload = {}) {
+  return request("/api/project/archive/chat", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function applyProjectArchiveReview(payload = {}) {
+  return request("/api/project/archive/review", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function reportProjectHallucination(payload = {}) {
+  return request("/api/project/hallucination/report", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function checkProjectHallucination(payload = {}) {
+  return request("/api/project/hallucination/check", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function updateProjectUserGraph(payload = {}) {
   return request("/api/project/user-graph/update", {
     method: "POST",

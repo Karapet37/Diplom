@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  applyProjectArchiveReview,
   clearGraph,
+  checkProjectHallucination,
   createEdge,
   createNode,
   deleteEdge,
@@ -18,8 +20,10 @@ import {
   loadGraph,
   persistGraph,
   reinforceRelation,
+  reportProjectHallucination,
   rewardEvent,
   runProjectLLMDebate,
+  runProjectArchiveChat,
   runProjectDailyMode,
   simulateGraph,
   subscribeGraphEvents,
@@ -39,6 +43,7 @@ const RELATION_OPTIONS = [
 ];
 
 const ACTIVATION_OPTIONS = ["tanh", "identity", "relu", "sigmoid"];
+const HALLUCINATION_SEVERITY_OPTIONS = ["low", "medium", "high", "critical"];
 const LLM_ROLE_OPTIONS = [
   "creative",
   "analyst",
@@ -58,6 +63,7 @@ const OVERVIEW_SECTION_KEYS = [
   "graph",
   "client",
   "advisors",
+  "hallucination_hunter",
 ];
 
 const UI_LANG_OPTIONS = [
@@ -651,6 +657,7 @@ const EXTRA_TRANSLATIONS = {
     overview_section_editor: "Editor",
     overview_section_client: "Client",
     overview_section_advisors: "Advisors",
+    overview_section_hallucination_hunter: "Hallucination Hunter",
     pager_prev: "Prev",
     pager_next: "Next",
     pager_events: "Events",
@@ -774,6 +781,54 @@ const EXTRA_TRANSLATIONS = {
     log_personalization_saved: "personalization profile saved",
     log_personalization_reset: "personalization profile reset",
     log_personalization_roles_synced: "personalization roles synced to debate controls",
+    hallucination_hunter_title: "Hallucination Hunter",
+    hallucination_report_title: "Report Hallucination Case",
+    hallucination_check_title: "Check For Known Hallucinations",
+    hallucination_prompt: "Question / Prompt",
+    hallucination_prompt_placeholder: "What was the user question where LLM hallucinated?",
+    hallucination_wrong_answer: "Hallucinated Answer",
+    hallucination_wrong_answer_placeholder: "Paste incorrect model answer",
+    hallucination_correct_answer: "Correct Answer",
+    hallucination_correct_answer_placeholder: "Paste verified correct answer",
+    hallucination_source: "Verification Source",
+    hallucination_source_placeholder: "Link, document, or trusted source",
+    hallucination_tags: "Tags",
+    hallucination_tags_placeholder: "facts, geography, medical...",
+    hallucination_severity: "Severity",
+    hallucination_report_action: "Save Hallucination",
+    hallucination_report_result: "Saved Case Result",
+    hallucination_check_action: "Check Repetition Risk",
+    hallucination_check_result: "Hunter Check Result",
+    hallucination_llm_answer_hint: "Current LLM Answer (optional)",
+    hallucination_llm_answer_hint_placeholder: "Paste candidate answer for overlap check",
+    error_hallucination_prompt_empty: "Prompt is empty",
+    error_hallucination_wrong_empty: "Hallucinated answer is empty",
+    error_hallucination_correct_empty: "Correct answer is empty",
+    action_hallucination_report: "hallucination report",
+    action_hallucination_check: "hallucination check",
+    archive_chat_title: "Verified Archive Chat",
+    archive_chat_message: "Message",
+    archive_chat_message_placeholder: "Describe what should be added/changed in your archive...",
+    archive_chat_context: "Context (optional)",
+    archive_chat_context_placeholder: "Constraints, domain rules, evidence policy...",
+    archive_chat_model_path: "Model Path",
+    archive_chat_model_role: "Fallback Role",
+    archive_chat_verification_mode: "Verification Mode",
+    archive_chat_attach_graph: "Attach updates to graph branch",
+    archive_chat_run: "Run Verified Chat",
+    archive_chat_result: "Verified Archive Result",
+    archive_chat_suggestions: "Detected Local Models",
+    archive_chat_history: "Dialogue",
+    archive_chat_no_messages: "No messages yet.",
+    archive_review_title: "Review And Edit Conclusions",
+    archive_review_editor: "Archive Updates JSON",
+    archive_review_editor_placeholder: "[{\"entity\":\"...\",\"field\":\"...\",\"operation\":\"upsert\",\"value\":\"...\"}]",
+    archive_review_apply: "Re-check And Apply Edited Draft",
+    archive_review_result: "Review Check Result",
+    error_archive_chat_message_empty: "Archive chat message is empty",
+    error_archive_review_json_invalid: "Invalid archive updates JSON",
+    action_archive_chat: "archive verified chat",
+    action_archive_review_apply: "archive review apply",
   },
   ru: {
     overview_sections: "Разделы обзора",
@@ -786,6 +841,7 @@ const EXTRA_TRANSLATIONS = {
     overview_section_editor: "Редактор",
     overview_section_client: "Клиент",
     overview_section_advisors: "Советчики",
+    overview_section_hallucination_hunter: "Охотник на галлюцинации",
     pager_prev: "Назад",
     pager_next: "Вперед",
     pager_events: "События",
@@ -910,6 +966,54 @@ const EXTRA_TRANSLATIONS = {
     log_personalization_saved: "профиль персонализации сохранен",
     log_personalization_reset: "профиль персонализации сброшен",
     log_personalization_roles_synced: "роли персонализации синхронизированы с дебатами",
+    hallucination_hunter_title: "Охотник на галлюцинации",
+    hallucination_report_title: "Сообщить о галлюцинации",
+    hallucination_check_title: "Проверка на повтор известной галлюцинации",
+    hallucination_prompt: "Вопрос / Промпт",
+    hallucination_prompt_placeholder: "Какой был исходный вопрос, где LLM ошиблась?",
+    hallucination_wrong_answer: "Ошибочный ответ LLM",
+    hallucination_wrong_answer_placeholder: "Вставь неверный ответ модели",
+    hallucination_correct_answer: "Правильный ответ",
+    hallucination_correct_answer_placeholder: "Вставь проверенный корректный ответ",
+    hallucination_source: "Источник проверки",
+    hallucination_source_placeholder: "Ссылка, документ или надежный источник",
+    hallucination_tags: "Теги",
+    hallucination_tags_placeholder: "факты, география, медицина...",
+    hallucination_severity: "Серьезность",
+    hallucination_report_action: "Сохранить галлюцинацию",
+    hallucination_report_result: "Результат сохранения",
+    hallucination_check_action: "Проверить риск повтора",
+    hallucination_check_result: "Результат проверки охотника",
+    hallucination_llm_answer_hint: "Текущий ответ LLM (необязательно)",
+    hallucination_llm_answer_hint_placeholder: "Вставь ответ для проверки пересечения",
+    error_hallucination_prompt_empty: "Пустой вопрос/промпт",
+    error_hallucination_wrong_empty: "Пустой ошибочный ответ LLM",
+    error_hallucination_correct_empty: "Пустой правильный ответ",
+    action_hallucination_report: "запись галлюцинации",
+    action_hallucination_check: "проверка галлюцинации",
+    archive_chat_title: "Проверенный архивный чат",
+    archive_chat_message: "Сообщение",
+    archive_chat_message_placeholder: "Опиши, что нужно добавить/изменить в архиве...",
+    archive_chat_context: "Контекст (необязательно)",
+    archive_chat_context_placeholder: "Ограничения, правила домена, политика источников...",
+    archive_chat_model_path: "Путь к модели",
+    archive_chat_model_role: "Роль по умолчанию",
+    archive_chat_verification_mode: "Режим проверки",
+    archive_chat_attach_graph: "Сохранять обновления в ветку графа",
+    archive_chat_run: "Запустить проверенный чат",
+    archive_chat_result: "Результат проверенного архива",
+    archive_chat_suggestions: "Найденные локальные модели",
+    archive_chat_history: "Диалог",
+    archive_chat_no_messages: "Сообщений пока нет.",
+    archive_review_title: "Проверка и редактирование выводов",
+    archive_review_editor: "JSON обновлений архива",
+    archive_review_editor_placeholder: "[{\"entity\":\"...\",\"field\":\"...\",\"operation\":\"upsert\",\"value\":\"...\"}]",
+    archive_review_apply: "Перепроверить и применить правки",
+    archive_review_result: "Результат проверки правок",
+    error_archive_chat_message_empty: "Пустое сообщение архивного чата",
+    error_archive_review_json_invalid: "Некорректный JSON обновлений архива",
+    action_archive_chat: "проверенный архивный чат",
+    action_archive_review_apply: "применение review архива",
   },
   hy: {
     overview_sections: "Ընդհանուր բաժիններ",
@@ -2095,6 +2199,7 @@ const OVERVIEW_SECTION_TRANSLATION_KEYS = {
   graph: "overview_section_graph",
   client: "overview_section_client",
   advisors: "overview_section_advisors",
+  hallucination_hunter: "overview_section_hallucination_hunter",
 };
 
 function detectInitialLanguage() {
@@ -3633,6 +3738,25 @@ export default function App() {
   const [debateCriticRole, setDebateCriticRole] = useState("analyst");
   const [debateJudgeRole, setDebateJudgeRole] = useState("planner");
   const [debateResult, setDebateResult] = useState(null);
+  const [archiveChatMessageText, setArchiveChatMessageText] = useState("");
+  const [archiveChatContextText, setArchiveChatContextText] = useState("");
+  const [archiveChatModelPath, setArchiveChatModelPath] = useState("");
+  const [archiveChatModelRole, setArchiveChatModelRole] = useState("general");
+  const [archiveChatVerificationMode, setArchiveChatVerificationMode] = useState("strict");
+  const [archiveChatAttachGraph, setArchiveChatAttachGraph] = useState(true);
+  const [archiveChatResult, setArchiveChatResult] = useState(null);
+  const [archiveChatMessages, setArchiveChatMessages] = useState([]);
+  const [archiveReviewUpdatesText, setArchiveReviewUpdatesText] = useState("[]");
+  const [archiveReviewResult, setArchiveReviewResult] = useState(null);
+  const [hallucinationPromptText, setHallucinationPromptText] = useState("");
+  const [hallucinationWrongAnswerText, setHallucinationWrongAnswerText] = useState("");
+  const [hallucinationCorrectAnswerText, setHallucinationCorrectAnswerText] = useState("");
+  const [hallucinationSourceText, setHallucinationSourceText] = useState("");
+  const [hallucinationTagsText, setHallucinationTagsText] = useState("");
+  const [hallucinationSeverity, setHallucinationSeverity] = useState("medium");
+  const [hallucinationLlmAnswerText, setHallucinationLlmAnswerText] = useState("");
+  const [hallucinationReportResult, setHallucinationReportResult] = useState(null);
+  const [hallucinationCheckResult, setHallucinationCheckResult] = useState(null);
   const [personalizationDraft, setPersonalizationDraft] = useState(() => loadPersonalizationDraft());
   const [selectedTraceIndex, setSelectedTraceIndex] = useState(0);
   const [edgeEffectsBySig, setEdgeEffectsBySig] = useState({});
@@ -3727,6 +3851,22 @@ export default function App() {
     () => summarizePersonalization(personalizationPayload),
     [personalizationPayload]
   );
+  const advisorDetectedModels = useMemo(() => {
+    const rows = modelAdvisors?.advisors?.detected_models;
+    return Array.isArray(rows) ? rows.map((item) => String(item || "").trim()).filter(Boolean) : [];
+  }, [modelAdvisors]);
+  const advisorRoleModels = useMemo(() => {
+    const rows = modelAdvisors?.advisors?.advisors;
+    return Array.isArray(rows) ? rows : [];
+  }, [modelAdvisors]);
+  const archiveChatModelOptions = useMemo(() => {
+    const out = [...advisorDetectedModels];
+    const current = String(archiveChatModelPath || "").trim();
+    if (current && !out.includes(current)) {
+      out.unshift(current);
+    }
+    return out;
+  }, [advisorDetectedModels, archiveChatModelPath]);
 
   const t = useMemo(() => {
     const selected = {
@@ -3765,6 +3905,19 @@ export default function App() {
       // ignore
     }
   }, [personalizationDraft]);
+
+  useEffect(() => {
+    if (String(archiveChatModelPath || "").trim()) {
+      return;
+    }
+    const generalRow = advisorRoleModels.find((row) => String(row?.role || "") === "general");
+    const generalPath = String(generalRow?.model_path || "").trim();
+    const fallbackPath = advisorDetectedModels[0] || "";
+    const nextPath = generalPath || fallbackPath;
+    if (nextPath) {
+      setArchiveChatModelPath(nextPath);
+    }
+  }, [archiveChatModelPath, advisorDetectedModels, advisorRoleModels]);
 
   useEffect(() => {
     const root = document?.documentElement;
@@ -3849,6 +4002,19 @@ export default function App() {
 
   function appendLog(line) {
     setLogLines((prev) => [...prev, line]);
+  }
+
+  function appendArchiveChatMessage(role, text) {
+    const body = String(text || "").trim();
+    if (!body) return;
+    setArchiveChatMessages((prev) => [
+      ...(Array.isArray(prev) ? prev : []),
+      {
+        role: String(role || "assistant"),
+        text: body,
+        ts: Date.now(),
+      },
+    ]);
   }
 
   function patchPersonalizationDraft(patch) {
@@ -4228,6 +4394,10 @@ export default function App() {
     setUserGraphResult(null);
     setAutorunsImportResult(null);
     setDebateResult(null);
+    setArchiveChatResult(null);
+    setArchiveChatMessages([]);
+    setArchiveReviewUpdatesText("[]");
+    setArchiveReviewResult(null);
   }
 
   async function onSeedDemo() {
@@ -4373,6 +4543,138 @@ export default function App() {
         })
       );
       setDebateResult(out || null);
+    } catch (error) {
+      appendLog(`${t("log_error")}: ${error.message}`);
+    }
+  }
+
+  async function onRunArchiveChat() {
+    const message = String(archiveChatMessageText || "").trim();
+    if (!message) {
+      appendLog(`${t("log_error")}: ${t("error_archive_chat_message_empty")}`);
+      return;
+    }
+    const sessionId = getClientSessionId();
+    appendArchiveChatMessage("user", message);
+    try {
+      const out = await runAction(t("action_archive_chat"), () =>
+        runProjectArchiveChat({
+          user_id: `web_${sessionId}`,
+          session_id: `archive_${sessionId}`,
+          message,
+          context: String(archiveChatContextText || "").trim(),
+          model_path: String(archiveChatModelPath || "").trim(),
+          model_role: normalizeRole(archiveChatModelRole, "general"),
+          apply_to_graph: Boolean(archiveChatAttachGraph),
+          verification_mode: String(archiveChatVerificationMode || "strict").trim() || "strict",
+          top_k: 5,
+        })
+      );
+      setArchiveChatResult(out || null);
+      const assistantReply = String(out?.assistant_reply || out?.summary || "").trim();
+      appendArchiveChatMessage("assistant", assistantReply || "Processed. Review conclusions in the review panel.");
+      setArchiveReviewUpdatesText(stringifySafe(out?.archive_updates || []));
+      setArchiveReviewResult(out?.review || out || null);
+    } catch (error) {
+      appendLog(`${t("log_error")}: ${error.message}`);
+    }
+  }
+
+  async function onApplyArchiveReview() {
+    let updatesDraft = [];
+    try {
+      updatesDraft = parseJsonSafe(
+        archiveReviewUpdatesText,
+        [],
+        t("error_archive_review_json_invalid")
+      );
+    } catch (error) {
+      appendLog(`${t("log_error")}: ${error.message}`);
+      return;
+    }
+    const message = String(archiveChatMessageText || "").trim() || "Manual archive review draft";
+    const sessionId = getClientSessionId();
+    try {
+      const out = await runAction(t("action_archive_review_apply"), () =>
+        applyProjectArchiveReview({
+          user_id: `web_${sessionId}`,
+          session_id: `archive_review_${sessionId}`,
+          message,
+          context: String(archiveChatContextText || "").trim(),
+          summary: String(archiveChatResult?.summary || "").trim(),
+          archive_updates: updatesDraft,
+          verification_mode: String(archiveChatVerificationMode || "strict").trim() || "strict",
+          apply_to_graph: Boolean(archiveChatAttachGraph),
+          top_k: 5,
+        })
+      );
+      setArchiveReviewResult(out?.review || out || null);
+      setArchiveChatResult(out || null);
+      setArchiveReviewUpdatesText(stringifySafe(out?.archive_updates || updatesDraft || []));
+      appendArchiveChatMessage(
+        "assistant",
+        String(out?.assistant_reply || "Reviewed edited draft. Check verification result in the review panel.")
+      );
+    } catch (error) {
+      appendLog(`${t("log_error")}: ${error.message}`);
+    }
+  }
+
+  async function onReportHallucination() {
+    const prompt = String(hallucinationPromptText || "").trim();
+    const llmAnswer = String(hallucinationWrongAnswerText || "").trim();
+    const correctAnswer = String(hallucinationCorrectAnswerText || "").trim();
+    if (!prompt) {
+      appendLog(`${t("log_error")}: ${t("error_hallucination_prompt_empty")}`);
+      return;
+    }
+    if (!llmAnswer) {
+      appendLog(`${t("log_error")}: ${t("error_hallucination_wrong_empty")}`);
+      return;
+    }
+    if (!correctAnswer) {
+      appendLog(`${t("log_error")}: ${t("error_hallucination_correct_empty")}`);
+      return;
+    }
+    const sessionId = getClientSessionId();
+    try {
+      const out = await runAction(t("action_hallucination_report"), () =>
+        reportProjectHallucination({
+          user_id: `web_${sessionId}`,
+          session_id: `hall_${sessionId}`,
+          prompt,
+          llm_answer: llmAnswer,
+          correct_answer: correctAnswer,
+          source: String(hallucinationSourceText || "").trim(),
+          tags: parseListText(hallucinationTagsText),
+          severity: String(hallucinationSeverity || "medium"),
+          confidence: 0.9,
+        })
+      );
+      setHallucinationReportResult(out || null);
+    } catch (error) {
+      appendLog(`${t("log_error")}: ${error.message}`);
+    }
+  }
+
+  async function onCheckHallucinationHunter() {
+    const prompt = String(hallucinationPromptText || "").trim();
+    const llmAnswer = String(hallucinationLlmAnswerText || "").trim();
+    if (!prompt && !llmAnswer) {
+      appendLog(`${t("log_error")}: ${t("error_hallucination_prompt_empty")}`);
+      return;
+    }
+    const sessionId = getClientSessionId();
+    try {
+      const out = await runAction(t("action_hallucination_check"), () =>
+        checkProjectHallucination({
+          user_id: `web_${sessionId}`,
+          prompt,
+          llm_answer: llmAnswer,
+          top_k: 5,
+        })
+      );
+      setHallucinationCheckResult(out || null);
     } catch (error) {
       appendLog(`${t("log_error")}: ${error.message}`);
     }
@@ -5167,11 +5469,215 @@ export default function App() {
               </div>
             </section>
 
+            <section className="card grid-2">
+              <div>
+                <h2>{t("archive_chat_title")}</h2>
+                <h3>{t("archive_chat_history")}</h3>
+                <div className="chat-log">
+                  {(archiveChatMessages || []).length ? (
+                    (archiveChatMessages || []).map((item) => (
+                      <div key={`archive-chat-msg-${item.ts}-${item.role}`}>
+                        <strong>{item.role === "user" ? "You" : "Assistant"}:</strong> {String(item.text || "")}
+                      </div>
+                    ))
+                  ) : (
+                    <div>{t("archive_chat_no_messages")}</div>
+                  )}
+                </div>
+                <div className="row">
+                  <label>{t("archive_chat_message")}</label>
+                  <textarea
+                    value={archiveChatMessageText}
+                    onChange={(e) => setArchiveChatMessageText(e.target.value)}
+                    rows={4}
+                    placeholder={t("archive_chat_message_placeholder")}
+                  />
+                </div>
+                <div className="row">
+                  <label>{t("archive_chat_context")}</label>
+                  <textarea
+                    value={archiveChatContextText}
+                    onChange={(e) => setArchiveChatContextText(e.target.value)}
+                    rows={3}
+                    placeholder={t("archive_chat_context_placeholder")}
+                  />
+                </div>
+                <div className="grid-2">
+                  <div className="row">
+                    <label>{t("archive_chat_model_path")}</label>
+                    <select value={archiveChatModelPath} onChange={(e) => setArchiveChatModelPath(e.target.value)}>
+                      <option value="">auto</option>
+                      {archiveChatModelOptions.map((path) => (
+                        <option key={`archive-model-${path}`} value={path}>
+                          {path}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="row">
+                    <label>{t("archive_chat_model_role")}</label>
+                    <select value={archiveChatModelRole} onChange={(e) => setArchiveChatModelRole(e.target.value)}>
+                      {LLM_ROLE_OPTIONS.map((role) => (
+                        <option key={`archive-role-${role}`} value={role}>
+                          {role}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="grid-2">
+                  <div className="row">
+                    <label>{t("archive_chat_verification_mode")}</label>
+                    <select
+                      value={archiveChatVerificationMode}
+                      onChange={(e) => setArchiveChatVerificationMode(e.target.value)}
+                    >
+                      <option value="strict">strict</option>
+                      <option value="balanced">balanced</option>
+                    </select>
+                  </div>
+                  <div className="row row-checkbox">
+                    <label>{t("archive_chat_attach_graph")}</label>
+                    <input
+                      type="checkbox"
+                      checked={archiveChatAttachGraph}
+                      onChange={(e) => setArchiveChatAttachGraph(Boolean(e.target.checked))}
+                    />
+                  </div>
+                </div>
+                <div className="row-actions">
+                  <button disabled={busy} onClick={onRunArchiveChat}>
+                    {t("archive_chat_run")}
+                  </button>
+                </div>
+                <h3>{t("archive_chat_suggestions")}</h3>
+                <pre>{stringifySafe(advisorDetectedModels)}</pre>
+              </div>
+              <div>
+                <h2>{t("archive_review_title")}</h2>
+                <div className="row">
+                  <label>{t("archive_review_editor")}</label>
+                  <textarea
+                    value={archiveReviewUpdatesText}
+                    onChange={(e) => setArchiveReviewUpdatesText(e.target.value)}
+                    rows={14}
+                    placeholder={t("archive_review_editor_placeholder")}
+                  />
+                </div>
+                <div className="row-actions">
+                  <button disabled={busy} onClick={onApplyArchiveReview}>
+                    {t("archive_review_apply")}
+                  </button>
+                </div>
+                <h3>{t("archive_review_result")}</h3>
+                <pre>{stringifySafe(archiveReviewResult)}</pre>
+                <h3>{t("archive_chat_result")}</h3>
+                <pre>{stringifySafe(archiveChatResult?.verification || archiveChatResult || {})}</pre>
+              </div>
+            </section>
+
             <section className="card">
               <h2>{t("prompt_catalog")}</h2>
               <pre>{stringifySafe(modelAdvisors?.prompts || [])}</pre>
             </section>
           </>
+        )}
+
+        {sectionKey === "hallucination_hunter" && (
+          <section className="card grid-2">
+            <div>
+              <h2>{t("hallucination_report_title")}</h2>
+              <div className="row">
+                <label>{t("hallucination_prompt")}</label>
+                <textarea
+                  value={hallucinationPromptText}
+                  onChange={(e) => setHallucinationPromptText(e.target.value)}
+                  rows={3}
+                  placeholder={t("hallucination_prompt_placeholder")}
+                />
+              </div>
+              <div className="row">
+                <label>{t("hallucination_wrong_answer")}</label>
+                <textarea
+                  value={hallucinationWrongAnswerText}
+                  onChange={(e) => setHallucinationWrongAnswerText(e.target.value)}
+                  rows={3}
+                  placeholder={t("hallucination_wrong_answer_placeholder")}
+                />
+              </div>
+              <div className="row">
+                <label>{t("hallucination_correct_answer")}</label>
+                <textarea
+                  value={hallucinationCorrectAnswerText}
+                  onChange={(e) => setHallucinationCorrectAnswerText(e.target.value)}
+                  rows={3}
+                  placeholder={t("hallucination_correct_answer_placeholder")}
+                />
+              </div>
+              <div className="row">
+                <label>{t("hallucination_source")}</label>
+                <input
+                  value={hallucinationSourceText}
+                  onChange={(e) => setHallucinationSourceText(e.target.value)}
+                  placeholder={t("hallucination_source_placeholder")}
+                />
+              </div>
+              <div className="row">
+                <label>{t("hallucination_tags")}</label>
+                <input
+                  value={hallucinationTagsText}
+                  onChange={(e) => setHallucinationTagsText(e.target.value)}
+                  placeholder={t("hallucination_tags_placeholder")}
+                />
+              </div>
+              <div className="row">
+                <label>{t("hallucination_severity")}</label>
+                <select value={hallucinationSeverity} onChange={(e) => setHallucinationSeverity(e.target.value)}>
+                  {HALLUCINATION_SEVERITY_OPTIONS.map((item) => (
+                    <option key={`hall-severity-${item}`} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="row-actions">
+                <button disabled={busy} onClick={onReportHallucination}>
+                  {t("hallucination_report_action")}
+                </button>
+              </div>
+              <h3>{t("hallucination_report_result")}</h3>
+              <pre>{stringifySafe(hallucinationReportResult)}</pre>
+            </div>
+
+            <div>
+              <h2>{t("hallucination_check_title")}</h2>
+              <div className="row">
+                <label>{t("hallucination_prompt")}</label>
+                <textarea
+                  value={hallucinationPromptText}
+                  onChange={(e) => setHallucinationPromptText(e.target.value)}
+                  rows={3}
+                  placeholder={t("hallucination_prompt_placeholder")}
+                />
+              </div>
+              <div className="row">
+                <label>{t("hallucination_llm_answer_hint")}</label>
+                <textarea
+                  value={hallucinationLlmAnswerText}
+                  onChange={(e) => setHallucinationLlmAnswerText(e.target.value)}
+                  rows={3}
+                  placeholder={t("hallucination_llm_answer_hint_placeholder")}
+                />
+              </div>
+              <div className="row-actions">
+                <button disabled={busy} onClick={onCheckHallucinationHunter}>
+                  {t("hallucination_check_action")}
+                </button>
+              </div>
+              <h3>{t("hallucination_check_result")}</h3>
+              <pre>{stringifySafe(hallucinationCheckResult)}</pre>
+            </div>
+          </section>
         )}
       </>
     );

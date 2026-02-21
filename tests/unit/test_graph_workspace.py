@@ -665,6 +665,150 @@ class GraphWorkspaceServiceTests(unittest.TestCase):
         self.assertIn("llm_hypothesis", node_types)
         self.assertIn("llm_judgement", node_types)
 
+    def test_hallucination_hunter_report_check_and_debate_guard(self):
+        report = self.svc.project_hallucination_report(
+            {
+                "user_id": "u_hall",
+                "session_id": "s_hall_1",
+                "prompt": "What is the capital of Armenia?",
+                "llm_answer": "The capital is Tbilisi.",
+                "correct_answer": "The capital of Armenia is Yerevan.",
+                "source": "trusted_geo_dataset_v1",
+                "tags": ["geography", "capital"],
+                "severity": "high",
+                "confidence": 0.93,
+            }
+        )
+        self.assertIn("hallucination_branch", report)
+        self.assertIn("case", report)
+        self.assertTrue(report["case"]["created"])
+        self.assertGreaterEqual(report["case"]["occurrence_count"], 1)
+
+        check = self.svc.project_hallucination_check(
+            {
+                "user_id": "u_hall",
+                "prompt": "Tell me the capital of Armenia",
+                "llm_answer": "It is Tbilisi",
+                "top_k": 3,
+            }
+        )
+        self.assertTrue(check["has_known_hallucination_risk"])
+        self.assertGreaterEqual(check["match_count"], 1)
+        top = check["matches"][0]
+        self.assertIn("Yerevan", top.get("correct_answer", ""))
+
+        debate = self.svc.project_llm_debate(
+            {
+                "user_id": "u_hall",
+                "topic": "Prepare a short answer about the capital of Armenia",
+                "hypothesis_count": 2,
+                "attach_to_graph": False,
+            }
+        )
+        self.assertIn("hallucination_guard", debate)
+        self.assertGreaterEqual(int(debate["hallucination_guard"]["hits"]), 1)
+
+    def test_project_archive_verified_chat_with_explicit_model_and_verification(self):
+        def fake_model_resolver(model_path: str):
+            token = str(model_path or "").strip()
+            if "h2o-danube3-4b-chat" not in token:
+                return None
+
+            def _run(_: str) -> str:
+                return json.dumps(
+                    {
+                        "summary": "Add validated planning note and budget status.",
+                        "archive_updates": [
+                            {
+                                "entity": "project_plan",
+                                "field": "next_step",
+                                "operation": "upsert",
+                                "value": "Run benchmark on 10k nodes before release.",
+                                "reason": "Keeps performance risks measurable.",
+                                "source": "internal_test_protocol_v2",
+                                "confidence": 0.83,
+                                "tags": ["performance", "release"],
+                            },
+                            {
+                                "entity": "project_budget",
+                                "field": "status",
+                                "operation": "upsert",
+                                "value": "stable",
+                                "reason": "Current costs are within plan.",
+                                "source": "finance_snapshot_2026_02",
+                                "confidence": 0.79,
+                                "tags": ["budget"],
+                            },
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+
+            return _run
+
+        svc = GraphWorkspaceService(
+            use_env_adapter=False,
+            enable_living_system=False,
+            model_llm_resolver=fake_model_resolver,
+        )
+        out = svc.project_archive_verified_chat(
+            {
+                "user_id": "u_archive",
+                "session_id": "s_archive_1",
+                "message": "Update archive with validated next step and budget status.",
+                "context": "Use practical, low-risk updates only.",
+                "model_path": "models/gguf/textGen/h2o-danube3-4b-chat-Q5_K_M.gguf",
+                "model_role": "general",
+                "apply_to_graph": True,
+                "verification_mode": "strict",
+                "top_k": 3,
+            }
+        )
+        self.assertIn("archive_updates", out)
+        self.assertEqual(len(out["archive_updates"]), 2)
+        self.assertTrue(out["verification"]["verified"])
+        self.assertEqual(out["verification"]["issue_count"], 0)
+        self.assertTrue(str(out.get("assistant_reply", "")).strip())
+        self.assertEqual(out["model"]["resolution_mode"], "explicit_model_path")
+        self.assertTrue(out["graph_binding"]["attached"])
+        node_types = {row.get("type") for row in out["snapshot"]["nodes"]}
+        self.assertIn("llm_archive_update_branch", node_types)
+        self.assertIn("llm_archive_update_session", node_types)
+        self.assertIn("llm_archive_update_record", node_types)
+
+    def test_project_archive_review_apply_allows_edit_and_recheck(self):
+        edited_updates = [
+            {
+                "entity": "project_plan",
+                "field": "next_step",
+                "operation": "upsert",
+                "value": "Run controlled benchmark before rollout.",
+                "reason": "Keeps rollout risk measurable.",
+                "source": "qa_runbook_v3",
+                "confidence": 0.86,
+                "tags": ["qa", "performance"],
+            }
+        ]
+        out = self.svc.project_archive_review_apply(
+            {
+                "user_id": "u_archive_review",
+                "session_id": "s_archive_review_1",
+                "message": "Apply reviewed archive updates",
+                "summary": "Reviewed by user",
+                "archive_updates": edited_updates,
+                "verification_mode": "strict",
+                "apply_to_graph": True,
+                "top_k": 3,
+            }
+        )
+        self.assertIn("archive_updates", out)
+        self.assertEqual(len(out["archive_updates"]), 1)
+        self.assertTrue(out["verification"]["verified"])
+        self.assertIn("assistant_reply", out)
+        self.assertTrue(out["graph_binding"]["attached"])
+        node_types = {row.get("type") for row in out["snapshot"]["nodes"]}
+        self.assertIn("llm_archive_update_record", node_types)
+
 
 if __name__ == "__main__":
     unittest.main()

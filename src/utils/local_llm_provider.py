@@ -451,7 +451,56 @@ def build_role_llm_fn(role: str = ROLE_GENERAL) -> Callable[[str], str] | None:
             _LLM_INSTANCE = llm
             _LLM_FN = fn
             _LLM_UNAVAILABLE = False
-            _LAST_ERROR = ""
+        _LAST_ERROR = ""
+        return fn
+
+
+def build_model_llm_fn(model_path: str) -> Callable[[str], str] | None:
+    """
+    Build or reuse an LLM callable for an explicit GGUF model path.
+
+    The path is normalized to split entrypoint when needed, and must resolve to a
+    valid candidate model file.
+    """
+    raw = str(model_path or "").strip()
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    normalized = _resolve_entrypoint(path)
+    if normalized is None:
+        if path.exists() and path.is_file():
+            _warn(
+                f"[local_llm_provider] WARN: explicit model path is not a valid split entrypoint: {path}. "
+                "Use shard 00001-of-N for split models."
+            )
+        return None
+    if not _is_candidate_gguf(normalized):
+        _warn(f"[local_llm_provider] WARN: explicit model path is not an allowed GGUF candidate: {normalized}")
+        return None
+
+    normalized_path = str(normalized)
+    with _LLM_LOCK:
+        if normalized_path in _PATH_LLM_FN:
+            return _PATH_LLM_FN[normalized_path]
+
+        if Llama is None:
+            if "missing_llama_cpp" not in _ROLE_ERRORS_WARNED:
+                _warn("[local_llm_provider] WARN: llama_cpp python bindings not installed.")
+                _ROLE_ERRORS_WARNED.add("missing_llama_cpp")
+            return None
+
+        try:
+            llm = _build_llm_for_path(normalized_path)
+            if llm is None:
+                return None
+            fn = _make_llm_fn(llm)
+        except Exception as exc:
+            _warn(f"[local_llm_provider] WARN: Failed to initialize explicit model '{normalized_path}': {exc}")
+            _ROLE_ERRORS_WARNED.add(f"init:path:{normalized_path}")
+            return None
+
+        _PATH_LLM_INSTANCE[normalized_path] = llm
+        _PATH_LLM_FN[normalized_path] = fn
         return fn
 
 

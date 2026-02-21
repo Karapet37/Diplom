@@ -33,6 +33,9 @@ _GRAPH_MUTATION_PATHS = {
     "/api/graph/profile/infer",
     "/api/project/user-graph/update",
     "/api/project/llm/debate",
+    "/api/project/hallucination/report",
+    "/api/project/archive/chat",
+    "/api/project/archive/review",
 }
 
 _KNOWLEDGE_MUTATION_PATHS = {
@@ -197,6 +200,7 @@ class RuntimeControlPlane:
             if not flags.allow_prompt_execution and req_path in {
                 "/api/living/prompt/run",
                 "/api/project/llm/debate",
+                "/api/project/archive/chat",
             }:
                 return False, "prompt_execution_disabled"
 

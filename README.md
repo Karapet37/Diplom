@@ -23,6 +23,12 @@ Legacy agent/speech/personalizer modules were removed.
   - focus goals/domain focus/avoid topics,
   - memory notes and default debate roles.
 - `LLM Role Debate` now accepts personalization context and uses it in proposer/critic/judge prompts.
+- `Hallucination Hunter` is added as a dedicated verification branch:
+  - report hallucinations with wrong/correct answers,
+  - reuse known corrections during future debates/checks.
+- `Verified Archive Chat` is added:
+  - user gets conversational assistant reply (not raw JSON),
+  - archive JSON conclusions are reviewed/edited in a separate verification flow.
 - User profile updates accept personalization and explicit feedback items.
 - UI now has `Personalization Studio` with local persistence and auto-apply toggles.
 - Graph UX improvements:
@@ -89,6 +95,28 @@ npm run dev
 
 Open `http://127.0.0.1:5173`.
 
+## Product Usage Flow (Client)
+
+1. Build your personal graph:
+- provide goals, constraints, abilities, and context via UI or `POST /api/project/user-graph/update`.
+- system creates a personal semantic graph (nodes, edges, reasoning context).
+
+2. Simulate a real situation:
+- send a scenario to `POST /api/project/llm/debate`.
+- proposer/critic/judge roles generate alternatives and a final decision path.
+
+3. Analyze and improve your plan:
+- use `POST /api/project/daily-mode` to evaluate progress, risks, and next actions.
+- apply feedback so the next iterations become more personalized.
+
+4. Prevent repeated hallucinations:
+- save wrong answers with `POST /api/project/hallucination/report`.
+- check new answers against known issues with `POST /api/project/hallucination/check`.
+
+5. Chat and archive updates:
+- ask in natural language via `POST /api/project/archive/chat` with selected GGUF model path or role.
+- review/edit generated archive updates separately via `POST /api/project/archive/review`.
+
 ## Local GGUF Models
 
 Put local models in:
@@ -123,6 +151,24 @@ Role-based auto-discovery also works from `models/gguf`:
 - `coder_architect`, `coder_reviewer`, `coder_refactor`, `coder_debug`
 - `analyst`, `creative`, `planner`
 - `translator` (MADLAD priority, translator-only policy)
+
+Current workspace configuration (`.env` in this repository):
+- `general` -> `models/gguf/textGen/mistral-7b-instruct-v0.3-q4_k_m.gguf` (recommended default)
+- `coder_architect` -> `models/gguf/coder/qwen2.5-coder-7b-instruct-q4_k_m-00001-of-00002.gguf`
+- `coder_reviewer` -> `models/gguf/coder/qwen2.5-coder-7b-instruct-q4_k_m-00001-of-00002.gguf`
+- `coder_refactor` -> `models/gguf/coder/qwen2.5-coder-7b-instruct-q4_k_m-00001-of-00002.gguf`
+- `coder_debug` -> `models/gguf/coder/qwen2.5-coder-7b-instruct-q4_k_m-00001-of-00002.gguf`
+- `translator` -> `models/translator/model-q4k.gguf`
+
+Additional local `textGen` models available in this repository:
+- `models/gguf/textGen/mistral-7b-instruct-v0.3-q4_k_m.gguf`
+- `models/gguf/textGen/GLM-4.7-Flash-Q5_K_M.gguf`
+- `models/gguf/textGen/h2o-danube3-4b-chat-Q5_K_M.gguf`
+- `models/gguf/textGen/llama-2-7b-chat.Q4_K_M.gguf`
+
+Suggested usage profile:
+- `mistral-7b-instruct-v0.3` for `general` and planning-heavy tasks.
+- `qwen2.5-coder-7b-instruct` for all `coder_*` roles.
 
 Important:
 - `translate_text` prompt resolves only `translator` role GGUF.
@@ -180,6 +226,10 @@ data/profile_exports/
 - `POST /api/project/demo/watch`
 - `POST /api/project/daily-mode`
 - `POST /api/project/llm/debate`
+- `POST /api/project/hallucination/report`
+- `POST /api/project/hallucination/check`
+- `POST /api/project/archive/chat`
+- `POST /api/project/archive/review`
 - `POST /api/project/user-graph/update`
 - `POST /api/project/autoruns/import`
 - `GET /api/project/model-advisors`
@@ -299,6 +349,21 @@ WebSocket stream notes:
   ]
 }
 ```
+
+## Verified Archive Chat + Review
+
+`POST /api/project/archive/chat`:
+- accepts `message`, optional `context`, and either explicit `model_path` or `model_role`.
+- returns:
+  - `assistant_reply` (conversational answer for chat UI),
+  - `archive_updates` (structured conclusions),
+  - `verification` (issues/warnings/score/verified flag),
+  - `review` block for separate edit-and-apply step.
+
+`POST /api/project/archive/review`:
+- accepts edited `archive_updates`,
+- re-runs verification checks,
+- writes verified/candidate updates into dedicated archive graph branch.
 
 ## Sysinternals Autoruns Integration
 

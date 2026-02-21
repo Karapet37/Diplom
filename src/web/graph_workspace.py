@@ -305,6 +305,29 @@ _DEBATE_DEFAULT_ROLES: dict[str, str] = {
     "judge": "planner",
 }
 
+_HALLUCINATION_BRANCH_NAME = "hallucination_hunter"
+
+_HALLUCINATION_SEVERITY_ALLOWED: tuple[str, ...] = (
+    "low",
+    "medium",
+    "high",
+    "critical",
+)
+
+_ARCHIVE_UPDATE_BRANCH_NAME = "archive_verified_updates"
+
+_ARCHIVE_UPDATE_OPERATIONS_ALLOWED: tuple[str, ...] = (
+    "upsert",
+    "append",
+    "correct",
+    "deprecate",
+)
+
+_ARCHIVE_VERIFICATION_MODES_ALLOWED: tuple[str, ...] = (
+    "strict",
+    "balanced",
+)
+
 _PERSONALIZATION_STYLE_ALLOWED: tuple[str, ...] = (
     "adaptive",
     "concise",
@@ -792,6 +815,7 @@ class GraphWorkspaceService:
         use_env_adapter: bool = True,
         profile_llm_fn: Callable[[str], str] | None = None,
         role_llm_resolver: Callable[[str], Callable[[str], str] | None] | None = None,
+        model_llm_resolver: Callable[[str], Callable[[str], str] | None] | None = None,
         enable_living_system: bool = True,
         living_system_db_path: str = "data/living_system.db",
         workspace_root: str = ".",
@@ -801,6 +825,9 @@ class GraphWorkspaceService:
         self.profile_llm_fn = profile_llm_fn if profile_llm_fn is not None else self._build_profile_llm_fn()
         self.role_llm_resolver = (
             role_llm_resolver if role_llm_resolver is not None else self._build_role_llm_resolver()
+        )
+        self.model_llm_resolver = (
+            model_llm_resolver if model_llm_resolver is not None else self._build_model_llm_resolver()
         )
         self.living_system = (
             LivingSystemEngine(
@@ -831,6 +858,14 @@ class GraphWorkspaceService:
         except Exception:
             return None
         return build_role_llm_fn
+
+    @staticmethod
+    def _build_model_llm_resolver() -> Callable[[str], Callable[[str], str] | None] | None:
+        try:
+            from src.utils.local_llm_provider import build_model_llm_fn
+        except Exception:
+            return None
+        return build_model_llm_fn
 
     @staticmethod
     def _env_flag(name: str, default: bool = True) -> bool:
@@ -1580,6 +1615,596 @@ class GraphWorkspaceService:
         if memory_notes:
             parts.append(f"- memory_notes: {memory_notes[:360]}")
         return "\n".join(parts)
+
+    @staticmethod
+    def _hallucination_signature(*parts: Any) -> str:
+        rows: list[str] = []
+        for part in parts:
+            token = GraphWorkspaceService._normalize_token(part)
+            if token:
+                rows.append(token)
+        if not rows:
+            return ""
+        payload = " | ".join(rows)
+        checksum = int(zlib.crc32(payload.encode("utf-8")) & 0xFFFFFFFF)
+        return f"h{checksum:08x}"
+
+    @staticmethod
+    def _token_set(value: Any) -> set[str]:
+        source = str(value or "").strip().lower()
+        if not source:
+            return set()
+        cleaned = re.sub(r"[^\w]+", " ", source, flags=re.UNICODE)
+        return {item for item in cleaned.split() if len(item) >= 3}
+
+    @staticmethod
+    def _jaccard_similarity(left: set[str], right: set[str]) -> float:
+        if not left or not right:
+            return 0.0
+        union = left | right
+        if not union:
+            return 0.0
+        return float(len(left & right)) / float(len(union))
+
+    def _sanitize_hallucination_payload(self, payload: Mapping[str, Any] | None) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        prompt = " ".join(
+            str(
+                root.get("prompt")
+                or root.get("question")
+                or root.get("query")
+                or root.get("text")
+                or ""
+            ).split()
+        ).strip()
+        llm_answer = " ".join(
+            str(
+                root.get("llm_answer")
+                or root.get("answer")
+                or root.get("hallucinated_answer")
+                or root.get("wrong_answer")
+                or ""
+            ).split()
+        ).strip()
+        correct_answer = " ".join(
+            str(
+                root.get("correct_answer")
+                or root.get("reference_answer")
+                or root.get("ground_truth")
+                or ""
+            ).split()
+        ).strip()
+        source = " ".join(str(root.get("source", "") or "").split()).strip()
+        severity = self._pick_allowed_token(
+            root.get("severity"),
+            allowed=_HALLUCINATION_SEVERITY_ALLOWED,
+            default="medium",
+        )
+        tags = self._dedupe_strings(self._to_list_of_strings(root.get("tags")), limit=16)
+        confidence = self._confidence(root.get("confidence", 0.8), 0.8)
+        metadata = self._as_mapping(root.get("metadata"))
+        return {
+            "prompt": prompt[:1800],
+            "llm_answer": llm_answer[:3200],
+            "correct_answer": correct_answer[:3200],
+            "source": source[:600],
+            "severity": severity,
+            "tags": tags,
+            "confidence": confidence,
+            "metadata": metadata,
+        }
+
+    def _ensure_hallucination_branch_node(self, *, user_id: str):
+        branch_key = f"{user_id}:{_HALLUCINATION_BRANCH_NAME}"
+        branch_node, _ = self._ensure_shared_node(
+            node_type="llm_hallucination_branch",
+            identity_key="branch_key",
+            identity_value=branch_key,
+            attributes={
+                "branch_key": branch_key,
+                "branch_name": _HALLUCINATION_BRANCH_NAME,
+                "user_id": user_id,
+                "name": f"Hallucination Hunter Branch ({user_id})",
+                "description": "Dedicated branch to track hallucinations and verified corrections.",
+            },
+        )
+        branch_node.attributes["last_seen_at"] = float(time.time())
+        return branch_node
+
+    def _hallucination_case_nodes(self, *, user_id: str) -> list[Any]:
+        out: list[Any] = []
+        user_token = " ".join(str(user_id or "").split()).strip()
+        for node in self.api.engine.store.nodes.values():
+            if str(node.type) != "llm_hallucination_case":
+                continue
+            owner = " ".join(str(node.attributes.get("user_id", "") or "").split()).strip()
+            if user_token and owner and owner != user_token:
+                continue
+            out.append(node)
+        return out
+
+    def _match_hallucination_cases(
+        self,
+        *,
+        user_id: str,
+        prompt: str,
+        llm_answer: str = "",
+        top_k: int = 3,
+    ) -> list[dict[str, Any]]:
+        prompt_sig = self._hallucination_signature(user_id, prompt)
+        prompt_tokens = self._token_set(prompt)
+        answer_tokens = self._token_set(llm_answer)
+
+        scored: list[dict[str, Any]] = []
+        for node in self._hallucination_case_nodes(user_id=user_id):
+            attrs = self._as_mapping(node.attributes)
+            score = 0.0
+            reasons: list[str] = []
+
+            case_prompt_sig = str(attrs.get("prompt_signature", "") or "").strip()
+            if prompt_sig and case_prompt_sig and prompt_sig == case_prompt_sig:
+                score += 1.0
+                reasons.append("prompt_signature_match")
+
+            case_prompt_tokens = self._token_set(attrs.get("prompt", ""))
+            prompt_overlap = self._jaccard_similarity(prompt_tokens, case_prompt_tokens)
+            if prompt_overlap > 0.0:
+                score += 0.82 * prompt_overlap
+                if prompt_overlap >= 0.45:
+                    reasons.append("prompt_overlap")
+
+            case_wrong_tokens = self._token_set(attrs.get("hallucinated_answer", ""))
+            answer_overlap = self._jaccard_similarity(answer_tokens, case_wrong_tokens)
+            if answer_overlap > 0.0:
+                score += 0.58 * answer_overlap
+                if answer_overlap >= 0.40:
+                    reasons.append("answer_overlap")
+
+            if score < 0.18:
+                continue
+            scored.append(
+                {
+                    "case_node_id": int(node.id),
+                    "score": round(max(0.0, min(1.0, score)), 4),
+                    "prompt": str(attrs.get("prompt", "") or ""),
+                    "hallucinated_answer": str(attrs.get("hallucinated_answer", "") or ""),
+                    "correct_answer": str(attrs.get("correct_answer", "") or ""),
+                    "source": str(attrs.get("source", "") or ""),
+                    "severity": str(attrs.get("severity", "medium") or "medium"),
+                    "tags": self._to_list_of_strings(attrs.get("tags")),
+                    "occurrence_count": self._to_int(attrs.get("occurrence_count", 1), 1),
+                    "reasons": reasons,
+                }
+            )
+
+        scored.sort(
+            key=lambda row: (
+                float(row.get("score", 0.0)),
+                int(row.get("occurrence_count", 0)),
+            ),
+            reverse=True,
+        )
+        return scored[: max(1, min(10, int(top_k)))]
+
+    def _hallucination_guard_context(self, matches: list[Mapping[str, Any]]) -> str:
+        if not matches:
+            return ""
+        rows: list[str] = [
+            "Hallucination guard memory:",
+            "Avoid repeating known wrong claims and prioritize corrected facts below.",
+        ]
+        for idx, item in enumerate(matches[:3]):
+            wrong = " ".join(str(item.get("hallucinated_answer", "") or "").split()).strip()
+            correct = " ".join(str(item.get("correct_answer", "") or "").split()).strip()
+            source = " ".join(str(item.get("source", "") or "").split()).strip()
+            score = float(item.get("score", 0.0) or 0.0)
+            rows.append(f"- Case {idx + 1} (score={score:.2f})")
+            if wrong:
+                rows.append(f"  wrong: {wrong[:220]}")
+            if correct:
+                rows.append(f"  correct: {correct[:220]}")
+            if source:
+                rows.append(f"  source: {source[:120]}")
+        return "\n".join(rows)
+
+    @staticmethod
+    def _stable_json(value: Any) -> str:
+        try:
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        except Exception:
+            return str(value)
+
+    def _sanitize_archive_chat_payload(self, payload: Mapping[str, Any] | None) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        message = " ".join(
+            str(root.get("message", "") or root.get("prompt", "") or root.get("text", "") or "").split()
+        ).strip()
+        context = " ".join(str(root.get("context", "") or root.get("notes", "") or "").split()).strip()
+        model_path = str(root.get("model_path", "") or "").strip()
+        model_role = self._debate_role(root.get("model_role"), fallback="general")
+        verification_mode = self._pick_allowed_token(
+            root.get("verification_mode"),
+            allowed=_ARCHIVE_VERIFICATION_MODES_ALLOWED,
+            default="strict",
+        )
+        top_k = max(1, min(8, self._to_int(root.get("top_k", 3), 3)))
+        apply_to_graph = self._to_bool(root.get("apply_to_graph", True))
+        return {
+            "message": message[:2400],
+            "context": context[:2400],
+            "model_path": model_path,
+            "model_role": model_role,
+            "verification_mode": verification_mode,
+            "top_k": top_k,
+            "apply_to_graph": apply_to_graph,
+        }
+
+    def _normalize_archive_updates(self, value: Any) -> list[dict[str, Any]]:
+        rows = self._as_list(value)
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in rows:
+            row = self._as_mapping(item)
+            if not row:
+                continue
+            entity = " ".join(str(row.get("entity", "") or row.get("target", "") or "").split()).strip()
+            field = " ".join(str(row.get("field", "") or row.get("path", "") or row.get("key", "") or "").split()).strip()
+            if not entity or not field:
+                continue
+            operation = self._pick_allowed_token(
+                row.get("operation"),
+                allowed=_ARCHIVE_UPDATE_OPERATIONS_ALLOWED,
+                default="upsert",
+            )
+            update_key = self._hallucination_signature(entity, field, operation)
+            if not update_key or update_key in seen:
+                continue
+            seen.add(update_key)
+            out.append(
+                {
+                    "entity": entity[:160],
+                    "field": field[:160],
+                    "operation": operation,
+                    "value": row.get("value"),
+                    "reason": " ".join(str(row.get("reason", "") or row.get("rationale", "") or "").split()).strip()[:800],
+                    "source": " ".join(str(row.get("source", "") or row.get("evidence", "") or "").split()).strip()[:800],
+                    "confidence": self._confidence(row.get("confidence", 0.65), 0.65),
+                    "tags": self._dedupe_strings(self._to_list_of_strings(row.get("tags")), limit=16),
+                }
+            )
+        return out
+
+    def _ensure_archive_branch_node(self, *, user_id: str):
+        branch_key = f"{user_id}:{_ARCHIVE_UPDATE_BRANCH_NAME}"
+        branch_node, _ = self._ensure_shared_node(
+            node_type="llm_archive_update_branch",
+            identity_key="branch_key",
+            identity_value=branch_key,
+            attributes={
+                "branch_key": branch_key,
+                "branch_name": _ARCHIVE_UPDATE_BRANCH_NAME,
+                "user_id": user_id,
+                "name": f"Archive Update Verification Branch ({user_id})",
+                "description": "Stores verified JSON archive updates generated by selected local LLM models.",
+            },
+        )
+        branch_node.attributes["last_seen_at"] = float(time.time())
+        return branch_node
+
+    def _archive_record_nodes(self, *, user_id: str) -> list[Any]:
+        out: list[Any] = []
+        user_token = " ".join(str(user_id or "").split()).strip()
+        for node in self.api.engine.store.nodes.values():
+            if str(node.type) != "llm_archive_update_record":
+                continue
+            owner = " ".join(str(node.attributes.get("user_id", "") or "").split()).strip()
+            if user_token and owner and owner != user_token:
+                continue
+            out.append(node)
+        return out
+
+    def _resolve_archive_chat_llm(
+        self,
+        *,
+        model_path: str,
+        model_role: str,
+    ) -> tuple[Callable[[str], str] | None, str, str]:
+        path_token = str(model_path or "").strip()
+        role_token = self._debate_role(model_role, fallback="general")
+        if path_token and self.model_llm_resolver is not None:
+            try:
+                fn = self.model_llm_resolver(path_token)
+                if fn is not None:
+                    return fn, path_token, "explicit_model_path"
+            except Exception:
+                pass
+        role_fn = self._resolve_debate_llm(role_token)
+        if role_fn is not None:
+            return role_fn, "", f"role:{role_token}"
+        return None, "", "unavailable"
+
+    def _verify_archive_updates(
+        self,
+        *,
+        user_id: str,
+        message: str,
+        updates: list[dict[str, Any]],
+        verification_mode: str,
+        top_k: int,
+    ) -> dict[str, Any]:
+        strict_mode = verification_mode == "strict"
+        issues: list[str] = []
+        warnings: list[str] = []
+        checked = len(updates)
+        min_confidence = 0.62 if strict_mode else 0.5
+
+        if checked <= 0:
+            issues.append("no_updates")
+
+        for idx, row in enumerate(updates):
+            value = row.get("value")
+            if value in ("", None, [], {}):
+                issues.append(f"update_{idx + 1}_empty_value")
+            if not str(row.get("reason", "") or "").strip():
+                issues.append(f"update_{idx + 1}_missing_reason")
+            if strict_mode and not str(row.get("source", "") or "").strip():
+                issues.append(f"update_{idx + 1}_missing_source")
+            if self._confidence(row.get("confidence", 0.0), 0.0) < min_confidence:
+                issues.append(f"update_{idx + 1}_low_confidence")
+
+        llm_answer_text = self._stable_json({"archive_updates": updates})
+        hallucination_matches = self._match_hallucination_cases(
+            user_id=user_id,
+            prompt=message,
+            llm_answer=llm_answer_text,
+            top_k=top_k,
+        )
+        if hallucination_matches:
+            issues.append("known_hallucination_overlap")
+
+        known_records = self._archive_record_nodes(user_id=user_id)
+        value_conflicts: list[dict[str, Any]] = []
+        for row in updates:
+            entity = self._normalize_token(row.get("entity"))
+            field = self._normalize_token(row.get("field"))
+            if not entity or not field:
+                continue
+            new_value_key = self._stable_json(row.get("value"))
+            for node in known_records:
+                attrs = self._as_mapping(node.attributes)
+                if self._normalize_token(attrs.get("entity")) != entity:
+                    continue
+                if self._normalize_token(attrs.get("field")) != field:
+                    continue
+                existing_value = attrs.get("value")
+                existing_value_key = self._stable_json(existing_value)
+                if existing_value_key == new_value_key:
+                    continue
+                value_conflicts.append(
+                    {
+                        "record_node_id": int(node.id),
+                        "entity": str(attrs.get("entity", "") or ""),
+                        "field": str(attrs.get("field", "") or ""),
+                        "existing_value": existing_value,
+                        "candidate_value": row.get("value"),
+                    }
+                )
+        if value_conflicts:
+            if strict_mode:
+                issues.append("conflicts_with_verified_archive")
+            else:
+                warnings.append("conflicts_with_verified_archive")
+
+        score = 1.0 - (0.2 * float(len(issues))) - (0.08 * float(len(warnings)))
+        score = max(0.0, min(1.0, score))
+        return {
+            "verified": len(issues) == 0,
+            "verification_mode": verification_mode,
+            "schema_valid": checked > 0,
+            "issue_count": len(issues),
+            "warning_count": len(warnings),
+            "issues": issues,
+            "warnings": warnings,
+            "checked_updates": checked,
+            "hallucination_guard_hits": len(hallucination_matches),
+            "hallucination_matches": hallucination_matches,
+            "value_conflicts": value_conflicts[:8],
+            "score": round(score, 4),
+        }
+
+    def _coerce_archive_updates_input(self, value: Any) -> list[dict[str, Any]]:
+        source = value
+        if isinstance(source, str):
+            parsed = self._extract_json_from_llm_output(source)
+            if isinstance(parsed, Mapping):
+                source = parsed.get("archive_updates", parsed.get("updates", []))
+            elif isinstance(parsed, list):
+                source = parsed
+            else:
+                source = []
+        elif isinstance(source, Mapping):
+            source = source.get("archive_updates", source.get("updates", []))
+        return self._normalize_archive_updates(source)
+
+    def _attach_archive_updates_to_graph(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        message: str,
+        context: str,
+        summary: str,
+        updates: list[dict[str, Any]],
+        verification: Mapping[str, Any],
+        model_role: str,
+        model_path: str,
+        resolution_mode: str,
+        raw_output: str,
+        verification_mode: str,
+        apply_to_graph: bool,
+    ) -> dict[str, Any]:
+        graph_binding: dict[str, Any] = {
+            "attached": False,
+            "branch_node_id": 0,
+            "session_node_id": 0,
+            "update_node_ids": [],
+        }
+        if not apply_to_graph:
+            return graph_binding
+
+        branch_node = self._ensure_archive_branch_node(user_id=user_id)
+        graph_binding["attached"] = True
+        graph_binding["branch_node_id"] = int(branch_node.id)
+
+        session_node = self.api.engine.create_node(
+            "llm_archive_update_session",
+            attributes={
+                "name": self._to_title(message, fallback="Archive Chat Session", limit=96),
+                "user_id": user_id,
+                "session_id": session_id,
+                "message": message,
+                "context": context,
+                "summary": summary,
+                "model_role": model_role,
+                "model_path": model_path,
+                "resolution_mode": resolution_mode,
+                "verification": dict(verification),
+                "raw_output": raw_output[:6000],
+            },
+            state={"confidence": self._confidence(verification.get("score", 0.0), 0.0)},
+        )
+        graph_binding["session_node_id"] = int(session_node.id)
+        self._connect_nodes(
+            from_node=branch_node.id,
+            to_node=session_node.id,
+            relation_type="tracks_archive_session",
+            weight=self._confidence(verification.get("score", 0.0), 0.0),
+            logic_rule="archive_update_chat",
+            metadata={
+                "verified": bool(verification.get("verified", False)),
+                "verification_mode": verification_mode,
+            },
+        )
+
+        update_node_ids: list[int] = []
+        for idx, row in enumerate(updates):
+            entity = str(row.get("entity", "") or "").strip()
+            field = str(row.get("field", "") or "").strip()
+            operation = str(row.get("operation", "upsert") or "upsert").strip() or "upsert"
+            node_type = (
+                "llm_archive_update_record"
+                if bool(verification.get("verified", False))
+                else "llm_archive_update_candidate"
+            )
+            update_key = self._hallucination_signature(user_id, entity, field, operation)
+            update_node, created = self._ensure_shared_node(
+                node_type=node_type,
+                identity_key="update_key",
+                identity_value=update_key,
+                attributes={
+                    "update_key": update_key,
+                    "user_id": user_id,
+                    "entity": entity,
+                    "field": field,
+                    "operation": operation,
+                    "value": row.get("value"),
+                    "reason": str(row.get("reason", "") or ""),
+                    "source": str(row.get("source", "") or ""),
+                    "tags": self._to_list_of_strings(row.get("tags")),
+                    "verification_mode": verification_mode,
+                    "verified": bool(verification.get("verified", False)),
+                    "first_seen_at": float(time.time()),
+                },
+            )
+            update_node.attributes["entity"] = entity
+            update_node.attributes["field"] = field
+            update_node.attributes["operation"] = operation
+            update_node.attributes["value"] = row.get("value")
+            update_node.attributes["reason"] = str(row.get("reason", "") or "")
+            update_node.attributes["source"] = str(row.get("source", "") or "")
+            update_node.attributes["tags"] = self._to_list_of_strings(row.get("tags"))
+            update_node.attributes["verified"] = bool(verification.get("verified", False))
+            update_node.attributes["last_seen_at"] = float(time.time())
+            prev_count = self._to_int(update_node.attributes.get("occurrence_count", 0), 0)
+            update_node.attributes["occurrence_count"] = max(1, prev_count + 1)
+            if created:
+                update_node.attributes["created_at"] = float(time.time())
+
+            self._connect_nodes(
+                from_node=session_node.id,
+                to_node=update_node.id,
+                relation_type="proposes_archive_update",
+                weight=self._confidence(row.get("confidence", 0.65), 0.65),
+                logic_rule=(
+                    "archive_update_verified"
+                    if bool(verification.get("verified", False))
+                    else "archive_update_candidate"
+                ),
+                metadata={
+                    "index": idx + 1,
+                    "operation": operation,
+                    "verified": bool(verification.get("verified", False)),
+                },
+            )
+            update_node_ids.append(int(update_node.id))
+        graph_binding["update_node_ids"] = update_node_ids
+        return graph_binding
+
+    def _build_archive_chat_reply(
+        self,
+        *,
+        message: str,
+        summary: str,
+        updates: list[Mapping[str, Any]],
+        verification: Mapping[str, Any],
+    ) -> str:
+        is_russian = bool(re.search(r"[А-Яа-яЁё]", str(message or "")))
+        verified = bool(verification.get("verified", False))
+        issue_count = int(verification.get("issue_count", 0) or 0)
+        update_count = len(updates)
+
+        preview_tokens: list[str] = []
+        for row in updates[:3]:
+            entity = str(row.get("entity", "") or "").strip()
+            field = str(row.get("field", "") or "").strip()
+            if entity and field:
+                preview_tokens.append(f"{entity}.{field}")
+            elif entity:
+                preview_tokens.append(entity)
+        preview = ", ".join(preview_tokens)
+
+        if is_russian:
+            parts: list[str] = []
+            if summary:
+                parts.append(summary)
+            if verified:
+                parts.append(f"Подготовил {update_count} проверенных обновлений архива.")
+            else:
+                parts.append(
+                    f"Сформировал {update_count} обновлений, но проверка нашла проблемы ({issue_count})."
+                )
+            if preview:
+                parts.append(f"Основные изменения: {preview}.")
+            issues = self._to_list_of_strings(verification.get("issues"))[:3]
+            if issues:
+                parts.append(f"Нужно поправить: {', '.join(issues)}.")
+            parts.append("Проверь и отредактируй выводы в блоке review справа.")
+            return " ".join(item for item in parts if item).strip()
+
+        parts = []
+        if summary:
+            parts.append(summary)
+        if verified:
+            parts.append(f"I prepared {update_count} verified archive updates.")
+        else:
+            parts.append(f"I drafted {update_count} updates, but verification found issues ({issue_count}).")
+        if preview:
+            parts.append(f"Main changes: {preview}.")
+        issues = self._to_list_of_strings(verification.get("issues"))[:3]
+        if issues:
+            parts.append(f"Please resolve: {', '.join(issues)}.")
+        parts.append("Review and edit the conclusions in the review panel.")
+        return " ".join(item for item in parts if item).strip()
 
     @staticmethod
     def _split_sentences(text: str, *, limit: int = 6) -> list[str]:
@@ -5076,6 +5701,8 @@ class GraphWorkspaceService:
                 "autoruns_import": True,
                 "model_advisors": True,
                 "llm_role_debate": True,
+                "hallucination_hunter": True,
+                "archive_verified_chat": True,
             },
         }
 
@@ -5104,6 +5731,383 @@ class GraphWorkspaceService:
             "advisors": advisor_payload,
             "prompts": prompt_catalog,
             "timestamp": time.time(),
+        }
+
+    def project_hallucination_report(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        user_id = str(payload.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(payload.get("session_id", "") or "").strip()
+        sanitized = self._sanitize_hallucination_payload(payload)
+
+        prompt = str(sanitized.get("prompt", "") or "").strip()
+        llm_answer = str(sanitized.get("llm_answer", "") or "").strip()
+        correct_answer = str(sanitized.get("correct_answer", "") or "").strip()
+        if not prompt:
+            raise ValueError("prompt is required")
+        if not llm_answer:
+            raise ValueError("llm_answer is required")
+        if not correct_answer:
+            raise ValueError("correct_answer is required")
+
+        branch_node = self._ensure_hallucination_branch_node(user_id=user_id)
+        case_key = self._hallucination_signature(user_id, prompt, llm_answer)
+        prompt_signature = self._hallucination_signature(user_id, prompt)
+        wrong_signature = self._hallucination_signature(user_id, llm_answer)
+        correct_signature = self._hallucination_signature(user_id, correct_answer)
+
+        case_node, created = self._ensure_shared_node(
+            node_type="llm_hallucination_case",
+            identity_key="case_key",
+            identity_value=case_key,
+            attributes={
+                "case_key": case_key,
+                "user_id": user_id,
+                "session_id": session_id,
+                "name": self._to_title(prompt, fallback="LLM Hallucination Case", limit=110),
+                "prompt": prompt,
+                "hallucinated_answer": llm_answer,
+                "correct_answer": correct_answer,
+                "source": str(sanitized.get("source", "") or ""),
+                "severity": str(sanitized.get("severity", "medium") or "medium"),
+                "confidence": self._confidence(sanitized.get("confidence", 0.8), 0.8),
+                "tags": self._to_list_of_strings(sanitized.get("tags")),
+                "metadata": self._as_mapping(sanitized.get("metadata")),
+                "prompt_signature": prompt_signature,
+                "wrong_signature": wrong_signature,
+                "correct_signature": correct_signature,
+                "occurrence_count": 0,
+            },
+        )
+
+        case_node.attributes["prompt"] = prompt
+        case_node.attributes["hallucinated_answer"] = llm_answer
+        case_node.attributes["correct_answer"] = correct_answer
+        case_node.attributes["source"] = str(sanitized.get("source", "") or "")
+        case_node.attributes["severity"] = str(sanitized.get("severity", "medium") or "medium")
+        case_node.attributes["confidence"] = self._confidence(sanitized.get("confidence", 0.8), 0.8)
+        case_node.attributes["tags"] = self._to_list_of_strings(sanitized.get("tags"))
+        case_node.attributes["metadata"] = self._as_mapping(sanitized.get("metadata"))
+        case_node.attributes["prompt_signature"] = prompt_signature
+        case_node.attributes["wrong_signature"] = wrong_signature
+        case_node.attributes["correct_signature"] = correct_signature
+        case_node.attributes["updated_at"] = float(time.time())
+        if created:
+            case_node.attributes["created_at"] = float(time.time())
+
+        prev_occurrence = self._to_int(case_node.attributes.get("occurrence_count", 0), 0)
+        case_node.attributes["occurrence_count"] = max(1, prev_occurrence + 1)
+
+        self._connect_nodes(
+            from_node=int(branch_node.id),
+            to_node=int(case_node.id),
+            relation_type="tracks_hallucination",
+            weight=self._confidence(case_node.attributes.get("confidence", 0.8), 0.8),
+            logic_rule="hallucination_hunter_report",
+            metadata={
+                "severity": str(case_node.attributes.get("severity", "medium") or "medium"),
+                "occurrence_count": int(case_node.attributes.get("occurrence_count", 1) or 1),
+            },
+        )
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "hallucination_reported",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "case_node_id": int(case_node.id),
+                "created": bool(created),
+                "severity": str(case_node.attributes.get("severity", "medium") or "medium"),
+                "occurrence_count": int(case_node.attributes.get("occurrence_count", 1) or 1),
+            },
+        )
+
+        similar = self._match_hallucination_cases(
+            user_id=user_id,
+            prompt=prompt,
+            llm_answer=llm_answer,
+            top_k=3,
+        )
+        return {
+            "hallucination_branch": {
+                "branch_name": _HALLUCINATION_BRANCH_NAME,
+                "branch_node_id": int(branch_node.id),
+                "user_id": user_id,
+            },
+            "case": {
+                "case_node_id": int(case_node.id),
+                "case_key": case_key,
+                "created": bool(created),
+                "occurrence_count": int(case_node.attributes.get("occurrence_count", 1) or 1),
+                "severity": str(case_node.attributes.get("severity", "medium") or "medium"),
+                "confidence": self._confidence(case_node.attributes.get("confidence", 0.8), 0.8),
+            },
+            "guard_matches": similar,
+            **self.snapshot_payload(),
+        }
+
+    def project_hallucination_check(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        user_id = str(payload.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        prompt = " ".join(
+            str(payload.get("prompt", "") or payload.get("question", "") or payload.get("text", "") or "").split()
+        ).strip()
+        llm_answer = " ".join(str(payload.get("llm_answer", "") or payload.get("answer", "") or "").split()).strip()
+        if not prompt and not llm_answer:
+            raise ValueError("prompt or llm_answer is required")
+        top_k = max(1, min(10, self._to_int(payload.get("top_k", 3), 3)))
+
+        query_text = prompt or llm_answer
+        matches = self._match_hallucination_cases(
+            user_id=user_id,
+            prompt=query_text,
+            llm_answer=llm_answer,
+            top_k=top_k,
+        )
+        guard = self._hallucination_guard_context(matches)
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "hallucination_checked",
+            {
+                "user_id": user_id,
+                "matches": len(matches),
+                "query_present": bool(prompt),
+                "answer_present": bool(llm_answer),
+            },
+        )
+
+        return {
+            "user_id": user_id,
+            "query": {
+                "prompt": prompt,
+                "llm_answer": llm_answer,
+            },
+            "matches": matches,
+            "guard_context": guard,
+            "has_known_hallucination_risk": bool(matches),
+            "match_count": len(matches),
+            **self.snapshot_payload(),
+        }
+
+    def project_archive_verified_chat(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        user_id = str(payload.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(payload.get("session_id", "") or "").strip()
+        sanitized = self._sanitize_archive_chat_payload(payload)
+        message = str(sanitized.get("message", "") or "").strip()
+        if not message:
+            raise ValueError("message is required")
+
+        context = str(sanitized.get("context", "") or "").strip()
+        model_path = str(sanitized.get("model_path", "") or "").strip()
+        model_role = str(sanitized.get("model_role", "general") or "general").strip() or "general"
+        top_k = max(1, min(8, self._to_int(sanitized.get("top_k", 3), 3)))
+        verification_mode = str(sanitized.get("verification_mode", "strict") or "strict").strip() or "strict"
+        apply_to_graph = self._to_bool(sanitized.get("apply_to_graph", True))
+
+        llm_fn, selected_model_path, resolution_mode = self._resolve_archive_chat_llm(
+            model_path=model_path,
+            model_role=model_role,
+        )
+        if llm_fn is None:
+            raise ValueError("archive chat model is unavailable; configure LOCAL_GGUF_MODEL or provide valid model_path")
+
+        update_schema = (
+            "{\n"
+            '  "summary": "short summary",\n'
+            '  "archive_updates": [\n'
+            "    {\n"
+            '      "entity": "string",\n'
+            '      "field": "string",\n'
+            '      "operation": "upsert|append|correct|deprecate",\n'
+            '      "value": "any-json-value",\n'
+            '      "reason": "why this update is needed",\n'
+            '      "source": "verified source or evidence",\n'
+            '      "confidence": 0.0,\n'
+            '      "tags": ["optional"]\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+        )
+
+        prompt = (
+            "You are a verification-first archive update assistant.\n"
+            "Task: produce only safe JSON updates for knowledge archive maintenance.\n"
+            "Rules:\n"
+            "- Output JSON only, no markdown.\n"
+            "- Do not invent facts; if uncertain, set lower confidence and include why.\n"
+            "- Include `source` for each update.\n"
+            "- Keep updates concise and practical.\n"
+            f"Verification mode: {verification_mode}\n"
+            f"User message: {message}\n"
+            f"Context: {context}\n"
+            "Return JSON with this schema:\n"
+            f"{update_schema}"
+        )
+
+        raw_output = ""
+        try:
+            raw_output = str(llm_fn(prompt) or "").strip()
+        except Exception:
+            raw_output = ""
+
+        parsed_output = self._extract_json_from_llm_output(raw_output)
+        updates: list[dict[str, Any]] = []
+        summary = ""
+        if isinstance(parsed_output, Mapping):
+            summary = " ".join(str(parsed_output.get("summary", "") or "").split()).strip()
+            updates = self._normalize_archive_updates(
+                parsed_output.get("archive_updates", parsed_output.get("updates", []))
+            )
+        elif isinstance(parsed_output, list):
+            updates = self._normalize_archive_updates(parsed_output)
+
+        verification = self._verify_archive_updates(
+            user_id=user_id,
+            message=message,
+            updates=updates,
+            verification_mode=verification_mode,
+            top_k=top_k,
+        )
+
+        selected_path = selected_model_path or model_path
+        graph_binding = self._attach_archive_updates_to_graph(
+            user_id=user_id,
+            session_id=session_id,
+            message=message,
+            context=context,
+            summary=summary,
+            updates=updates,
+            verification=verification,
+            model_role=model_role,
+            model_path=selected_path,
+            resolution_mode=resolution_mode,
+            raw_output=raw_output,
+            verification_mode=verification_mode,
+            apply_to_graph=apply_to_graph,
+        )
+        assistant_reply = self._build_archive_chat_reply(
+            message=message,
+            summary=summary,
+            updates=updates,
+            verification=verification,
+        )
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "archive_update_chat_completed",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "model_role": model_role,
+                "model_path": selected_path,
+                "resolution_mode": resolution_mode,
+                "verified": bool(verification.get("verified", False)),
+                "updates_count": len(updates),
+                "hallucination_guard_hits": int(verification.get("hallucination_guard_hits", 0) or 0),
+                "verification_mode": verification_mode,
+                "attached_to_graph": bool(graph_binding.get("attached", False)),
+            },
+        )
+
+        return {
+            "user_id": user_id,
+            "session_id": session_id,
+            "model": {
+                "requested_model_path": model_path,
+                "selected_model_path": selected_path,
+                "model_role": model_role,
+                "resolution_mode": resolution_mode,
+            },
+            "input": {
+                "message": message,
+                "context": context,
+            },
+            "assistant_reply": assistant_reply,
+            "summary": summary,
+            "archive_updates": updates,
+            "verification": verification,
+            "graph_binding": graph_binding,
+            "review": {
+                "summary": summary,
+                "archive_updates": updates,
+                "verification": verification,
+            },
+            "raw_output": raw_output[:6000],
+            **self.snapshot_payload(),
+        }
+
+    def project_archive_review_apply(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        user_id = str(payload.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(payload.get("session_id", "") or "").strip()
+        message = " ".join(
+            str(payload.get("message", "") or payload.get("prompt", "") or "Manual archive review draft").split()
+        ).strip()
+        context = " ".join(str(payload.get("context", "") or "").split()).strip()
+        verification_mode = self._pick_allowed_token(
+            payload.get("verification_mode"),
+            allowed=_ARCHIVE_VERIFICATION_MODES_ALLOWED,
+            default="strict",
+        )
+        top_k = max(1, min(8, self._to_int(payload.get("top_k", 3), 3)))
+        apply_to_graph = self._to_bool(payload.get("apply_to_graph", True))
+        summary = " ".join(str(payload.get("summary", "") or "").split()).strip()
+
+        updates_input = payload.get("archive_updates", payload.get("updates", payload.get("review_json", [])))
+        updates = self._coerce_archive_updates_input(updates_input)
+        if not updates:
+            raise ValueError("archive_updates is required")
+
+        verification = self._verify_archive_updates(
+            user_id=user_id,
+            message=message,
+            updates=updates,
+            verification_mode=verification_mode,
+            top_k=top_k,
+        )
+        graph_binding = self._attach_archive_updates_to_graph(
+            user_id=user_id,
+            session_id=session_id,
+            message=message,
+            context=context,
+            summary=summary,
+            updates=updates,
+            verification=verification,
+            model_role="general",
+            model_path="manual_review",
+            resolution_mode="manual_review",
+            raw_output=self._stable_json({"archive_updates": updates}),
+            verification_mode=verification_mode,
+            apply_to_graph=apply_to_graph,
+        )
+        assistant_reply = self._build_archive_chat_reply(
+            message=message,
+            summary=summary,
+            updates=updates,
+            verification=verification,
+        )
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "archive_update_review_applied",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "verified": bool(verification.get("verified", False)),
+                "updates_count": len(updates),
+                "verification_mode": verification_mode,
+                "attached_to_graph": bool(graph_binding.get("attached", False)),
+            },
+        )
+
+        return {
+            "user_id": user_id,
+            "session_id": session_id,
+            "assistant_reply": assistant_reply,
+            "summary": summary,
+            "archive_updates": updates,
+            "verification": verification,
+            "graph_binding": graph_binding,
+            "review": {
+                "summary": summary,
+                "archive_updates": updates,
+                "verification": verification,
+            },
+            **self.snapshot_payload(),
         }
 
     def project_llm_debate(self, payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -5143,6 +6147,13 @@ class GraphWorkspaceService:
         )
 
         personalization_context = self._personalization_prompt_context(personalization)
+        hallucination_matches = self._match_hallucination_cases(
+            user_id=user_id,
+            prompt=topic,
+            llm_answer="",
+            top_k=3,
+        )
+        hallucination_guard = self._hallucination_guard_context(hallucination_matches)
 
         proposer_llm = self._resolve_debate_llm(proposer_role)
         critic_llm = self._resolve_debate_llm(critic_role)
@@ -5161,6 +6172,7 @@ class GraphWorkspaceService:
                     "judge": judge_role,
                 },
                 "personalization_enabled": bool(personalization),
+                "hallucination_guard_hits": len(hallucination_matches),
             },
         )
 
@@ -5168,6 +6180,7 @@ class GraphWorkspaceService:
             "You are a hypothesis proposer for graph-based reasoning.\n"
             f"Task: {topic}\n"
             f"{personalization_context}\n"
+            f"{hallucination_guard}\n"
             f"Generate {hypothesis_count} distinct hypotheses.\n"
             "Return JSON only:\n"
             "{\n"
@@ -5225,6 +6238,7 @@ class GraphWorkspaceService:
                 "You are a contradiction and risk critic.\n"
                 f"Task: {topic}\n"
                 f"{personalization_context}\n"
+                f"{hallucination_guard}\n"
                 f"Hypothesis #{idx + 1}: {hypothesis.get('claim', '')}\n"
                 "Return JSON only:\n"
                 "{\n"
@@ -5268,6 +6282,7 @@ class GraphWorkspaceService:
             "You are the final judge for a multi-role LLM debate.\n"
             f"Task: {topic}\n"
             f"{personalization_context}\n"
+            f"{hallucination_guard}\n"
             f"Hypotheses: {json.dumps(hypotheses, ensure_ascii=False)}\n"
             f"Critiques: {json.dumps(critiques, ensure_ascii=False)}\n"
             "Return JSON only:\n"
@@ -5356,6 +6371,7 @@ class GraphWorkspaceService:
                     },
                     "personalization": personalization,
                     "feedback_summary": feedback_summary,
+                    "hallucination_guard_hits": len(hallucination_matches),
                 },
                 state={"confidence": self._confidence(verdict.get("confidence", 0.6), 0.6)},
             )
@@ -5456,6 +6472,7 @@ class GraphWorkspaceService:
                 "confidence": self._confidence(verdict.get("confidence", 0.6), 0.6),
                 "attached_to_graph": bool(graph_binding.get("attached", False)),
                 "personalization_enabled": bool(personalization),
+                "hallucination_guard_hits": len(hallucination_matches),
             },
         )
 
@@ -5465,6 +6482,11 @@ class GraphWorkspaceService:
             "session_id": session_id,
             "personalization": personalization,
             "feedback_summary": feedback_summary,
+            "hallucination_guard": {
+                "hits": len(hallucination_matches),
+                "matches": hallucination_matches,
+                "context": hallucination_guard,
+            },
             "roles": {
                 "proposer": proposer_role,
                 "critic": critic_role,

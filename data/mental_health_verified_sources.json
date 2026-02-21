@@ -1,0 +1,35 @@
+{
+  "sources": [
+    {
+      "title": "NIMH: Caring for Your Mental Health",
+      "topic": "self-care",
+      "url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health"
+    },
+    {
+      "title": "CDC: Mental Health and Coping During Stressful Events",
+      "topic": "stress",
+      "url": "https://www.cdc.gov/mentalhealth/stress-coping/index.html"
+    },
+    {
+      "title": "Samhsa: 988 Suicide and Crisis Lifeline",
+      "topic": "crisis",
+      "url": "https://www.samhsa.gov/find-help/988"
+    },
+    {
+      "title": "988 Lifeline",
+      "topic": "crisis",
+      "url": "https://988lifeline.org/"
+    },
+    {
+      "title": "WHO: Mental Health",
+      "topic": "general",
+      "url": "https://www.who.int/health-topics/mental-health"
+    },
+    {
+      "title": "NHS: Every Mind Matters",
+      "topic": "self-care",
+      "url": "https://www.nhs.uk/every-mind-matters/"
+    }
+  ],
+  "version": 1
+}

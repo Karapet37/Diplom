@@ -1,0 +1,150 @@
+# Autonomous Graph Test Texts
+# Purpose: sample text payloads for node analysis and graph construction.
+# Format: each block can be ingested as free text or parsed by markers.
+
+[HUMAN_PROFILE]
+id_hint: h1
+first_name: Elena
+last_name: Markova
+bio:
+I design data systems for product teams and optimize decision loops.
+I prefer rigorous analysis, long-term planning, and measurable outcomes.
+employment:
+status=senior data scientist; importance=0.92; company=Aurora Analytics; industry=AI SaaS
+
+[HUMAN_PROFILE]
+id_hint: h2
+first_name: Aram
+last_name: Sargsyan
+bio:
+I build resilient backend systems and mentor junior engineers.
+I value reliability, low latency, and clear ownership boundaries.
+employment:
+status=founder; importance=0.95; company=Graph Forge; industry=Infra Tools
+
+[HUMAN_PROFILE]
+id_hint: h3
+first_name: Nora
+last_name: Kim
+bio:
+I manage cross-functional teams and convert ambiguous goals into executable plans.
+I like structured communication and iterative experimentation.
+employment:
+status=operations lead; importance=0.78; company=Northlight Group; industry=Holding
+
+[COMPANY_PROFILE]
+id_hint: c1
+name: Aurora Analytics
+industry: AI SaaS
+description:
+Provides analytical platforms for retail forecasting and anomaly detection.
+parent_company: Northlight Group
+
+[COMPANY_PROFILE]
+id_hint: c2
+name: Graph Forge
+industry: Infra Tools
+description:
+Develops graph processing middleware for high-throughput event systems.
+parent_company:
+
+[COMPANY_PROFILE]
+id_hint: c3
+name: Northlight Group
+industry: Holding
+description:
+Strategic holding with multiple subsidiaries in analytics and enterprise software.
+parent_company:
+
+[RELATION_FACT]
+from: h2
+to: c2
+relation: owns
+weight: 0.88
+reason: founder status and equity control
+
+[RELATION_FACT]
+from: c1
+to: c3
+relation: part_of
+weight: 0.90
+reason: corporate hierarchy
+
+[RELATION_FACT]
+from: c3
+to: c1
+relation: influences
+weight: 0.75
+reason: board strategy and capital allocation
+
+[RELATION_FACT]
+from: c2
+to: c1
+relation: competes_with
+weight: 0.52
+reason: overlapping analytics market segment
+
+[EVENT]
+timestamp: 2026-01-10T09:15:00Z
+event_type: product_launch
+text:
+Aurora Analytics released a new forecasting engine and expanded enterprise contracts.
+expected_effect:
+target=c1; state=influence; reward=+0.25
+
+[EVENT]
+timestamp: 2026-01-24T14:20:00Z
+event_type: outage
+text:
+Graph Forge experienced a four-hour platform outage with delayed customer response.
+expected_effect:
+target=c2; state=trust; reward=-0.30
+
+[EVENT]
+timestamp: 2026-02-01T11:05:00Z
+event_type: hiring_signal
+text:
+Northlight Group hired a principal risk officer and announced stricter compliance controls.
+expected_effect:
+target=c3; state=risk; reward=-0.10
+
+[BIO_STRESS_TEST]
+id_hint: h4
+first_name: Mila
+bio:
+I feel constant pressure and fear that every decision will fail.
+Still, I keep documenting metrics and trying to improve system quality.
+employment:
+status=data analyst; importance=0.67; company=Aurora Analytics
+
+[BIO_CREATIVE_TEST]
+id_hint: h5
+first_name: Leon
+bio:
+I explore design variants, narrative prototypes, and unconventional product ideas.
+I collaborate with users and quickly test concept sketches.
+employment:
+status=product designer; importance=0.71; company=Graph Forge
+
+[NOISE_INPUT]
+text:
+random tokens ... maybe typo ... but includes words: analysis growth risk team design
+expected_behavior:
+Analyzer should still produce non-empty mindset/outlook/cognitive profile.
+
+[MULTILINGUAL_HINT]
+text:
+The team reports: rast, uspekh, and risk mitigation in every sprint.
+expected_behavior:
+Mixed-language tokens should not break heuristic topic extraction.
+
+[EDGE_LEARNING_FEEDBACK]
+event_reference:
+relation=influences; source=c3; target=c1
+reward_cycle:
+round1=+0.40
+round2=+0.10
+round3=-0.20
+expected_behavior:
+Edge weight increases after positive feedback and decreases after negative feedback.
+
