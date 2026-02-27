@@ -809,6 +809,279 @@ class GraphWorkspaceServiceTests(unittest.TestCase):
         node_types = {row.get("type") for row in out["snapshot"]["nodes"]}
         self.assertIn("llm_archive_update_record", node_types)
 
+    def test_project_personal_tree_ingest_creates_summary_points_and_source(self):
+        out = self.svc.project_personal_tree_ingest(
+            {
+                "user_id": "u_tree",
+                "session_id": "sess_tree_1",
+                "title": "Law review",
+                "topic": "Contract obligations",
+                "text": (
+                    "Article 12 defines core obligations for both parties. "
+                    "The law emphasizes written notice and delivery evidence. "
+                    "A breach triggers compensation and corrective actions."
+                ),
+                "source_type": "law",
+                "source_url": "https://example.org/law/contract",
+                "source_title": "Contract Law Extract",
+                "max_points": 4,
+            }
+        )
+        self.assertIn("extraction", out)
+        self.assertTrue(str(out["extraction"].get("summary", "")).strip())
+        self.assertTrue(out["extraction"].get("points"))
+        self.assertIn("tree", out)
+        tree = out["tree"]
+        self.assertGreaterEqual(int(tree["stats"]["node_count"]), 3)
+        node_types = {row.get("type") for row in tree.get("nodes", [])}
+        self.assertIn("thought_summary_node", node_types)
+        self.assertIn("thought_point_node", node_types)
+        self.assertIn("source_reference", node_types)
+
+    def test_project_personal_tree_note_and_view(self):
+        saved = self.svc.project_personal_tree_note(
+            {
+                "user_id": "u_tree_note",
+                "session_id": "sess_note_1",
+                "title": "Idea",
+                "note": "Use a focused mini-tree for legal risk analysis.",
+                "tags": ["idea", "risk", "law"],
+                "links": ["https://example.org/article/1"],
+                "source_type": "article",
+                "source_url": "https://example.org/article/1",
+                "source_title": "Article One",
+            }
+        )
+        self.assertIn("note", saved)
+        note_node_id = int(saved["note"]["node_id"])
+        self.assertGreater(note_node_id, 0)
+        self.assertIn("persisted", saved)
+
+        viewed = self.svc.project_personal_tree_view(
+            {
+                "user_id": "u_tree_note",
+                "focus_node_id": note_node_id,
+                "max_nodes": 80,
+            }
+        )
+        self.assertIn("tree", viewed)
+        tree = viewed["tree"]
+        self.assertGreaterEqual(int(tree["stats"]["node_count"]), 2)
+        self.assertTrue(tree.get("notes"))
+        self.assertTrue(tree.get("sources"))
+
+    def test_project_packages_manage_store_purge_restore(self):
+        stored = self.svc.project_packages_manage(
+            {
+                "user_id": "u_pkg",
+                "session_id": "s_pkg",
+                "package_name": "inbox",
+                "action": "store",
+                "items": [
+                    "Temporary tmp draft for old migration",
+                    "Validated release checklist for deployment",
+                ],
+                "classify_with_llm": False,
+            }
+        )
+        self.assertIn("items", stored)
+        self.assertGreaterEqual(len(stored["items"]), 2)
+
+        purged = self.svc.project_packages_manage(
+            {
+                "user_id": "u_pkg",
+                "session_id": "s_pkg",
+                "package_name": "inbox",
+                "action": "purge",
+                "apply_changes": True,
+                "confirmation": "confirm",
+            }
+        )
+        self.assertIn("changed_item_ids", purged)
+        self.assertTrue(purged["changed_item_ids"])
+
+        restore_target = int(purged["changed_item_ids"][0])
+        restored = self.svc.project_packages_manage(
+            {
+                "user_id": "u_pkg",
+                "session_id": "s_pkg",
+                "package_name": "inbox",
+                "action": "restore",
+                "item_node_ids": [restore_target],
+                "apply_changes": True,
+                "confirmation": "confirm",
+            }
+        )
+        restored_rows = [row for row in restored["items"] if int(row.get("node_id", 0)) == restore_target]
+        self.assertTrue(restored_rows)
+        self.assertEqual(str(restored_rows[0].get("status", "")), "active")
+
+    def test_project_memory_namespace_apply_and_view(self):
+        node_out = self.svc.create_node(
+            {
+                "node_type": "generic",
+                "attributes": {
+                    "user_id": "u_ns",
+                    "name": "Risk checklist node",
+                    "summary": "Risk checklist and mitigation tasks",
+                    "namespace": "personal",
+                },
+            }
+        )
+        node_id = int(node_out["node"]["id"])
+        applied = self.svc.project_memory_namespace_apply(
+            {
+                "user_id": "u_ns",
+                "session_id": "s_ns",
+                "namespace": "experiment",
+                "scope": "owned",
+                "node_ids": [node_id],
+                "apply_changes": True,
+                "confirmation": "confirm",
+            }
+        )
+        self.assertEqual(int(applied["affected_count"]), 1)
+        self.assertTrue(applied["policy"]["apply_allowed"])
+
+        viewed = self.svc.project_memory_namespace_view(
+            {
+                "user_id": "u_ns",
+                "scope": "owned",
+                "max_nodes": 50,
+            }
+        )
+        self.assertIn("namespace_counts", viewed)
+        self.assertGreaterEqual(int(viewed["namespace_counts"].get("experiment", 0)), 1)
+
+    def test_project_graph_rag_contradiction_task_risk(self):
+        self.svc.create_node(
+            {
+                "node_type": "generic",
+                "attributes": {
+                    "user_id": "u_ai",
+                    "name": "Release policy",
+                    "summary": "System must deploy after legal review is complete.",
+                    "namespace": "personal",
+                },
+            }
+        )
+        self.svc.create_node(
+            {
+                "node_type": "generic",
+                "attributes": {
+                    "user_id": "u_ai",
+                    "name": "Emergency policy",
+                    "summary": "System must not deploy before legal review.",
+                    "namespace": "personal",
+                },
+            }
+        )
+        rag = self.svc.project_graph_rag_query(
+            {
+                "query": "legal review before deploy",
+                "user_id": "u_ai",
+                "scope": "owned",
+                "use_llm": False,
+                "top_k": 4,
+            }
+        )
+        self.assertIn("hits", rag)
+        self.assertTrue(rag["hits"])
+        self.assertTrue(str(rag.get("answer", "")).strip())
+
+        contradictions = self.svc.project_contradiction_scan(
+            {
+                "user_id": "u_ai",
+                "scope": "owned",
+                "max_nodes": 80,
+                "top_k": 10,
+                "apply_to_graph": True,
+                "confirmation": "confirm",
+            }
+        )
+        self.assertGreaterEqual(int(contradictions["issue_count"]), 1)
+        self.assertTrue(contradictions["graph_binding"]["attached"])
+
+        board = self.svc.project_task_risk_board(
+            {
+                "user_id": "u_ai",
+                "session_id": "s_board",
+                "tasks": [
+                    {"title": "Finalize legal approval for release", "description": "deadline this week"},
+                    {"title": "Prepare optional UI polish draft"},
+                ],
+                "apply_to_graph": True,
+                "confirmation": "confirm",
+            }
+        )
+        self.assertEqual(int(board["task_count"]), 2)
+        self.assertTrue(board["graph_binding"]["attached"])
+
+    def test_project_timeline_policy_quality_backup_and_audit(self):
+        policy = self.svc.project_llm_policy_update(
+            {
+                "mode": "assisted_autonomy",
+                "trusted_users": ["u_backup"],
+                "allow_apply_for_actions": ["backup_restore"],
+                "merge_lists": True,
+            }
+        )
+        self.assertTrue(policy["ok"])
+        self.assertEqual(str(policy["policy"]["mode"]), "assisted_autonomy")
+
+        self.svc.create_node(
+            {
+                "node_type": "generic",
+                "attributes": {
+                    "user_id": "u_backup",
+                    "name": "Backup anchor node",
+                    "summary": "Anchor for backup restore test",
+                    "namespace": "personal",
+                },
+            }
+        )
+
+        quality = self.svc.project_quality_harness(
+            {
+                "user_id": "u_backup",
+                "sample_queries": ["backup anchor node"],
+            }
+        )
+        self.assertIn("score", quality)
+        self.assertGreaterEqual(float(quality["score"]), 0.0)
+
+        created = self.svc.project_backup_create(
+            {
+                "label": "unit_test",
+                "user_id": "u_backup",
+                "include_events": True,
+                "event_limit": 200,
+            }
+        )
+        self.assertTrue(created["ok"])
+        backup_path = str(created["path"])
+        self.assertTrue(Path(backup_path).exists())
+
+        restored = self.svc.project_backup_restore(
+            {
+                "path": backup_path,
+                "user_id": "u_backup",
+                "session_id": "s_restore",
+                "apply_changes": True,
+                "confirmation": "confirm",
+            }
+        )
+        self.assertTrue(restored["applied"])
+        self.assertGreaterEqual(int(restored["result"]["created_nodes"]), 1)
+
+        timeline = self.svc.project_timeline_replay({"limit": 200})
+        self.assertIn("timeline", timeline)
+        self.assertTrue(timeline["timeline"])
+
+        audit = self.svc.project_audit_logs({"limit": 200, "include_backups": True})
+        self.assertIn("events", audit)
+        self.assertGreaterEqual(int(audit["backup_count"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

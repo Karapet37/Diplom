@@ -36,6 +36,14 @@ _GRAPH_MUTATION_PATHS = {
     "/api/project/hallucination/report",
     "/api/project/archive/chat",
     "/api/project/archive/review",
+    "/api/project/personal-tree/ingest",
+    "/api/project/personal-tree/note",
+    "/api/project/packages/manage",
+    "/api/project/memory/namespace/apply",
+    "/api/project/contradiction/scan",
+    "/api/project/task-risk/board",
+    "/api/project/llm-policy",
+    "/api/project/backup/restore",
 }
 
 _KNOWLEDGE_MUTATION_PATHS = {
@@ -201,6 +209,8 @@ class RuntimeControlPlane:
                 "/api/living/prompt/run",
                 "/api/project/llm/debate",
                 "/api/project/archive/chat",
+                "/api/project/graph-rag/query",
+                "/api/project/packages/manage",
             }:
                 return False, "prompt_execution_disabled"
 

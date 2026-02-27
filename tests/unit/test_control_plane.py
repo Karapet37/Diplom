@@ -88,6 +88,45 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertEqual(reason, "graph_writes_disabled")
 
+    def test_graph_writes_gate_blocks_personal_tree_ingest(self):
+        plane = RuntimeControlPlane(
+            flags=ControlPlaneFlags(
+                allow_graph_writes=False,
+            )
+        )
+        allowed, reason = plane.allow_request(
+            method="POST",
+            path="/api/project/personal-tree/ingest",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "graph_writes_disabled")
+
+    def test_graph_writes_gate_blocks_memory_namespace_apply(self):
+        plane = RuntimeControlPlane(
+            flags=ControlPlaneFlags(
+                allow_graph_writes=False,
+            )
+        )
+        allowed, reason = plane.allow_request(
+            method="POST",
+            path="/api/project/memory/namespace/apply",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "graph_writes_disabled")
+
+    def test_prompt_execution_gate_blocks_graph_rag_query(self):
+        plane = RuntimeControlPlane(
+            flags=ControlPlaneFlags(
+                allow_prompt_execution=False,
+            )
+        )
+        allowed, reason = plane.allow_request(
+            method="POST",
+            path="/api/project/graph-rag/query",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "prompt_execution_disabled")
+
     def test_apply_patch_updates_known_flags_and_ignores_unknown(self):
         plane = RuntimeControlPlane(flags=ControlPlaneFlags())
         out = plane.apply_patch(

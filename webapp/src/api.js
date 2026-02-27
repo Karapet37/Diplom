@@ -241,6 +241,115 @@ export function updateProjectUserGraph(payload = {}) {
   });
 }
 
+export function runProjectPersonalTreeIngest(payload = {}) {
+  return request("/api/project/personal-tree/ingest", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function saveProjectPersonalTreeNote(payload = {}) {
+  return request("/api/project/personal-tree/note", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function viewProjectPersonalTree(payload = {}) {
+  return request("/api/project/personal-tree/view", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function manageProjectPackages(payload = {}) {
+  return request("/api/project/packages/manage", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function applyProjectMemoryNamespace(payload = {}) {
+  return request("/api/project/memory/namespace/apply", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function viewProjectMemoryNamespace(payload = {}) {
+  return request("/api/project/memory/namespace/view", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runProjectGraphRagQuery(payload = {}) {
+  return request("/api/project/graph-rag/query", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function scanProjectContradictions(payload = {}) {
+  return request("/api/project/contradiction/scan", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runProjectTaskRiskBoard(payload = {}) {
+  return request("/api/project/task-risk/board", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runProjectTimelineReplay(payload = {}) {
+  return request("/api/project/timeline/replay", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getProjectLLMPolicy() {
+  return request("/api/project/llm-policy");
+}
+
+export function updateProjectLLMPolicy(payload = {}) {
+  return request("/api/project/llm-policy", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runProjectQualityHarness(payload = {}) {
+  return request("/api/project/quality/harness", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createProjectBackup(payload = {}) {
+  return request("/api/project/backup/create", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function restoreProjectBackup(payload = {}) {
+  return request("/api/project/backup/restore", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getProjectAuditLogs(payload = {}) {
+  return request("/api/project/audit/logs", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function importProjectAutoruns(payload = {}) {
   return request("/api/project/autoruns/import", {
     method: "POST",

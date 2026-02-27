@@ -293,6 +293,150 @@ class ProjectUserGraphUpdateRequest(BaseModel):
     assets: list[str] | str | None = None
 
 
+class ProjectPersonalTreeIngestRequest(BaseModel):
+    user_id: str = "default_user"
+    session_id: str = ""
+    title: str = ""
+    topic: str = ""
+    text: str
+    source_type: str = "text"
+    source_url: str = ""
+    source_title: str = ""
+    max_points: int = 6
+    parent_node_id: int = 0
+    max_nodes: int = 200
+
+
+class ProjectPersonalTreeNoteRequest(BaseModel):
+    user_id: str = "default_user"
+    session_id: str = ""
+    note_id: int = 0
+    parent_node_id: int = 0
+    title: str = ""
+    note: str = ""
+    tags: list[str] | str | None = None
+    links: list[str] | str | None = None
+    source_type: str = "note"
+    source_url: str = ""
+    source_title: str = ""
+    max_nodes: int = 180
+
+
+class ProjectPersonalTreeViewRequest(BaseModel):
+    user_id: str = "default_user"
+    focus_node_id: int = 0
+    max_nodes: int = 180
+
+
+class ProjectPackagesManageRequest(BaseModel):
+    user_id: str = "default_user"
+    session_id: str = ""
+    package_name: str = "inbox"
+    action: str = "list"
+    items: list[str] | str | None = None
+    item_node_ids: list[int] | str | None = None
+    model_role: str = "coder_reviewer"
+    model_path: str = ""
+    classify_with_llm: bool = True
+    apply_changes: bool = False
+    confirmation: str = ""
+
+
+class ProjectMemoryNamespaceApplyRequest(BaseModel):
+    user_id: str = "default_user"
+    session_id: str = ""
+    namespace: str = "personal"
+    source_namespace: str = ""
+    scope: str = "owned"
+    node_ids: list[int] | str | None = None
+    query: str = ""
+    min_score: float = 0.2
+    apply_changes: bool = True
+    confirmation: str = ""
+
+
+class ProjectMemoryNamespaceViewRequest(BaseModel):
+    user_id: str = ""
+    scope: str = "all"
+    max_nodes: int = 220
+
+
+class ProjectGraphRagQueryRequest(BaseModel):
+    query: str
+    user_id: str = ""
+    scope: str = "all"
+    namespace: str = ""
+    top_k: int = 6
+    use_llm: bool = True
+    model_role: str = "analyst"
+    model_path: str = ""
+
+
+class ProjectContradictionScanRequest(BaseModel):
+    user_id: str = ""
+    session_id: str = ""
+    scope: str = "all"
+    namespace: str = ""
+    max_nodes: int = 120
+    top_k: int = 20
+    min_overlap: float = 0.32
+    apply_to_graph: bool = False
+    confirmation: str = ""
+
+
+class ProjectTaskRiskBoardRequest(BaseModel):
+    user_id: str = "default_user"
+    session_id: str = ""
+    tasks: list[dict[str, Any] | str] = Field(default_factory=list)
+    text: str = ""
+    apply_to_graph: bool = True
+    confirmation: str = ""
+
+
+class ProjectTimelineReplayRequest(BaseModel):
+    user_id: str = ""
+    session_id: str = ""
+    event_type: str = ""
+    limit: int = 600
+    from_ts: float = 0.0
+    to_ts: float = 0.0
+
+
+class ProjectLLMPolicyUpdateRequest(BaseModel):
+    mode: str = "confirm_required"
+    trusted_sessions: list[str] | str | None = None
+    trusted_users: list[str] | str | None = None
+    allow_apply_for_actions: list[str] | str | None = None
+    merge_lists: bool = True
+
+
+class ProjectQualityHarnessRequest(BaseModel):
+    user_id: str = ""
+    sample_queries: list[str] | str | None = None
+
+
+class ProjectBackupCreateRequest(BaseModel):
+    label: str = "manual"
+    user_id: str = ""
+    include_events: bool = True
+    event_limit: int = 2000
+
+
+class ProjectBackupRestoreRequest(BaseModel):
+    path: str = ""
+    latest: bool = True
+    user_id: str = ""
+    session_id: str = ""
+    apply_changes: bool = False
+    confirmation: str = ""
+    restore_policy: bool = True
+
+
+class ProjectAuditLogsRequest(BaseModel):
+    limit: int = 200
+    include_backups: bool = True
+
+
 class ProjectHallucinationReportRequest(BaseModel):
     user_id: str = "default_user"
     session_id: str = ""
@@ -869,6 +1013,118 @@ def create_app() -> FastAPI:
                 request_headers=request.headers,
                 request_ip=extract_client_ip(request, settings=security),
             )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/personal-tree/ingest")
+    def project_personal_tree_ingest(payload: ProjectPersonalTreeIngestRequest) -> dict[str, Any]:
+        try:
+            return graph.project_personal_tree_ingest(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/personal-tree/note")
+    def project_personal_tree_note(payload: ProjectPersonalTreeNoteRequest) -> dict[str, Any]:
+        try:
+            return graph.project_personal_tree_note(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/personal-tree/view")
+    def project_personal_tree_view(payload: ProjectPersonalTreeViewRequest) -> dict[str, Any]:
+        try:
+            return graph.project_personal_tree_view(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/packages/manage")
+    def project_packages_manage(payload: ProjectPackagesManageRequest) -> dict[str, Any]:
+        try:
+            return graph.project_packages_manage(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/memory/namespace/apply")
+    def project_memory_namespace_apply(payload: ProjectMemoryNamespaceApplyRequest) -> dict[str, Any]:
+        try:
+            return graph.project_memory_namespace_apply(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/memory/namespace/view")
+    def project_memory_namespace_view(payload: ProjectMemoryNamespaceViewRequest) -> dict[str, Any]:
+        try:
+            return graph.project_memory_namespace_view(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/graph-rag/query")
+    def project_graph_rag_query(payload: ProjectGraphRagQueryRequest) -> dict[str, Any]:
+        try:
+            return graph.project_graph_rag_query(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/contradiction/scan")
+    def project_contradiction_scan(payload: ProjectContradictionScanRequest) -> dict[str, Any]:
+        try:
+            return graph.project_contradiction_scan(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/task-risk/board")
+    def project_task_risk_board(payload: ProjectTaskRiskBoardRequest) -> dict[str, Any]:
+        try:
+            return graph.project_task_risk_board(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/timeline/replay")
+    def project_timeline_replay(payload: ProjectTimelineReplayRequest) -> dict[str, Any]:
+        try:
+            return graph.project_timeline_replay(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/project/llm-policy")
+    def project_llm_policy() -> dict[str, Any]:
+        try:
+            return graph.project_llm_policy_get({})
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/llm-policy")
+    def project_llm_policy_update(payload: ProjectLLMPolicyUpdateRequest) -> dict[str, Any]:
+        try:
+            return graph.project_llm_policy_update(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/quality/harness")
+    def project_quality_harness(payload: ProjectQualityHarnessRequest) -> dict[str, Any]:
+        try:
+            return graph.project_quality_harness(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/backup/create")
+    def project_backup_create(payload: ProjectBackupCreateRequest) -> dict[str, Any]:
+        try:
+            return graph.project_backup_create(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/backup/restore")
+    def project_backup_restore(payload: ProjectBackupRestoreRequest) -> dict[str, Any]:
+        try:
+            return graph.project_backup_restore(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/audit/logs")
+    def project_audit_logs(payload: ProjectAuditLogsRequest) -> dict[str, Any]:
+        try:
+            return graph.project_audit_logs(payload.model_dump())
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -328,6 +328,82 @@ _ARCHIVE_VERIFICATION_MODES_ALLOWED: tuple[str, ...] = (
     "balanced",
 )
 
+_PERSONAL_TREE_BRANCH_NAME = "personal_info_tree"
+_PERSONAL_TREE_SOURCE_TYPES_ALLOWED: tuple[str, ...] = (
+    "article",
+    "law",
+    "text",
+    "note",
+    "other",
+)
+_PERSONAL_TREE_NODE_TYPES: tuple[str, ...] = (
+    "personal_info_tree_root",
+    "thought_tree_session",
+    "thought_summary_node",
+    "thought_point_node",
+    "personal_note_node",
+    "source_reference",
+)
+_PERSONAL_TREE_EDGE_TYPES: tuple[str, ...] = (
+    "tree_session",
+    "has_summary",
+    "supports_point",
+    "based_on_source",
+    "tree_note",
+    "note_child_of",
+    "about_topic",
+    "references_source",
+)
+_PERSONAL_TREE_CITATION_RE = re.compile(
+    r"(?:article|art\.?|статья|ст\.?|հոդված)\s*\d+[a-zа-я0-9.\-]*",
+    flags=re.IGNORECASE | re.UNICODE,
+)
+_MEMORY_NAMESPACES_ALLOWED: tuple[str, ...] = (
+    "global",
+    "personal",
+    "session",
+    "experiment",
+    "trash",
+)
+_LLM_POLICY_MODES_ALLOWED: tuple[str, ...] = (
+    "propose_only",
+    "confirm_required",
+    "assisted_autonomy",
+)
+_CONTRADICTION_NEGATION_HINTS: tuple[str, ...] = (
+    " not ",
+    " no ",
+    " never ",
+    " without ",
+    " cannot ",
+    " can't ",
+    " doesn't ",
+    " isn't ",
+    " нет ",
+    " не ",
+    " без ",
+    " never",
+    " ոչ ",
+    " չի ",
+)
+_GARBAGE_MANAGER_DEFAULT_ROLE = "coder_reviewer"
+_PACKAGE_ACTIONS_ALLOWED: tuple[str, ...] = (
+    "store",
+    "list",
+    "purge",
+    "restore",
+)
+_MEMORY_SCOPE_ALLOWED: tuple[str, ...] = (
+    "all",
+    "owned",
+)
+_TASK_RISK_LEVELS: tuple[str, ...] = (
+    "low",
+    "medium",
+    "high",
+    "critical",
+)
+
 _PERSONALIZATION_STYLE_ALLOWED: tuple[str, ...] = (
     "adaptive",
     "concise",
@@ -838,6 +914,14 @@ class GraphWorkspaceService:
             if enable_living_system
             else None
         )
+        self._llm_policy: dict[str, Any] = {
+            "mode": str(os.getenv("AUTOGRAPH_LLM_POLICY_MODE", "confirm_required") or "confirm_required").strip()
+            or "confirm_required",
+            "trusted_sessions": [],
+            "trusted_users": [],
+            "allow_apply_for_actions": [],
+            "updated_at": time.time(),
+        }
         self._bootstrap_runtime_graph()
 
     @staticmethod
@@ -1469,6 +1553,286 @@ class GraphWorkspaceService:
         if token in allowed:
             return token
         return str(default or "")
+
+    def _normalize_namespace(self, value: Any, *, default: str = "global") -> str:
+        token = self._pick_allowed_token(
+            value,
+            allowed=_MEMORY_NAMESPACES_ALLOWED,
+            default=default,
+        )
+        return token or default
+
+    def _node_namespace(self, node: Any, *, default: str = "global") -> str:
+        attrs = self._as_mapping(getattr(node, "attributes", {}))
+        return self._normalize_namespace(attrs.get("namespace", default), default=default)
+
+    @staticmethod
+    def _node_text_blob(node: Any) -> str:
+        attrs = GraphWorkspaceService._as_mapping(getattr(node, "attributes", {}))
+        chunks: list[str] = []
+        for key in (
+            "name",
+            "title",
+            "description",
+            "summary",
+            "point",
+            "claim",
+            "note",
+            "details",
+            "topic",
+            "source_title",
+            "source_url",
+        ):
+            value = attrs.get(key)
+            if isinstance(value, str) and value.strip():
+                chunks.append(value.strip())
+        return " ".join(chunks).strip()
+
+    @staticmethod
+    def _node_belongs_to_user(node: Any, user_id: str) -> bool:
+        attrs = GraphWorkspaceService._as_mapping(getattr(node, "attributes", {}))
+        owner = str(attrs.get("user_id", "") or "").strip()
+        if not owner:
+            return False
+        return owner == str(user_id or "").strip()
+
+    def _llm_policy_snapshot(self) -> dict[str, Any]:
+        mode = self._pick_allowed_token(
+            self._llm_policy.get("mode"),
+            allowed=_LLM_POLICY_MODES_ALLOWED,
+            default="confirm_required",
+        )
+        return {
+            "mode": mode,
+            "trusted_sessions": self._dedupe_strings(self._to_list_of_strings(self._llm_policy.get("trusted_sessions"))),
+            "trusted_users": self._dedupe_strings(self._to_list_of_strings(self._llm_policy.get("trusted_users"))),
+            "allow_apply_for_actions": self._dedupe_strings(
+                self._to_list_of_strings(self._llm_policy.get("allow_apply_for_actions"))
+            ),
+            "updated_at": float(self._llm_policy.get("updated_at", time.time()) or time.time()),
+        }
+
+    def _llm_policy_decision(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        action: str,
+        requested_apply: bool,
+        confirmation: Any = None,
+    ) -> dict[str, Any]:
+        policy = self._llm_policy_snapshot()
+        mode = str(policy.get("mode", "confirm_required") or "confirm_required")
+        token = str(confirmation or "").strip().lower()
+        is_confirmed = token in {"confirm", "confirmed", "yes", "true", "1", "apply"}
+        trusted_session = str(session_id or "").strip() in set(policy.get("trusted_sessions", []))
+        trusted_user = str(user_id or "").strip() in set(policy.get("trusted_users", []))
+        action_allowed = str(action or "").strip() in set(policy.get("allow_apply_for_actions", []))
+
+        apply_allowed = bool(requested_apply)
+        reason = "requested_false"
+        requires_confirmation = False
+        if not requested_apply:
+            apply_allowed = False
+            reason = "requested_false"
+        elif mode == "propose_only":
+            apply_allowed = False
+            reason = "policy_propose_only"
+        elif mode == "confirm_required":
+            if is_confirmed:
+                apply_allowed = True
+                reason = "confirmed"
+            else:
+                apply_allowed = False
+                requires_confirmation = True
+                reason = "confirmation_required"
+        else:  # assisted_autonomy
+            if trusted_session or trusted_user or action_allowed or is_confirmed:
+                apply_allowed = True
+                reason = "assisted_autonomy_allowed"
+            else:
+                apply_allowed = False
+                requires_confirmation = True
+                reason = "assisted_autonomy_needs_trust_or_confirm"
+
+        return {
+            "mode": mode,
+            "requested_apply": bool(requested_apply),
+            "apply_allowed": bool(apply_allowed),
+            "requires_confirmation": bool(requires_confirmation),
+            "confirmation_received": bool(is_confirmed),
+            "trusted_session": bool(trusted_session),
+            "trusted_user": bool(trusted_user),
+            "action_allowlisted": bool(action_allowed),
+            "reason": reason,
+            "action": str(action or ""),
+        }
+
+    def _resolve_role_or_model_llm(
+        self,
+        *,
+        role: str = "general",
+        model_path: str = "",
+    ) -> tuple[Callable[[str], str] | None, dict[str, Any]]:
+        requested_model_path = str(model_path or "").strip()
+        requested_role = str(role or "general").strip() or "general"
+        if requested_model_path and self.model_llm_resolver is not None:
+            fn = self.model_llm_resolver(requested_model_path)
+            if fn is not None:
+                return fn, {
+                    "mode": "explicit_model_path",
+                    "requested_model_path": requested_model_path,
+                    "selected_model_path": requested_model_path,
+                    "requested_role": requested_role,
+                }
+        if self.role_llm_resolver is not None:
+            fn = self.role_llm_resolver(requested_role)
+            if fn is not None:
+                return fn, {
+                    "mode": "role_resolver",
+                    "requested_model_path": requested_model_path,
+                    "selected_model_path": "",
+                    "requested_role": requested_role,
+                }
+        return None, {
+            "mode": "unavailable",
+            "requested_model_path": requested_model_path,
+            "selected_model_path": "",
+            "requested_role": requested_role,
+        }
+
+    @staticmethod
+    def _safe_slug(value: Any, *, default: str) -> str:
+        token = re.sub(r"[^a-z0-9_]+", "_", str(value or "").strip().lower()).strip("_")
+        return token or default
+
+    def _iter_user_nodes(
+        self,
+        *,
+        user_id: str = "",
+        namespace: str = "",
+        scope: str = "all",
+    ) -> list[Any]:
+        owner = str(user_id or "").strip()
+        mode = self._pick_allowed_token(scope, allowed=_MEMORY_SCOPE_ALLOWED, default="all")
+        namespace_token = ""
+        if str(namespace or "").strip():
+            namespace_token = self._normalize_namespace(namespace, default="global")
+
+        out: list[Any] = []
+        for node in self.api.engine.store.nodes.values():
+            if namespace_token and self._node_namespace(node, default="global") != namespace_token:
+                continue
+            if mode == "owned":
+                if not owner:
+                    continue
+                if not self._node_belongs_to_user(node, owner):
+                    continue
+            out.append(node)
+        return out
+
+    def _graph_degree_map(self, node_ids: set[int] | None = None) -> dict[int, int]:
+        degrees: dict[int, int] = {}
+        selected = set(node_ids or set())
+        for edge in self.api.engine.store.edges:
+            left = int(edge.from_node)
+            right = int(edge.to_node)
+            if selected and left not in selected and right not in selected:
+                continue
+            degrees[left] = degrees.get(left, 0) + 1
+            degrees[right] = degrees.get(right, 0) + 1
+        return degrees
+
+    def _has_negation_hint(self, text: str) -> bool:
+        source = f" {str(text or '').strip().lower()} "
+        return any(hint in source for hint in _CONTRADICTION_NEGATION_HINTS)
+
+    @staticmethod
+    def _project_backups_dir() -> Path:
+        return Path("data/project_backups")
+
+    def _write_project_backup(self, payload: Mapping[str, Any], *, label: str = "") -> str:
+        base = self._project_backups_dir()
+        base.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+        token = self._safe_slug(label, default="manual")
+        path = base / f"project_backup_{stamp}_{token}.json"
+        suffix = 1
+        while path.exists():
+            path = base / f"project_backup_{stamp}_{token}_{suffix:02d}.json"
+            suffix += 1
+        path.write_text(json.dumps(dict(payload), ensure_ascii=False, indent=2), encoding="utf-8")
+        return str(path)
+
+    def _collect_audit_events(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        interesting = {
+            "project_package_action",
+            "memory_namespace_applied",
+            "graph_rag_query",
+            "contradiction_scan_completed",
+            "task_risk_board_generated",
+            "timeline_replay_requested",
+            "llm_policy_updated",
+            "quality_harness_ran",
+            "project_backup_created",
+            "project_backup_restored",
+        }
+        rows = self.list_events(limit=max(10, min(4000, int(limit))))
+        out = [row for row in rows if str(row.get("event_type", "")) in interesting]
+        return out[-max(1, min(1000, int(limit))):]
+
+    def _restore_graph_from_snapshot(self, snapshot: Mapping[str, Any]) -> dict[str, Any]:
+        nodes = self._as_list(snapshot.get("nodes"))
+        edges = self._as_list(snapshot.get("edges"))
+        self.api.engine.store.nodes.clear()
+        self.api.engine.store.edges.clear()
+        self.api.engine.clear_event_log()
+        self.api.engine._next_node_id = 1  # noqa: SLF001
+
+        created_nodes = 0
+        created_edges = 0
+        for item in sorted(nodes, key=lambda row: self._to_int(self._as_mapping(row).get("id", 0), 0)):
+            row = self._as_mapping(item)
+            node_id = self._to_int(row.get("id", 0), 0)
+            if node_id <= 0:
+                continue
+            node_type = str(row.get("type", "generic") or "generic").strip() or "generic"
+            attrs = self._as_mapping(row.get("attributes"))
+            state = self._as_mapping(row.get("state"))
+            try:
+                self.api.engine.create_node(
+                    node_type,
+                    node_id=node_id,
+                    attributes=attrs,
+                    state=state,
+                )
+                created_nodes += 1
+            except Exception:
+                continue
+
+        for item in edges:
+            row = self._as_mapping(item)
+            from_node = self._to_int(row.get("from", 0), 0)
+            to_node = self._to_int(row.get("to", 0), 0)
+            relation_type = str(row.get("relation_type", "") or "").strip()
+            if from_node <= 0 or to_node <= 0 or not relation_type:
+                continue
+            if self.api.engine.get_node(from_node) is None or self.api.engine.get_node(to_node) is None:
+                continue
+            self._connect_nodes(
+                from_node=from_node,
+                to_node=to_node,
+                relation_type=relation_type,
+                weight=self._confidence(row.get("weight", 0.6), 0.6),
+                logic_rule=str(row.get("logic_rule", "backup_restore") or "backup_restore"),
+                metadata=self._as_mapping(row.get("metadata")),
+            )
+            created_edges += 1
+
+        return {
+            "created_nodes": int(created_nodes),
+            "created_edges": int(created_edges),
+        }
 
     def _sanitize_personalization(self, payload: Any) -> dict[str, Any]:
         root = self._as_mapping(payload)
@@ -5449,6 +5813,1736 @@ class GraphWorkspaceService:
             **self.snapshot_payload(),
         }
 
+    def _persist_graph_safe(self) -> bool:
+        try:
+            return bool(self.api.persist())
+        except Exception:
+            return False
+
+    def _ensure_personal_tree_root(self, *, user_id: str):
+        tree_key = f"{user_id}:{_PERSONAL_TREE_BRANCH_NAME}"
+        root, _ = self._ensure_shared_node(
+            node_type="personal_info_tree_root",
+            identity_key="tree_key",
+            identity_value=tree_key,
+            attributes={
+                "tree_key": tree_key,
+                "user_id": user_id,
+                "branch_name": _PERSONAL_TREE_BRANCH_NAME,
+                "name": f"Personal Tree · {user_id}",
+                "description": "Persistent personal information tree with notes, summaries and thought branches.",
+            },
+        )
+        root.attributes["updated_at"] = time.time()
+        return root
+
+    def _extract_personal_tree_takeaways(
+        self,
+        *,
+        text: str,
+        source_type: str,
+        max_points: int,
+    ) -> dict[str, Any]:
+        source = str(text or "").strip()
+        rows = self._split_daily_sentences(source)
+        if not rows:
+            return {
+                "summary": "",
+                "points": [],
+                "citations": [],
+            }
+
+        hints_by_type: dict[str, tuple[str, ...]] = {
+            "law": ("law", "legal", "article", "статья", "закон", "հոդված", "իրավ"),
+            "article": ("study", "research", "article", "paper", "analysis", "evidence"),
+            "text": ("because", "therefore", "result", "impact", "plan", "risk"),
+            "note": ("todo", "fix", "improve", "idea", "next"),
+        }
+        active_hints = hints_by_type.get(source_type, hints_by_type["text"])
+
+        scored: list[tuple[float, int, str]] = []
+        for idx, sentence in enumerate(rows):
+            cleaned = " ".join(str(sentence or "").split()).strip()
+            if not cleaned:
+                continue
+            score = min(1.0, len(cleaned) / 190.0)
+            if idx < 2:
+                score += 0.28
+            if self._contains_hint(cleaned, active_hints):
+                score += 0.32
+            if _PERSONAL_TREE_CITATION_RE.search(cleaned):
+                score += 0.42
+            scored.append((score, idx, cleaned))
+
+        if not scored:
+            scored = [(0.5, idx, row) for idx, row in enumerate(rows)]
+        scored.sort(key=lambda item: (item[0], -item[1]), reverse=True)
+
+        points: list[str] = []
+        for _, _, row in scored:
+            if len(points) >= max(1, min(12, int(max_points))):
+                break
+            points.append(row)
+        points = self._dedupe_limited(points, limit=max(1, min(12, int(max_points))))
+
+        citations = self._dedupe_limited(
+            [match.group(0).strip() for match in _PERSONAL_TREE_CITATION_RE.finditer(source)],
+            limit=12,
+        )
+
+        summary_basis = points[:2] if points else rows[:2]
+        summary = " ".join(summary_basis).strip()
+        if len(summary) > 720:
+            summary = f"{summary[:717].rstrip()}..."
+
+        return {
+            "summary": summary,
+            "points": points,
+            "citations": citations,
+        }
+
+    def _serialize_personal_tree(self, *, user_id: str, focus_node_id: int = 0, max_nodes: int = 160) -> dict[str, Any]:
+        root = self._ensure_personal_tree_root(user_id=user_id)
+        focus = self._to_int(focus_node_id, 0)
+        limit = max(20, min(500, self._to_int(max_nodes, 160)))
+
+        candidate_ids: set[int] = {int(root.id)}
+        for node in self.api.engine.store.nodes.values():
+            if str(node.type or "") not in _PERSONAL_TREE_NODE_TYPES:
+                continue
+            attrs = self._as_mapping(node.attributes)
+            if str(attrs.get("user_id", "") or "").strip() == user_id:
+                candidate_ids.add(int(node.id))
+
+        eligible_edges = [
+            edge
+            for edge in self.api.engine.store.edges
+            if str(edge.relation_type or "") in _PERSONAL_TREE_EDGE_TYPES
+            and (int(edge.from_node) in candidate_ids or int(edge.to_node) in candidate_ids)
+        ]
+        for edge in eligible_edges:
+            candidate_ids.add(int(edge.from_node))
+            candidate_ids.add(int(edge.to_node))
+
+        eligible_edges = [
+            edge
+            for edge in self.api.engine.store.edges
+            if str(edge.relation_type or "") in _PERSONAL_TREE_EDGE_TYPES
+            and int(edge.from_node) in candidate_ids
+            and int(edge.to_node) in candidate_ids
+        ]
+
+        selected_ids: set[int]
+        if focus > 0 and focus in candidate_ids:
+            adjacency: dict[int, set[int]] = {}
+            for edge in eligible_edges:
+                left = int(edge.from_node)
+                right = int(edge.to_node)
+                adjacency.setdefault(left, set()).add(right)
+                adjacency.setdefault(right, set()).add(left)
+            queue: list[int] = [focus]
+            visited: set[int] = set()
+            while queue and len(visited) < limit:
+                current = queue.pop(0)
+                if current in visited:
+                    continue
+                visited.add(current)
+                for nxt in adjacency.get(current, set()):
+                    if nxt not in visited:
+                        queue.append(nxt)
+            visited.add(int(root.id))
+            selected_ids = visited
+        else:
+            selected_ids = set(sorted(candidate_ids)[:limit])
+            selected_ids.add(int(root.id))
+
+        nodes_out: list[dict[str, Any]] = []
+        for node_id in sorted(selected_ids):
+            node = self.api.engine.get_node(node_id)
+            if node is None:
+                continue
+            nodes_out.append(
+                {
+                    "id": int(node.id),
+                    "type": str(node.type or "generic"),
+                    "attributes": dict(node.attributes or {}),
+                    "state": dict(node.state or {}),
+                }
+            )
+
+        edges_out: list[dict[str, Any]] = []
+        for edge in eligible_edges:
+            from_id = int(edge.from_node)
+            to_id = int(edge.to_node)
+            if from_id not in selected_ids or to_id not in selected_ids:
+                continue
+            edges_out.append(
+                {
+                    "from": from_id,
+                    "to": to_id,
+                    "relation_type": str(edge.relation_type or ""),
+                    "weight": float(edge.weight or 0.0),
+                    "direction": str(edge.direction or "directed"),
+                    "logic_rule": str(edge.logic_rule or ""),
+                    "metadata": dict(edge.metadata or {}),
+                }
+            )
+
+        sources: list[dict[str, Any]] = []
+        notes: list[dict[str, Any]] = []
+        for row in nodes_out:
+            node_type = str(row.get("type", "") or "")
+            attrs = self._as_mapping(row.get("attributes"))
+            if node_type == "source_reference":
+                sources.append(
+                    {
+                        "node_id": int(row.get("id", 0) or 0),
+                        "title": str(attrs.get("title", "") or attrs.get("name", "") or "").strip(),
+                        "url": str(attrs.get("url", "") or "").strip(),
+                        "source_type": str(attrs.get("source_type", "") or "text").strip(),
+                    }
+                )
+            if node_type == "personal_note_node":
+                notes.append(
+                    {
+                        "node_id": int(row.get("id", 0) or 0),
+                        "title": str(attrs.get("title", "") or attrs.get("name", "") or "").strip(),
+                        "tags": self._to_list_of_strings(attrs.get("tags")),
+                        "links": self._to_list_of_strings(attrs.get("links")),
+                    }
+                )
+
+        return {
+            "branch_name": _PERSONAL_TREE_BRANCH_NAME,
+            "user_id": user_id,
+            "root_node_id": int(root.id),
+            "focus_node_id": int(focus if focus in selected_ids else root.id),
+            "nodes": nodes_out,
+            "edges": edges_out,
+            "sources": sources,
+            "notes": notes,
+            "stats": {
+                "node_count": len(nodes_out),
+                "edge_count": len(edges_out),
+                "source_count": len(sources),
+                "note_count": len(notes),
+            },
+        }
+
+    def project_personal_tree_note(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        user_id = str(payload.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(payload.get("session_id", "") or "").strip()
+        title = " ".join(str(payload.get("title", "") or "").split()).strip()
+        note_text = " ".join(str(payload.get("note", "") or payload.get("text", "") or "").split()).strip()
+        if not title and note_text:
+            title = self._to_title(note_text, fallback="Note", limit=86)
+        if not title:
+            raise ValueError("title or note is required")
+
+        tags = self._dedupe_strings(self._to_list_of_strings(payload.get("tags")), limit=40)
+        links = self._dedupe_strings(self._to_list_of_strings(payload.get("links")), limit=40)
+        parent_node_id = self._to_int(payload.get("parent_node_id", 0), 0)
+        note_id = self._to_int(payload.get("note_id", 0), 0)
+        source_url = " ".join(str(payload.get("source_url", "") or "").split()).strip()
+        source_title = " ".join(str(payload.get("source_title", "") or "").split()).strip()
+        source_type = self._pick_allowed_token(
+            payload.get("source_type"),
+            allowed=_PERSONAL_TREE_SOURCE_TYPES_ALLOWED,
+            default="note",
+        )
+
+        root = self._ensure_personal_tree_root(user_id=user_id)
+        now = time.time()
+        note_node = None
+        if note_id > 0:
+            existing = self.api.engine.get_node(note_id)
+            if existing is not None and str(existing.type or "") == "personal_note_node":
+                existing_owner = str(self._as_mapping(existing.attributes).get("user_id", "") or "").strip()
+                if existing_owner and existing_owner != user_id:
+                    raise ValueError("note belongs to another user_id")
+                note_node = existing
+
+        attrs = {
+            "user_id": user_id,
+            "title": title,
+            "name": title,
+            "note": note_text,
+            "tags": tags,
+            "links": links,
+            "session_id": session_id,
+            "updated_at": now,
+        }
+        if note_node is None:
+            note_node = self.api.engine.create_node(
+                "personal_note_node",
+                attributes={
+                    **attrs,
+                    "created_at": now,
+                },
+                state={"weight": 0.66},
+            )
+            created = True
+        else:
+            note_node.attributes.update(attrs)
+            created = False
+
+        self._connect_nodes(
+            from_node=int(root.id),
+            to_node=int(note_node.id),
+            relation_type="tree_note",
+            weight=0.92,
+            logic_rule="personal_tree_note",
+            metadata={"session_id": session_id},
+        )
+
+        if parent_node_id > 0 and self.api.engine.get_node(parent_node_id) is not None:
+            self._connect_nodes(
+                from_node=int(parent_node_id),
+                to_node=int(note_node.id),
+                relation_type="note_child_of",
+                weight=0.84,
+                logic_rule="personal_tree_note",
+            )
+
+        source_node_id = 0
+        if source_url or source_title:
+            source_identity = source_url or source_title
+            source_key = f"{user_id}:src:{zlib.crc32(source_identity.encode('utf-8')) & 0xFFFFFFFF:08x}"
+            source_node, _ = self._ensure_shared_node(
+                node_type="source_reference",
+                identity_key="source_key",
+                identity_value=source_key,
+                attributes={
+                    "source_key": source_key,
+                    "user_id": user_id,
+                    "name": source_title or source_url or "Source",
+                    "title": source_title or source_url or "Source",
+                    "url": source_url,
+                    "source_type": source_type,
+                    "updated_at": now,
+                },
+            )
+            source_node.attributes["updated_at"] = now
+            source_node_id = int(source_node.id)
+            self._connect_nodes(
+                from_node=int(note_node.id),
+                to_node=int(source_node.id),
+                relation_type="references_source",
+                weight=0.82,
+                logic_rule="personal_tree_note",
+            )
+
+        persisted = self._persist_graph_safe()
+        tree = self._serialize_personal_tree(
+            user_id=user_id,
+            focus_node_id=int(note_node.id),
+            max_nodes=self._to_int(payload.get("max_nodes", 180), 180),
+        )
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "personal_tree_note_saved",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "note_node_id": int(note_node.id),
+                "created": bool(created),
+                "source_node_id": int(source_node_id),
+            },
+        )
+
+        return {
+            "user_id": user_id,
+            "session_id": session_id,
+            "created": bool(created),
+            "persisted": bool(persisted),
+            "note": {
+                "node_id": int(note_node.id),
+                "title": title,
+                "tags": tags,
+                "links": links,
+                "source_node_id": int(source_node_id),
+            },
+            "tree": tree,
+            **self.snapshot_payload(),
+        }
+
+    def project_personal_tree_ingest(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        user_id = str(payload.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(payload.get("session_id", "") or "").strip()
+        topic = " ".join(str(payload.get("topic", "") or "").split()).strip()
+        title = " ".join(
+            str(payload.get("title", "") or payload.get("source_title", "") or topic or "Thought Tree Session").split()
+        ).strip()
+        text = str(payload.get("text", "") or "").strip()
+        if not text:
+            raise ValueError("text is required")
+        source_type = self._pick_allowed_token(
+            payload.get("source_type"),
+            allowed=_PERSONAL_TREE_SOURCE_TYPES_ALLOWED,
+            default="text",
+        )
+        source_url = " ".join(str(payload.get("source_url", "") or "").split()).strip()
+        source_title = " ".join(str(payload.get("source_title", "") or "").split()).strip()
+        max_points = max(2, min(12, self._to_int(payload.get("max_points", 6), 6)))
+        parent_node_id = self._to_int(payload.get("parent_node_id", 0), 0)
+
+        extraction = self._extract_personal_tree_takeaways(
+            text=text,
+            source_type=source_type,
+            max_points=max_points,
+        )
+        summary_text = str(extraction.get("summary", "") or "").strip()
+        points = self._to_list_of_strings(extraction.get("points"))
+        citations = self._to_list_of_strings(extraction.get("citations"))
+
+        root = self._ensure_personal_tree_root(user_id=user_id)
+        now = time.time()
+        session_node = self.api.engine.create_node(
+            "thought_tree_session",
+            attributes={
+                "user_id": user_id,
+                "name": title,
+                "title": title,
+                "topic": topic,
+                "source_type": source_type,
+                "source_title": source_title,
+                "source_url": source_url,
+                "session_id": session_id,
+                "created_at": now,
+                "updated_at": now,
+            },
+            state={"confidence": 0.74},
+        )
+        self._connect_nodes(
+            from_node=int(root.id),
+            to_node=int(session_node.id),
+            relation_type="tree_session",
+            weight=0.92,
+            logic_rule="personal_tree_ingest",
+        )
+        if parent_node_id > 0 and self.api.engine.get_node(parent_node_id) is not None:
+            self._connect_nodes(
+                from_node=int(parent_node_id),
+                to_node=int(session_node.id),
+                relation_type="about_topic",
+                weight=0.84,
+                logic_rule="personal_tree_ingest",
+            )
+
+        source_node_id = 0
+        if source_url or source_title:
+            source_identity = source_url or source_title
+            source_key = f"{user_id}:src:{zlib.crc32(source_identity.encode('utf-8')) & 0xFFFFFFFF:08x}"
+            source_node, _ = self._ensure_shared_node(
+                node_type="source_reference",
+                identity_key="source_key",
+                identity_value=source_key,
+                attributes={
+                    "source_key": source_key,
+                    "user_id": user_id,
+                    "name": source_title or source_url or title,
+                    "title": source_title or source_url or title,
+                    "url": source_url,
+                    "source_type": source_type,
+                    "updated_at": now,
+                },
+            )
+            source_node.attributes["updated_at"] = now
+            source_node_id = int(source_node.id)
+            self._connect_nodes(
+                from_node=int(session_node.id),
+                to_node=int(source_node.id),
+                relation_type="based_on_source",
+                weight=0.86,
+                logic_rule="personal_tree_ingest",
+            )
+
+        summary_node = self.api.engine.create_node(
+            "thought_summary_node",
+            attributes={
+                "user_id": user_id,
+                "name": self._to_title(summary_text or title, fallback=title, limit=96),
+                "summary": summary_text,
+                "citations": citations,
+                "source_type": source_type,
+                "source_url": source_url,
+                "created_at": now,
+                "updated_at": now,
+            },
+            state={"confidence": 0.77},
+        )
+        self._connect_nodes(
+            from_node=int(session_node.id),
+            to_node=int(summary_node.id),
+            relation_type="has_summary",
+            weight=0.9,
+            logic_rule="personal_tree_ingest",
+        )
+
+        point_node_ids: list[int] = []
+        for idx, point in enumerate(points, start=1):
+            point_node = self.api.engine.create_node(
+                "thought_point_node",
+                attributes={
+                    "user_id": user_id,
+                    "name": self._to_title(point, fallback=f"Point {idx}", limit=96),
+                    "point": point,
+                    "rank": idx,
+                    "source_type": source_type,
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                state={"confidence": max(0.45, 0.84 - idx * 0.06)},
+            )
+            point_node_ids.append(int(point_node.id))
+            self._connect_nodes(
+                from_node=int(summary_node.id),
+                to_node=int(point_node.id),
+                relation_type="supports_point",
+                weight=max(0.42, 0.92 - idx * 0.08),
+                logic_rule="personal_tree_ingest",
+                metadata={"rank": idx},
+            )
+
+        persisted = self._persist_graph_safe()
+        tree = self._serialize_personal_tree(
+            user_id=user_id,
+            focus_node_id=int(summary_node.id),
+            max_nodes=self._to_int(payload.get("max_nodes", 200), 200),
+        )
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "personal_tree_ingested",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "source_type": source_type,
+                "summary_node_id": int(summary_node.id),
+                "points": len(point_node_ids),
+                "citations": len(citations),
+            },
+        )
+
+        return {
+            "user_id": user_id,
+            "session_id": session_id,
+            "persisted": bool(persisted),
+            "ingest": {
+                "title": title,
+                "topic": topic,
+                "source_type": source_type,
+                "source_url": source_url,
+                "source_title": source_title,
+                "max_points": max_points,
+            },
+            "extraction": {
+                "summary": summary_text,
+                "points": points,
+                "citations": citations,
+            },
+            "semantic_binding": {
+                "root_node_id": int(root.id),
+                "session_node_id": int(session_node.id),
+                "summary_node_id": int(summary_node.id),
+                "point_node_ids": point_node_ids,
+                "source_node_id": int(source_node_id),
+            },
+            "tree": tree,
+            **self.snapshot_payload(),
+        }
+
+    def project_personal_tree_view(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        user_id = str(root.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        focus_node_id = self._to_int(root.get("focus_node_id", 0), 0)
+        max_nodes = max(20, min(500, self._to_int(root.get("max_nodes", 180), 180)))
+        tree = self._serialize_personal_tree(
+            user_id=user_id,
+            focus_node_id=focus_node_id,
+            max_nodes=max_nodes,
+        )
+        return {
+            "tree": tree,
+            **self.snapshot_payload(),
+        }
+
+    def project_packages_manage(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        user_id = str(payload.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(payload.get("session_id", "") or "").strip()
+        package_name = self._safe_slug(payload.get("package_name", "inbox"), default="inbox")
+        action = self._pick_allowed_token(
+            payload.get("action", "list"),
+            allowed=_PACKAGE_ACTIONS_ALLOWED,
+            default="list",
+        )
+        model_role = self._debate_role(payload.get("model_role"), fallback=_GARBAGE_MANAGER_DEFAULT_ROLE)
+        model_path = str(payload.get("model_path", "") or "").strip()
+        classify_with_llm = self._to_bool(payload.get("classify_with_llm", True))
+
+        bucket_key = f"{user_id}:{package_name}"
+        now = time.time()
+        bucket_node, _ = self._ensure_shared_node(
+            node_type="user_package_bucket",
+            identity_key="bucket_key",
+            identity_value=bucket_key,
+            attributes={
+                "bucket_key": bucket_key,
+                "user_id": user_id,
+                "name": package_name,
+                "namespace": "personal",
+                "updated_at": now,
+            },
+        )
+        bucket_node.attributes["updated_at"] = now
+
+        def _package_items() -> list[Any]:
+            out: list[Any] = []
+            for node in self.api.engine.store.nodes.values():
+                if str(node.type or "") != "user_package_item":
+                    continue
+                attrs = self._as_mapping(node.attributes)
+                if str(attrs.get("user_id", "") or "").strip() != user_id:
+                    continue
+                if str(attrs.get("package_name", "") or "").strip() != package_name:
+                    continue
+                out.append(node)
+            out.sort(
+                key=lambda row: float(self._as_mapping(row.attributes).get("created_at", 0.0) or 0.0),
+                reverse=True,
+            )
+            return out
+
+        llm_fn: Callable[[str], str] | None = None
+        manager_resolution: dict[str, Any] = {
+            "mode": "disabled",
+            "requested_model_path": model_path,
+            "requested_role": model_role,
+            "selected_model_path": "",
+        }
+        if classify_with_llm and action == "store":
+            llm_fn, manager_resolution = self._resolve_role_or_model_llm(
+                role=model_role,
+                model_path=model_path,
+            )
+
+        created_items: list[dict[str, Any]] = []
+        changed_item_ids: list[int] = []
+        if action == "store":
+            raw_items = payload.get("items", payload.get("entries", []))
+            if isinstance(raw_items, str):
+                raw_items = [raw_items]
+            if not isinstance(raw_items, list):
+                raw_items = []
+            if not raw_items:
+                fallback_item = " ".join(
+                    str(payload.get("item", "") or payload.get("text", "") or payload.get("content", "") or "").split()
+                ).strip()
+                if fallback_item:
+                    raw_items = [fallback_item]
+            if not raw_items:
+                raise ValueError("items or item is required for store action")
+
+            for idx, raw in enumerate(raw_items):
+                content = " ".join(str(raw or "").split()).strip()
+                if not content:
+                    continue
+                trash_score = 0.25
+                classification_reason = "heuristic_default"
+                if any(hint in content.lower() for hint in ("tmp", "todo", "old", "junk", "trash", "noise")):
+                    trash_score = 0.76
+                    classification_reason = "heuristic_keyword"
+                llm_output = ""
+                if llm_fn is not None:
+                    prompt = (
+                        "Classify package item for personal memory hygiene.\n"
+                        "Return JSON only:\n"
+                        '{ "trash_score":0.0, "status":"active|candidate_trash", "label":"", "reason":"" }\n'
+                        "trash_score in [0,1].\n"
+                        f"Item: {content}\n"
+                    )
+                    try:
+                        llm_output = str(llm_fn(prompt) or "").strip()
+                    except Exception:
+                        llm_output = ""
+                    parsed = self._extract_json_from_llm_output(llm_output)
+                    parsed_row = self._as_mapping(parsed)
+                    if parsed_row:
+                        trash_score = self._confidence(parsed_row.get("trash_score", trash_score), trash_score)
+                        classification_reason = "llm_classification"
+
+                namespace = "trash" if trash_score >= 0.67 else "personal"
+                status = "candidate_trash" if trash_score >= 0.67 else "active"
+                item_node = self.api.engine.create_node(
+                    "user_package_item",
+                    attributes={
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "package_name": package_name,
+                        "name": self._to_title(content, fallback=f"Item {idx + 1}", limit=80),
+                        "content": content,
+                        "namespace": namespace,
+                        "status": status,
+                        "trash_score": round(trash_score, 4),
+                        "classification_reason": classification_reason,
+                        "created_at": now,
+                        "updated_at": now,
+                    },
+                    state={"confidence": max(0.2, 1.0 - trash_score)},
+                )
+                changed_item_ids.append(int(item_node.id))
+                self._connect_nodes(
+                    from_node=int(bucket_node.id),
+                    to_node=int(item_node.id),
+                    relation_type="contains_item",
+                    weight=max(0.2, 1.0 - trash_score * 0.5),
+                    logic_rule="packages_manage_store",
+                )
+                created_items.append(
+                    {
+                        "node_id": int(item_node.id),
+                        "content": content,
+                        "namespace": namespace,
+                        "status": status,
+                        "trash_score": round(trash_score, 4),
+                    }
+                )
+
+        elif action in {"purge", "restore"}:
+            apply_changes = self._to_bool(payload.get("apply_changes", False))
+            confirmation = payload.get("confirmation", payload.get("security_decision", ""))
+            policy_decision = self._llm_policy_decision(
+                user_id=user_id,
+                session_id=session_id,
+                action=f"packages_{action}",
+                requested_apply=apply_changes,
+                confirmation=confirmation,
+            )
+            target_ids = {
+                self._to_int(item, 0)
+                for item in self._as_list(payload.get("item_node_ids", payload.get("node_ids", [])))
+                if self._to_int(item, 0) > 0
+            }
+            for node in _package_items():
+                attrs = self._as_mapping(node.attributes)
+                node_id = int(node.id)
+                if target_ids and node_id not in target_ids:
+                    continue
+                if action == "purge":
+                    if not target_ids and str(attrs.get("status", "active")) != "candidate_trash":
+                        continue
+                    if policy_decision.get("apply_allowed", False):
+                        node.attributes["status"] = "purged"
+                        node.attributes["namespace"] = "trash"
+                        node.attributes["updated_at"] = now
+                        node.attributes["purged_at"] = now
+                    changed_item_ids.append(node_id)
+                else:  # restore
+                    if policy_decision.get("apply_allowed", False):
+                        node.attributes["status"] = "active"
+                        node.attributes["namespace"] = "personal"
+                        node.attributes["updated_at"] = now
+                    changed_item_ids.append(node_id)
+        else:
+            # list action
+            pass
+
+        items_payload: list[dict[str, Any]] = []
+        namespace_counts: Counter[str] = Counter()
+        status_counts: Counter[str] = Counter()
+        for node in _package_items():
+            attrs = self._as_mapping(node.attributes)
+            namespace = str(attrs.get("namespace", "personal") or "personal").strip() or "personal"
+            status = str(attrs.get("status", "active") or "active").strip() or "active"
+            namespace_counts[namespace] += 1
+            status_counts[status] += 1
+            items_payload.append(
+                {
+                    "node_id": int(node.id),
+                    "name": str(attrs.get("name", "") or ""),
+                    "content": str(attrs.get("content", "") or ""),
+                    "namespace": namespace,
+                    "status": status,
+                    "trash_score": self._confidence(attrs.get("trash_score", 0.0), 0.0),
+                    "updated_at": float(attrs.get("updated_at", 0.0) or 0.0),
+                }
+            )
+
+        persisted = False
+        if action in {"store", "purge", "restore"} and (created_items or changed_item_ids):
+            persisted = self._persist_graph_safe()
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "project_package_action",
+            {
+                "action": action,
+                "user_id": user_id,
+                "session_id": session_id,
+                "package_name": package_name,
+                "changed_items": len(changed_item_ids),
+                "created_items": len(created_items),
+            },
+        )
+
+        return {
+            "action": action,
+            "user_id": user_id,
+            "session_id": session_id,
+            "package": {
+                "node_id": int(bucket_node.id),
+                "name": package_name,
+            },
+            "manager": {
+                "model_role": model_role,
+                "model_path": model_path,
+                "resolution": manager_resolution,
+            },
+            "created_items": created_items,
+            "changed_item_ids": changed_item_ids,
+            "items": items_payload,
+            "stats": {
+                "item_count": len(items_payload),
+                "namespace_counts": dict(namespace_counts),
+                "status_counts": dict(status_counts),
+            },
+            "persisted": bool(persisted),
+            **self.snapshot_payload(),
+        }
+
+    def project_memory_namespace_apply(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        user_id = str(payload.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(payload.get("session_id", "") or "").strip()
+        namespace = self._normalize_namespace(payload.get("namespace"), default="personal")
+        scope = self._pick_allowed_token(payload.get("scope", "owned"), allowed=_MEMORY_SCOPE_ALLOWED, default="owned")
+        query = " ".join(str(payload.get("query", "") or payload.get("text", "") or "").split()).strip()
+        query_tokens = self._token_set(query)
+        min_score = max(0.0, min(1.0, self._to_float(payload.get("min_score", 0.2), 0.2)))
+        apply_changes = self._to_bool(payload.get("apply_changes", True))
+        confirmation = payload.get("confirmation", payload.get("security_decision", ""))
+        policy_decision = self._llm_policy_decision(
+            user_id=user_id,
+            session_id=session_id,
+            action="memory_namespace_apply",
+            requested_apply=apply_changes,
+            confirmation=confirmation,
+        )
+
+        node_ids = {
+            self._to_int(item, 0)
+            for item in self._as_list(payload.get("node_ids", []))
+            if self._to_int(item, 0) > 0
+        }
+        candidates = self._iter_user_nodes(
+            user_id=user_id,
+            namespace=str(payload.get("source_namespace", "") or ""),
+            scope=scope,
+        )
+        affected: list[dict[str, Any]] = []
+        for node in candidates:
+            node_id = int(node.id)
+            if node_ids and node_id not in node_ids:
+                continue
+            if query_tokens:
+                score = self._jaccard_similarity(query_tokens, self._token_set(self._node_text_blob(node)))
+                if score < min_score:
+                    continue
+            attrs = self._as_mapping(node.attributes)
+            old_namespace = self._normalize_namespace(attrs.get("namespace", "global"), default="global")
+            if policy_decision.get("apply_allowed", False):
+                node.attributes["namespace"] = namespace
+                node.attributes["namespace_updated_at"] = time.time()
+                node.attributes.setdefault("user_id", user_id)
+            affected.append(
+                {
+                    "node_id": node_id,
+                    "node_type": str(node.type or "generic"),
+                    "name": str(attrs.get("name", "") or attrs.get("title", "") or "").strip(),
+                    "old_namespace": old_namespace,
+                    "new_namespace": namespace,
+                }
+            )
+
+        persisted = False
+        if affected and policy_decision.get("apply_allowed", False):
+            persisted = self._persist_graph_safe()
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "memory_namespace_applied",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "namespace": namespace,
+                "scope": scope,
+                "affected": len(affected),
+                "apply_allowed": bool(policy_decision.get("apply_allowed", False)),
+            },
+        )
+
+        return {
+            "user_id": user_id,
+            "session_id": session_id,
+            "namespace": namespace,
+            "scope": scope,
+            "query": query,
+            "affected": affected,
+            "affected_count": len(affected),
+            "policy": policy_decision,
+            "persisted": bool(persisted),
+            **self.snapshot_payload(),
+        }
+
+    def project_memory_namespace_view(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        user_id = str(root.get("user_id", "") or "").strip()
+        scope = self._pick_allowed_token(root.get("scope", "all"), allowed=_MEMORY_SCOPE_ALLOWED, default="all")
+        nodes = self._iter_user_nodes(user_id=user_id, namespace="", scope=scope)
+        max_nodes = max(10, min(800, self._to_int(root.get("max_nodes", 220), 220)))
+        nodes = nodes[:max_nodes]
+        counts: Counter[str] = Counter()
+        rows: list[dict[str, Any]] = []
+        for node in nodes:
+            attrs = self._as_mapping(node.attributes)
+            namespace = self._normalize_namespace(attrs.get("namespace", "global"), default="global")
+            counts[namespace] += 1
+            rows.append(
+                {
+                    "node_id": int(node.id),
+                    "type": str(node.type or "generic"),
+                    "namespace": namespace,
+                    "name": str(attrs.get("name", "") or attrs.get("title", "") or "").strip(),
+                    "user_id": str(attrs.get("user_id", "") or "").strip(),
+                }
+            )
+        rows.sort(key=lambda item: (item["namespace"], item["node_id"]))
+        return {
+            "user_id": user_id,
+            "scope": scope,
+            "namespace_counts": dict(counts),
+            "nodes": rows,
+            "total_nodes": len(rows),
+            **self.snapshot_payload(),
+        }
+
+    def project_graph_rag_query(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        query = " ".join(str(payload.get("query", "") or payload.get("text", "") or "").split()).strip()
+        if not query:
+            raise ValueError("query is required")
+        user_id = str(payload.get("user_id", "") or "").strip()
+        scope = self._pick_allowed_token(payload.get("scope", "all"), allowed=_MEMORY_SCOPE_ALLOWED, default="all")
+        namespace = str(payload.get("namespace", "") or "").strip()
+        top_k = max(1, min(20, self._to_int(payload.get("top_k", 6), 6)))
+        use_llm = self._to_bool(payload.get("use_llm", True))
+        model_role = self._debate_role(payload.get("model_role"), fallback="analyst")
+        model_path = str(payload.get("model_path", "") or "").strip()
+
+        nodes = self._iter_user_nodes(user_id=user_id, namespace=namespace, scope=scope)
+        if not nodes:
+            nodes = list(self.api.engine.store.nodes.values())
+
+        node_ids = {int(node.id) for node in nodes}
+        degree_map = self._graph_degree_map(node_ids=node_ids)
+        query_tokens = self._token_set(query)
+        scored: list[dict[str, Any]] = []
+        for node in nodes:
+            attrs = self._as_mapping(node.attributes)
+            text_blob = self._node_text_blob(node)
+            if not text_blob:
+                continue
+            overlap = self._jaccard_similarity(query_tokens, self._token_set(text_blob))
+            if overlap <= 0.0:
+                continue
+            degree_boost = min(1.0, float(degree_map.get(int(node.id), 0)) / 10.0)
+            score = (0.82 * overlap) + (0.18 * degree_boost)
+            if score < 0.12:
+                continue
+            scored.append(
+                {
+                    "node_id": int(node.id),
+                    "type": str(node.type or "generic"),
+                    "name": str(attrs.get("name", "") or attrs.get("title", "") or "").strip(),
+                    "summary": str(attrs.get("summary", "") or attrs.get("description", "") or "").strip(),
+                    "namespace": self._node_namespace(node, default="global"),
+                    "score": round(max(0.0, min(1.0, score)), 4),
+                }
+            )
+
+        scored.sort(key=lambda row: float(row.get("score", 0.0)), reverse=True)
+        hits = scored[:top_k]
+        context_lines: list[str] = []
+        for idx, hit in enumerate(hits, start=1):
+            title = str(hit.get("name", "") or f"Node {hit.get('node_id', 0)}")
+            summary = str(hit.get("summary", "") or "").strip()
+            if len(summary) > 240:
+                summary = f"{summary[:237].rstrip()}..."
+            context_lines.append(f"[{idx}] {title} (node:{hit.get('node_id')}, score={hit.get('score')})")
+            if summary:
+                context_lines.append(f"    {summary}")
+
+        llm_fn: Callable[[str], str] | None = None
+        resolution: dict[str, Any] = {
+            "mode": "disabled",
+            "requested_role": model_role,
+            "requested_model_path": model_path,
+            "selected_model_path": "",
+        }
+        answer = ""
+        raw_output = ""
+        if use_llm:
+            llm_fn, resolution = self._resolve_role_or_model_llm(role=model_role, model_path=model_path)
+        if llm_fn is not None and context_lines:
+            prompt = (
+                "You are a graph-RAG assistant.\n"
+                "Use only provided context nodes and mention uncertainty when context is insufficient.\n"
+                f"Query: {query}\n"
+                "Context:\n"
+                f"{chr(10).join(context_lines)}\n"
+                "Return JSON only:\n"
+                '{ "answer":"", "reasoning_summary":"", "citations":[{"node_id":0,"why":""}] }\n'
+            )
+            try:
+                raw_output = str(llm_fn(prompt) or "").strip()
+            except Exception:
+                raw_output = ""
+            parsed = self._extract_json_from_llm_output(raw_output)
+            parsed_row = self._as_mapping(parsed)
+            if parsed_row:
+                answer = " ".join(str(parsed_row.get("answer", "") or "").split()).strip()
+        if not answer:
+            if hits:
+                answer = (
+                    "Top graph evidence suggests focusing on: "
+                    + ", ".join(str(item.get("name", "") or item.get("node_id", 0)) for item in hits[:3])
+                )
+            else:
+                answer = "No strong matching nodes found for this query."
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "graph_rag_query",
+            {
+                "user_id": user_id,
+                "scope": scope,
+                "namespace": namespace,
+                "hits": len(hits),
+                "model_role": model_role,
+            },
+        )
+
+        return {
+            "query": query,
+            "user_id": user_id,
+            "scope": scope,
+            "namespace": namespace,
+            "answer": answer,
+            "hits": hits,
+            "model": {
+                "role": model_role,
+                "path": model_path,
+                "resolution": resolution,
+                "used": llm_fn is not None,
+            },
+            "raw_output": raw_output[:6000],
+            **self.snapshot_payload(),
+        }
+
+    def project_contradiction_scan(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        user_id = str(payload.get("user_id", "") or "").strip()
+        scope = self._pick_allowed_token(payload.get("scope", "all"), allowed=_MEMORY_SCOPE_ALLOWED, default="all")
+        namespace = str(payload.get("namespace", "") or "").strip()
+        max_nodes = max(10, min(240, self._to_int(payload.get("max_nodes", 120), 120)))
+        top_k = max(1, min(120, self._to_int(payload.get("top_k", 20), 20)))
+        min_overlap = max(0.1, min(0.95, self._to_float(payload.get("min_overlap", 0.32), 0.32)))
+        apply_to_graph = self._to_bool(payload.get("apply_to_graph", False))
+        session_id = str(payload.get("session_id", "") or "").strip()
+        confirmation = payload.get("confirmation", payload.get("security_decision", ""))
+        policy_decision = self._llm_policy_decision(
+            user_id=user_id,
+            session_id=session_id,
+            action="contradiction_scan_apply",
+            requested_apply=apply_to_graph,
+            confirmation=confirmation,
+        )
+
+        nodes = self._iter_user_nodes(user_id=user_id, namespace=namespace, scope=scope)[:max_nodes]
+        prepared: list[tuple[Any, str, set[str], bool]] = []
+        for node in nodes:
+            text = self._node_text_blob(node)
+            tokens = self._token_set(text)
+            if not text or not tokens:
+                continue
+            prepared.append((node, text, tokens, self._has_negation_hint(text)))
+
+        issues: list[dict[str, Any]] = []
+        for idx in range(len(prepared)):
+            left_node, left_text, left_tokens, left_neg = prepared[idx]
+            for jdx in range(idx + 1, len(prepared)):
+                right_node, right_text, right_tokens, right_neg = prepared[jdx]
+                overlap = self._jaccard_similarity(left_tokens, right_tokens)
+                if overlap < min_overlap:
+                    continue
+                left_lower = f" {left_text.lower()} "
+                right_lower = f" {right_text.lower()} "
+                explicit_opposite = (
+                    (" must " in left_lower and " must not " in right_lower)
+                    or (" must not " in left_lower and " must " in right_lower)
+                    or (" should " in left_lower and " should not " in right_lower)
+                    or (" should not " in left_lower and " should " in right_lower)
+                )
+                negation_conflict = left_neg != right_neg
+                if not explicit_opposite and not negation_conflict:
+                    continue
+                score = overlap + (0.28 if explicit_opposite else 0.0) + (0.16 if negation_conflict else 0.0)
+                issues.append(
+                    {
+                        "left_node_id": int(left_node.id),
+                        "right_node_id": int(right_node.id),
+                        "left_preview": self._to_title(left_text, fallback=f"Node {left_node.id}", limit=120),
+                        "right_preview": self._to_title(right_text, fallback=f"Node {right_node.id}", limit=120),
+                        "overlap": round(overlap, 4),
+                        "negation_conflict": bool(negation_conflict),
+                        "explicit_opposite": bool(explicit_opposite),
+                        "score": round(max(0.0, min(1.0, score)), 4),
+                        "suggestion": (
+                            "Split into context-specific branches or add explicit condition/time window."
+                            if explicit_opposite
+                            else "Add qualifier to clarify when each statement is true."
+                        ),
+                    }
+                )
+        issues.sort(key=lambda row: float(row.get("score", 0.0)), reverse=True)
+        issues = issues[:top_k]
+
+        binding: dict[str, Any] = {
+            "attached": False,
+            "scan_node_id": 0,
+            "issue_node_ids": [],
+        }
+        if issues and policy_decision.get("apply_allowed", False):
+            scan_node = self.api.engine.create_node(
+                "contradiction_scan",
+                attributes={
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "name": f"Contradiction Scan ({len(issues)} issues)",
+                    "namespace": namespace or "global",
+                    "created_at": time.time(),
+                },
+                state={"confidence": max(0.2, 1.0 - (len(issues) / max(1, len(prepared))))},
+            )
+            binding["attached"] = True
+            binding["scan_node_id"] = int(scan_node.id)
+            issue_node_ids: list[int] = []
+            for row in issues:
+                issue_node = self.api.engine.create_node(
+                    "contradiction_issue",
+                    attributes={
+                        "user_id": user_id,
+                        "left_node_id": int(row.get("left_node_id", 0)),
+                        "right_node_id": int(row.get("right_node_id", 0)),
+                        "suggestion": str(row.get("suggestion", "") or ""),
+                        "score": self._confidence(row.get("score", 0.5), 0.5),
+                        "created_at": time.time(),
+                    },
+                    state={"risk": self._confidence(row.get("score", 0.5), 0.5)},
+                )
+                issue_node_ids.append(int(issue_node.id))
+                self._connect_nodes(
+                    from_node=int(scan_node.id),
+                    to_node=int(issue_node.id),
+                    relation_type="tracks_issue",
+                    weight=self._confidence(row.get("score", 0.5), 0.5),
+                    logic_rule="contradiction_scan",
+                )
+            binding["issue_node_ids"] = issue_node_ids
+            self._persist_graph_safe()
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "contradiction_scan_completed",
+            {
+                "user_id": user_id,
+                "scope": scope,
+                "namespace": namespace,
+                "issues": len(issues),
+                "attached": bool(binding.get("attached", False)),
+            },
+        )
+
+        return {
+            "user_id": user_id,
+            "scope": scope,
+            "namespace": namespace,
+            "prepared_nodes": len(prepared),
+            "issues": issues,
+            "issue_count": len(issues),
+            "graph_binding": binding,
+            "policy": policy_decision,
+            **self.snapshot_payload(),
+        }
+
+    def project_task_risk_board(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        user_id = str(payload.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(payload.get("session_id", "") or "").strip()
+        tasks_raw = payload.get("tasks", [])
+        if isinstance(tasks_raw, str):
+            tasks_raw = [{"title": token.strip()} for token in re.split(r"[;\n]+", tasks_raw) if token.strip()]
+        tasks_list = self._as_list(tasks_raw)
+        if not tasks_list:
+            source_text = " ".join(str(payload.get("text", "") or "").split()).strip()
+            if source_text:
+                tasks_list = [{"title": item} for item in self._split_daily_sentences(source_text)[:12]]
+        if not tasks_list:
+            raise ValueError("tasks or text is required")
+
+        apply_to_graph = self._to_bool(payload.get("apply_to_graph", True))
+        confirmation = payload.get("confirmation", payload.get("security_decision", ""))
+        policy_decision = self._llm_policy_decision(
+            user_id=user_id,
+            session_id=session_id,
+            action="task_risk_apply",
+            requested_apply=apply_to_graph,
+            confirmation=confirmation,
+        )
+
+        board_rows: list[dict[str, Any]] = []
+        for idx, item in enumerate(tasks_list[:50], start=1):
+            row = self._as_mapping(item)
+            title = " ".join(str(row.get("title", "") or row.get("task", "") or "").split()).strip()
+            details = " ".join(str(row.get("description", "") or row.get("details", "") or "").split()).strip()
+            if not title:
+                continue
+            base_risk = self._confidence(row.get("risk", row.get("risk_score", 0.35)), 0.35)
+            text_blob = f"{title} {details}".lower()
+            if any(hint in text_blob for hint in ("legal", "law", "deadline", "security", "payment", "prod", "risk")):
+                base_risk = min(1.0, base_risk + 0.22)
+            if any(hint in text_blob for hint in ("research", "draft", "idea", "optional")):
+                base_risk = max(0.0, base_risk - 0.14)
+            level = "low"
+            if base_risk >= 0.8:
+                level = "critical"
+            elif base_risk >= 0.62:
+                level = "high"
+            elif base_risk >= 0.38:
+                level = "medium"
+            if level not in _TASK_RISK_LEVELS:
+                level = "medium"
+            board_rows.append(
+                {
+                    "index": idx,
+                    "title": title,
+                    "details": details,
+                    "risk_score": round(base_risk, 4),
+                    "risk_level": level,
+                    "action": (
+                        "Add mitigation plan and checkpoint"
+                        if level in {"high", "critical"}
+                        else "Proceed with normal monitoring"
+                    ),
+                }
+            )
+        board_rows.sort(key=lambda row: float(row.get("risk_score", 0.0)), reverse=True)
+
+        graph_binding: dict[str, Any] = {
+            "attached": False,
+            "board_node_id": 0,
+            "task_node_ids": [],
+            "risk_node_ids": [],
+        }
+        if board_rows and policy_decision.get("apply_allowed", False):
+            board_node = self.api.engine.create_node(
+                "task_risk_board",
+                attributes={
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "name": f"Task Risk Board ({len(board_rows)} tasks)",
+                    "created_at": time.time(),
+                },
+                state={"confidence": 0.76},
+            )
+            graph_binding["attached"] = True
+            graph_binding["board_node_id"] = int(board_node.id)
+            task_node_ids: list[int] = []
+            risk_node_ids: list[int] = []
+            for row in board_rows:
+                task_node = self.api.engine.create_node(
+                    "task_item",
+                    attributes={
+                        "user_id": user_id,
+                        "title": str(row.get("title", "") or ""),
+                        "details": str(row.get("details", "") or ""),
+                        "risk_level": str(row.get("risk_level", "medium") or "medium"),
+                        "risk_score": self._confidence(row.get("risk_score", 0.5), 0.5),
+                        "created_at": time.time(),
+                    },
+                    state={"risk": self._confidence(row.get("risk_score", 0.5), 0.5)},
+                )
+                task_node_ids.append(int(task_node.id))
+                self._connect_nodes(
+                    from_node=int(board_node.id),
+                    to_node=int(task_node.id),
+                    relation_type="tracks_task",
+                    weight=max(0.2, 1.0 - self._confidence(row.get("risk_score", 0.5), 0.5)),
+                    logic_rule="task_risk_board",
+                )
+                risk_node = self.api.engine.create_node(
+                    "task_risk",
+                    attributes={
+                        "user_id": user_id,
+                        "title": f"Risk · {row.get('title', '')}",
+                        "risk_level": str(row.get("risk_level", "medium") or "medium"),
+                        "risk_score": self._confidence(row.get("risk_score", 0.5), 0.5),
+                        "mitigation": str(row.get("action", "") or ""),
+                    },
+                    state={"risk": self._confidence(row.get("risk_score", 0.5), 0.5)},
+                )
+                risk_node_ids.append(int(risk_node.id))
+                self._connect_nodes(
+                    from_node=int(task_node.id),
+                    to_node=int(risk_node.id),
+                    relation_type="has_risk",
+                    weight=self._confidence(row.get("risk_score", 0.5), 0.5),
+                    logic_rule="task_risk_board",
+                )
+            graph_binding["task_node_ids"] = task_node_ids
+            graph_binding["risk_node_ids"] = risk_node_ids
+            self._persist_graph_safe()
+
+        level_counts: Counter[str] = Counter(str(row.get("risk_level", "low")) for row in board_rows)
+        self.api.engine._record_event(  # noqa: SLF001
+            "task_risk_board_generated",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "tasks": len(board_rows),
+                "attached": bool(graph_binding.get("attached", False)),
+                "level_counts": dict(level_counts),
+            },
+        )
+
+        return {
+            "user_id": user_id,
+            "session_id": session_id,
+            "tasks": board_rows,
+            "task_count": len(board_rows),
+            "risk_level_counts": dict(level_counts),
+            "graph_binding": graph_binding,
+            "policy": policy_decision,
+            **self.snapshot_payload(),
+        }
+
+    def project_timeline_replay(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        user_id = str(root.get("user_id", "") or "").strip()
+        session_id = str(root.get("session_id", "") or "").strip()
+        event_type = str(root.get("event_type", "") or "").strip()
+        limit = max(1, min(5000, self._to_int(root.get("limit", 600), 600)))
+        from_ts = self._to_float(root.get("from_ts", 0.0), 0.0)
+        to_ts = self._to_float(root.get("to_ts", 0.0), 0.0)
+
+        events = self.list_events(limit=limit, event_type=event_type)
+        filtered: list[dict[str, Any]] = []
+        for event in events:
+            timestamp = self._to_float(event.get("timestamp", 0.0), 0.0)
+            if from_ts > 0.0 and timestamp < from_ts:
+                continue
+            if to_ts > 0.0 and timestamp > to_ts:
+                continue
+            payload_map = self._as_mapping(event.get("payload"))
+            if user_id:
+                owner = str(payload_map.get("user_id", "") or "").strip()
+                if owner != user_id:
+                    continue
+            if session_id:
+                sid = str(payload_map.get("session_id", "") or "").strip()
+                if sid != session_id:
+                    continue
+            filtered.append(event)
+
+        event_counts: Counter[str] = Counter(str(item.get("event_type", "")) for item in filtered)
+        timeline: list[dict[str, Any]] = []
+        for idx, event in enumerate(filtered, start=1):
+            payload_map = self._as_mapping(event.get("payload"))
+            summary = ""
+            for key in ("name", "title", "topic", "action", "reason", "relation_type", "phase"):
+                token = " ".join(str(payload_map.get(key, "") or "").split()).strip()
+                if token:
+                    summary = token
+                    break
+            if not summary:
+                summary = f"event {event.get('event_type', '')}"
+            timeline.append(
+                {
+                    "index": idx,
+                    "id": int(event.get("id", 0) or 0),
+                    "event_type": str(event.get("event_type", "") or ""),
+                    "timestamp": self._to_float(event.get("timestamp", 0.0), 0.0),
+                    "summary": summary,
+                    "payload": payload_map,
+                }
+            )
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "timeline_replay_requested",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "event_type": event_type,
+                "returned_events": len(timeline),
+            },
+        )
+
+        return {
+            "filters": {
+                "user_id": user_id,
+                "session_id": session_id,
+                "event_type": event_type,
+                "limit": limit,
+                "from_ts": from_ts,
+                "to_ts": to_ts,
+            },
+            "event_counts": dict(event_counts),
+            "timeline": timeline,
+            "total_events": len(timeline),
+        }
+
+    def project_llm_policy_get(self, _payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            "policy": self._llm_policy_snapshot(),
+            "modes_allowed": list(_LLM_POLICY_MODES_ALLOWED),
+        }
+
+    def project_llm_policy_update(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        merge_lists = self._to_bool(root.get("merge_lists", True))
+        mode = self._pick_allowed_token(
+            root.get("mode", self._llm_policy.get("mode", "confirm_required")),
+            allowed=_LLM_POLICY_MODES_ALLOWED,
+            default="confirm_required",
+        )
+
+        def _next_list(key: str) -> list[str]:
+            incoming = self._dedupe_strings(self._to_list_of_strings(root.get(key)))
+            if not merge_lists:
+                return incoming
+            current = self._dedupe_strings(self._to_list_of_strings(self._llm_policy.get(key)))
+            return self._dedupe_strings(current + incoming)
+
+        self._llm_policy["mode"] = mode
+        if "trusted_sessions" in root:
+            self._llm_policy["trusted_sessions"] = _next_list("trusted_sessions")
+        if "trusted_users" in root:
+            self._llm_policy["trusted_users"] = _next_list("trusted_users")
+        if "allow_apply_for_actions" in root:
+            self._llm_policy["allow_apply_for_actions"] = _next_list("allow_apply_for_actions")
+        self._llm_policy["updated_at"] = time.time()
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "llm_policy_updated",
+            {
+                "mode": mode,
+                "trusted_sessions": len(self._to_list_of_strings(self._llm_policy.get("trusted_sessions"))),
+                "trusted_users": len(self._to_list_of_strings(self._llm_policy.get("trusted_users"))),
+                "allow_actions": len(self._to_list_of_strings(self._llm_policy.get("allow_apply_for_actions"))),
+            },
+        )
+        return {
+            "ok": True,
+            "policy": self._llm_policy_snapshot(),
+            "modes_allowed": list(_LLM_POLICY_MODES_ALLOWED),
+        }
+
+    def project_quality_harness(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        user_id = str(root.get("user_id", "") or "").strip()
+        sample_queries = self._to_list_of_strings(root.get("sample_queries"))[:12]
+        if not sample_queries:
+            sample_queries = [
+                "what are my top priorities",
+                "show risky contradictions",
+                "what to improve next",
+            ]
+
+        snapshot = self.snapshot_payload()
+        nodes = self._as_list(snapshot.get("snapshot", {}).get("nodes"))
+        edges = self._as_list(snapshot.get("snapshot", {}).get("edges"))
+        node_ids = {self._to_int(row.get("id", 0), 0) for row in nodes}
+        dangling_edges = 0
+        for edge in edges:
+            row = self._as_mapping(edge)
+            left = self._to_int(row.get("from", 0), 0)
+            right = self._to_int(row.get("to", 0), 0)
+            if left not in node_ids or right not in node_ids:
+                dangling_edges += 1
+
+        namespace_counts: Counter[str] = Counter()
+        for row in nodes:
+            attrs = self._as_mapping(self._as_mapping(row).get("attributes"))
+            namespace_counts[self._normalize_namespace(attrs.get("namespace", "global"), default="global")] += 1
+
+        contradiction_probe = self.project_contradiction_scan(
+            {
+                "user_id": user_id,
+                "scope": "owned" if user_id else "all",
+                "max_nodes": min(120, len(nodes)),
+                "top_k": 20,
+                "apply_to_graph": False,
+            }
+        )
+        contradiction_count = int(contradiction_probe.get("issue_count", 0) or 0)
+
+        rag_results: list[dict[str, Any]] = []
+        rag_hits = 0
+        for query in sample_queries:
+            rag = self.project_graph_rag_query(
+                {
+                    "query": query,
+                    "user_id": user_id,
+                    "scope": "owned" if user_id else "all",
+                    "top_k": 4,
+                    "use_llm": False,
+                }
+            )
+            hit_count = len(self._as_list(rag.get("hits")))
+            if hit_count > 0:
+                rag_hits += 1
+            rag_results.append(
+                {
+                    "query": query,
+                    "hits": hit_count,
+                }
+            )
+
+        score = 100.0
+        score -= min(30.0, dangling_edges * 3.0)
+        score -= min(24.0, contradiction_count * 1.2)
+        coverage = 0.0 if not sample_queries else float(rag_hits) / float(len(sample_queries))
+        score += 10.0 * coverage
+        if len(nodes) > 10000:
+            score -= 8.0
+        score = max(0.0, min(100.0, score))
+
+        recommendations: list[str] = []
+        if dangling_edges > 0:
+            recommendations.append("Fix dangling edges: nodes were deleted while relations remained.")
+        if contradiction_count > 0:
+            recommendations.append("Review contradiction issues and split statements by context.")
+        if coverage < 0.5:
+            recommendations.append("Improve node summaries/titles to boost graph-RAG retrieval quality.")
+        if len(nodes) > 10000:
+            recommendations.append("Add pagination/indexing for large graphs (10k+ nodes).")
+        if not recommendations:
+            recommendations.append("Quality is stable. Continue with periodic contradiction and retrieval checks.")
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "quality_harness_ran",
+            {
+                "user_id": user_id,
+                "node_count": len(nodes),
+                "edge_count": len(edges),
+                "score": round(score, 2),
+                "dangling_edges": dangling_edges,
+                "contradictions": contradiction_count,
+            },
+        )
+
+        return {
+            "user_id": user_id,
+            "score": round(score, 2),
+            "checks": {
+                "node_count": len(nodes),
+                "edge_count": len(edges),
+                "dangling_edges": dangling_edges,
+                "contradiction_count": contradiction_count,
+                "namespace_counts": dict(namespace_counts),
+                "rag_probe_hits": rag_hits,
+                "rag_probe_total": len(sample_queries),
+            },
+            "rag_results": rag_results,
+            "recommendations": recommendations,
+            **self.snapshot_payload(),
+        }
+
+    def project_backup_create(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        label = " ".join(str(root.get("label", "manual") or "manual").split()).strip() or "manual"
+        user_id = str(root.get("user_id", "") or "").strip()
+        include_events = self._to_bool(root.get("include_events", True))
+        event_limit = max(0, min(10000, self._to_int(root.get("event_limit", 2000), 2000)))
+        backup_payload = {
+            "meta": {
+                "created_at": time.time(),
+                "label": label,
+                "user_id": user_id,
+                "policy": self._llm_policy_snapshot(),
+            },
+            "graph": self.api.engine.snapshot(),
+            "events": self.list_events(limit=event_limit) if include_events else [],
+        }
+        path = self._write_project_backup(backup_payload, label=label)
+        self.api.engine._record_event(  # noqa: SLF001
+            "project_backup_created",
+            {
+                "path": path,
+                "label": label,
+                "user_id": user_id,
+                "include_events": include_events,
+                "event_limit": event_limit,
+            },
+        )
+        return {
+            "ok": True,
+            "path": path,
+            "label": label,
+            "include_events": include_events,
+            "event_count": len(self._as_list(backup_payload.get("events"))),
+            "graph_counts": {
+                "nodes": len(self._as_mapping(backup_payload.get("graph")).get("nodes", {})),
+                "edges": len(self._as_list(self._as_mapping(backup_payload.get("graph")).get("edges"))),
+            },
+        }
+
+    def project_backup_restore(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        requested_path = str(root.get("path", "") or root.get("backup_path", "") or "").strip()
+        if not requested_path and self._to_bool(root.get("latest", True)):
+            backup_dir = self._project_backups_dir()
+            candidates = sorted(backup_dir.glob("project_backup_*.json"))
+            if candidates:
+                requested_path = str(candidates[-1])
+        if not requested_path:
+            raise ValueError("path is required")
+        path = Path(requested_path)
+        if not path.exists() or not path.is_file():
+            raise ValueError("backup file not found")
+
+        raw = path.read_text(encoding="utf-8")
+        parsed = self._safe_json_loads(raw, {})
+        data = self._as_mapping(parsed)
+        graph_snapshot = self._as_mapping(data.get("graph"))
+        raw_nodes = graph_snapshot.get("nodes")
+        if isinstance(raw_nodes, Mapping):
+            nodes_in = len(raw_nodes)
+        elif isinstance(raw_nodes, list):
+            nodes_in = len(raw_nodes)
+        else:
+            nodes_in = 0
+        edges_in = len(self._as_list(graph_snapshot.get("edges")))
+
+        user_id = str(root.get("user_id", "") or "").strip()
+        session_id = str(root.get("session_id", "") or "").strip()
+        apply_changes = self._to_bool(root.get("apply_changes", False))
+        confirmation = root.get("confirmation", root.get("security_decision", ""))
+        policy_decision = self._llm_policy_decision(
+            user_id=user_id,
+            session_id=session_id,
+            action="backup_restore",
+            requested_apply=apply_changes,
+            confirmation=confirmation,
+        )
+
+        restore_result = {
+            "created_nodes": 0,
+            "created_edges": 0,
+        }
+        if policy_decision.get("apply_allowed", False):
+            serialized_nodes: list[dict[str, Any]] = []
+            if isinstance(raw_nodes, Mapping):
+                for key, row in raw_nodes.items():
+                    item = self._as_mapping(row)
+                    serialized_nodes.append(
+                        {
+                            "id": self._to_int(key, self._to_int(item.get("id", 0), 0)),
+                            "type": str(item.get("type", "generic") or "generic"),
+                            "attributes": self._as_mapping(item.get("attributes")),
+                            "state": self._as_mapping(item.get("state")),
+                        }
+                    )
+            elif isinstance(raw_nodes, list):
+                for row in raw_nodes:
+                    item = self._as_mapping(row)
+                    serialized_nodes.append(
+                        {
+                            "id": self._to_int(item.get("id", 0), 0),
+                            "type": str(item.get("type", "generic") or "generic"),
+                            "attributes": self._as_mapping(item.get("attributes")),
+                            "state": self._as_mapping(item.get("state")),
+                        }
+                    )
+            restore_result = self._restore_graph_from_snapshot(
+                {
+                    "nodes": serialized_nodes,
+                    "edges": self._as_list(graph_snapshot.get("edges")),
+                }
+            )
+            if self._to_bool(root.get("restore_policy", True)):
+                meta = self._as_mapping(data.get("meta"))
+                policy = self._as_mapping(meta.get("policy"))
+                if policy:
+                    self._llm_policy["mode"] = self._pick_allowed_token(
+                        policy.get("mode"),
+                        allowed=_LLM_POLICY_MODES_ALLOWED,
+                        default="confirm_required",
+                    )
+                    self._llm_policy["trusted_sessions"] = self._dedupe_strings(
+                        self._to_list_of_strings(policy.get("trusted_sessions"))
+                    )
+                    self._llm_policy["trusted_users"] = self._dedupe_strings(
+                        self._to_list_of_strings(policy.get("trusted_users"))
+                    )
+                    self._llm_policy["allow_apply_for_actions"] = self._dedupe_strings(
+                        self._to_list_of_strings(policy.get("allow_apply_for_actions"))
+                    )
+                    self._llm_policy["updated_at"] = time.time()
+            self._persist_graph_safe()
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "project_backup_restored",
+            {
+                "path": str(path),
+                "apply_allowed": bool(policy_decision.get("apply_allowed", False)),
+                "requested_apply": bool(apply_changes),
+                "nodes_in_backup": nodes_in,
+                "edges_in_backup": edges_in,
+                "restored_nodes": int(restore_result.get("created_nodes", 0)),
+                "restored_edges": int(restore_result.get("created_edges", 0)),
+            },
+        )
+
+        return {
+            "path": str(path),
+            "preview": {
+                "nodes": nodes_in,
+                "edges": edges_in,
+            },
+            "policy": policy_decision,
+            "applied": bool(policy_decision.get("apply_allowed", False)),
+            "result": restore_result,
+            **self.snapshot_payload(),
+        }
+
+    def project_audit_logs(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        limit = max(1, min(2000, self._to_int(root.get("limit", 200), 200)))
+        include_backups = self._to_bool(root.get("include_backups", True))
+        events = self._collect_audit_events(limit=limit)
+        backups: list[dict[str, Any]] = []
+        if include_backups:
+            for path in sorted(self._project_backups_dir().glob("project_backup_*.json"))[-200:]:
+                try:
+                    stat = path.stat()
+                    backups.append(
+                        {
+                            "path": str(path),
+                            "size_bytes": int(stat.st_size),
+                            "modified_at": float(stat.st_mtime),
+                        }
+                    )
+                except Exception:
+                    continue
+        return {
+            "events": events[-limit:],
+            "event_count": len(events[-limit:]),
+            "backups": backups,
+            "backup_count": len(backups),
+        }
+
     def project_db_schema(self) -> dict[str, Any]:
         if self.living_system is None:
             return {
@@ -5707,6 +7801,16 @@ class GraphWorkspaceService:
                 "llm_role_debate": True,
                 "hallucination_hunter": True,
                 "archive_verified_chat": True,
+                "packages_manager": True,
+                "memory_namespaces": True,
+                "graph_rag": True,
+                "contradiction_scan": True,
+                "task_risk_board": True,
+                "timeline_replay": True,
+                "llm_policy_layer": True,
+                "quality_harness": True,
+                "backup_restore": True,
+                "audit_logs": True,
             },
         }
 
