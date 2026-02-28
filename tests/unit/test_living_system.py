@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +18,164 @@ class LivingSystemTests(unittest.TestCase):
             table_map = store.required_tables_present()
             self.assertTrue(table_map)
             self.assertTrue(all(table_map.values()))
+
+    def test_initialize_applies_versioned_migrations_to_existing_db(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "living.db"
+            conn = sqlite3.connect(str(db_path))
+            conn.execute(
+                """
+                CREATE TABLE schema_versions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    version TEXT NOT NULL,
+                    applied_at REAL NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO schema_versions(version, applied_at) VALUES('2026.02.17', 1.0)"
+            )
+            conn.execute(
+                """
+                CREATE TABLE users (
+                    user_id TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE user_profiles (
+                    user_id TEXT PRIMARY KEY,
+                    primary_language TEXT NOT NULL DEFAULT 'hy',
+                    secondary_languages_json TEXT NOT NULL DEFAULT '[]',
+                    preferences_json TEXT NOT NULL DEFAULT '{}',
+                    behavior_model_json TEXT NOT NULL DEFAULT '{}',
+                    timeline_json TEXT NOT NULL DEFAULT '[]',
+                    updated_at REAL NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE nodes (
+                    node_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL DEFAULT '',
+                    node_type TEXT NOT NULL,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    confidence REAL NOT NULL DEFAULT 0.0,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE edges (
+                    edge_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL DEFAULT '',
+                    from_node TEXT NOT NULL,
+                    to_node TEXT NOT NULL,
+                    relation_type TEXT NOT NULL,
+                    confidence REAL NOT NULL DEFAULT 0.0,
+                    weight REAL NOT NULL DEFAULT 0.0,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE reasoning_traces (
+                    trace_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL DEFAULT '',
+                    session_id TEXT NOT NULL,
+                    input_text TEXT NOT NULL,
+                    output_text TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    trace_json TEXT NOT NULL DEFAULT '{}',
+                    created_at REAL NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO users(user_id, display_name, created_at, updated_at) VALUES('u1', 'User 1', 1.0, 2.0)"
+            )
+            conn.execute(
+                """
+                INSERT INTO user_profiles(
+                    user_id, primary_language, secondary_languages_json, preferences_json,
+                    behavior_model_json, timeline_json, updated_at
+                )
+                VALUES('u1', 'en', '[\"ru\"]', '{}', '{}', '[]', 2.0)
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO nodes(
+                    node_id, user_id, node_type, display_name, confidence, version, metadata_json, created_at, updated_at
+                )
+                VALUES('n1', 'u1', 'person', 'User 1', 0.9, 1, '{}', 1.0, 2.0)
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO edges(
+                    user_id, from_node, to_node, relation_type, confidence, weight, version, metadata_json, created_at, updated_at
+                )
+                VALUES('u1', 'n1', 'n1', 'self', 0.9, 0.9, 1, '{}', 1.0, 2.0)
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO reasoning_traces(
+                    user_id, session_id, input_text, output_text, confidence, trace_json, created_at
+                )
+                VALUES('u1', 's1', 'hello world', 'ok', 0.8, '{}', 2.0)
+                """
+            )
+            conn.commit()
+            conn.close()
+
+            store = KnowledgeSQLStore(db_path)
+            store.initialize()
+
+            with store._connect() as migrated:  # noqa: SLF001
+                user_columns = {row["name"] for row in migrated.execute("PRAGMA table_info('users')").fetchall()}
+                profile_columns = {row["name"] for row in migrated.execute("PRAGMA table_info('user_profiles')").fetchall()}
+                node_columns = {row["name"] for row in migrated.execute("PRAGMA table_info('nodes')").fetchall()}
+                edge_columns = {row["name"] for row in migrated.execute("PRAGMA table_info('edges')").fetchall()}
+                trace_columns = {row["name"] for row in migrated.execute("PRAGMA table_info('reasoning_traces')").fetchall()}
+
+                self.assertIn("last_active_at", user_columns)
+                self.assertIn("profile_summary", profile_columns)
+                self.assertIn("source_tag", node_columns)
+                self.assertIn("status", edge_columns)
+                self.assertIn("trace_summary", trace_columns)
+
+                row = migrated.execute(
+                    """
+                    SELECT users.last_active_at, user_profiles.profile_summary, nodes.source_tag, edges.status,
+                           reasoning_traces.trace_summary
+                    FROM users
+                    JOIN user_profiles ON user_profiles.user_id = users.user_id
+                    JOIN nodes ON nodes.user_id = users.user_id
+                    JOIN edges ON edges.user_id = users.user_id
+                    JOIN reasoning_traces ON reasoning_traces.user_id = users.user_id
+                    WHERE users.user_id = 'u1'
+                    """
+                ).fetchone()
+                self.assertGreater(float(row["last_active_at"]), 0.0)
+                self.assertTrue(str(row["profile_summary"]).strip())
+                self.assertEqual(str(row["source_tag"]), "person")
+                self.assertEqual(str(row["status"]), "active")
+                self.assertTrue(str(row["trace_summary"]).strip())
 
     def test_process_input_persists_reasoning_and_snapshot(self):
         with tempfile.TemporaryDirectory() as tmpdir:

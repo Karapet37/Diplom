@@ -77,6 +77,55 @@ class NodeUpdateRequest(BaseModel):
     description: str | None = None
 
 
+class GraphNodeAssistRequest(BaseModel):
+    node_id: int
+    action: str = "improve"
+    message: str = ""
+    context: str = ""
+    user_id: str = "default_user"
+    session_id: str = ""
+    model_path: str = ""
+    model_role: str = "general"
+    apply_to_graph: bool = True
+    verification_mode: str = "balanced"
+    top_k: int = 5
+    capture_dialect: bool = True
+    auto_triage: bool = True
+    triage_with_llm: bool = True
+
+
+class GraphEdgeAssistRequest(BaseModel):
+    from_node: int
+    to_node: int
+    relation_type: str
+    direction: str = "directed"
+    action: str = "improve"
+    message: str = ""
+    context: str = ""
+    user_id: str = "default_user"
+    session_id: str = ""
+    model_path: str = ""
+    model_role: str = "general"
+    apply_to_graph: bool = True
+    verification_mode: str = "balanced"
+    top_k: int = 5
+    capture_dialect: bool = True
+    auto_triage: bool = True
+    triage_with_llm: bool = True
+
+
+class GraphFoundationCreateRequest(BaseModel):
+    topic: str = ""
+    context: str = ""
+    target_node_id: int = 0
+    depth: int = Field(default=2, ge=1, le=3)
+    concept_limit: int = Field(default=4, ge=2, le=6)
+    user_id: str = "default_user"
+    session_id: str = ""
+    model_path: str = ""
+    model_role: str = "planner"
+
+
 class NodeDeleteRequest(BaseModel):
     node_id: int
 
@@ -233,7 +282,7 @@ class ProjectBootstrapRequest(BaseModel):
 
 
 class ProjectDemoWatchRequest(BaseModel):
-    persona_name: str = "Alexa"
+    persona_name: str = "You"
     narrative: str = ""
     language: str = "ru"
     reset_graph: bool = True
@@ -544,19 +593,6 @@ class ProjectArchiveReviewApplyRequest(BaseModel):
     top_k: int = 3
 
 
-class ProjectAutorunsImportRequest(BaseModel):
-    text: str = ""
-    auto_detect: bool = True
-    query: str = ""
-    language: str = "en"
-    client: dict[str, Any] = Field(default_factory=dict)
-    delimiter: str = ""
-    user_id: str = "default_user"
-    session_id: str = "autoruns_session"
-    host_label: str = ""
-    max_rows: int = 1000
-
-
 class ClientIntrospectionRequest(BaseModel):
     session_id: str = ""
     user_id: str = ""
@@ -569,7 +605,6 @@ class ControlPlaneUpdateRequest(BaseModel):
     allow_graph_writes: bool | None = None
     allow_project_demo: bool | None = None
     allow_project_daily: bool | None = None
-    allow_autoruns_import: bool | None = None
     allow_client_introspection: bool | None = None
     allow_living_file_ops: bool | None = None
     allow_knowledge_mutations: bool | None = None
@@ -952,6 +987,27 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.post("/api/graph/node/assist")
+    def graph_node_assist(payload: GraphNodeAssistRequest) -> dict[str, Any]:
+        try:
+            return graph.project_graph_node_assist(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/graph/foundation/create")
+    def graph_foundation_create(payload: GraphFoundationCreateRequest) -> dict[str, Any]:
+        try:
+            return graph.project_graph_foundation_create(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/graph/edge/assist")
+    def graph_edge_assist(payload: GraphEdgeAssistRequest) -> dict[str, Any]:
+        try:
+            return graph.project_graph_edge_assist(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/api/graph/edge/update")
     def graph_update_edge(payload: EdgeUpdateRequest) -> dict[str, Any]:
         try:
@@ -1233,17 +1289,6 @@ def create_app() -> FastAPI:
     def integration_layer_invoke(payload: IntegrationLayerInvokeRequest) -> dict[str, Any]:
         try:
             return graph.project_integration_layer_invoke(payload.model_dump())
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.post("/api/project/autoruns/import")
-    def project_autoruns_import(payload: ProjectAutorunsImportRequest, request: Request) -> dict[str, Any]:
-        try:
-            return graph.project_autoruns_import(
-                payload.model_dump(),
-                request_headers=request.headers,
-                request_ip=extract_client_ip(request, settings=security),
-            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

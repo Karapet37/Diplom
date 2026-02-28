@@ -19,20 +19,13 @@ class ControlPlaneTests(unittest.TestCase):
     def test_feature_gate_blocks_specific_path(self):
         plane = RuntimeControlPlane(
             flags=ControlPlaneFlags(
-                allow_autoruns_import=False,
                 allow_client_introspection=False,
             )
-        )
-        allowed_autoruns, reason_autoruns = plane.allow_request(
-            method="POST",
-            path="/api/project/autoruns/import",
         )
         allowed_introspect, reason_introspect = plane.allow_request(
             method="POST",
             path="/api/client/introspect",
         )
-        self.assertFalse(allowed_autoruns)
-        self.assertEqual(reason_autoruns, "autoruns_import_disabled")
         self.assertFalse(allowed_introspect)
         self.assertEqual(reason_introspect, "client_introspection_disabled")
 
@@ -71,6 +64,45 @@ class ControlPlaneTests(unittest.TestCase):
         allowed, reason = plane.allow_request(
             method="POST",
             path="/api/project/archive/chat",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "prompt_execution_disabled")
+
+    def test_prompt_execution_gate_blocks_graph_node_assist(self):
+        plane = RuntimeControlPlane(
+            flags=ControlPlaneFlags(
+                allow_prompt_execution=False,
+            )
+        )
+        allowed, reason = plane.allow_request(
+            method="POST",
+            path="/api/graph/node/assist",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "prompt_execution_disabled")
+
+    def test_prompt_execution_gate_blocks_graph_foundation_create(self):
+        plane = RuntimeControlPlane(
+            flags=ControlPlaneFlags(
+                allow_prompt_execution=False,
+            )
+        )
+        allowed, reason = plane.allow_request(
+            method="POST",
+            path="/api/graph/foundation/create",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "prompt_execution_disabled")
+
+    def test_prompt_execution_gate_blocks_graph_edge_assist(self):
+        plane = RuntimeControlPlane(
+            flags=ControlPlaneFlags(
+                allow_prompt_execution=False,
+            )
+        )
+        allowed, reason = plane.allow_request(
+            method="POST",
+            path="/api/graph/edge/assist",
         )
         self.assertFalse(allowed)
         self.assertEqual(reason, "prompt_execution_disabled")

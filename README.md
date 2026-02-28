@@ -358,6 +358,7 @@ data/profile_exports/
 - `POST /api/graph/node`
 - `POST /api/graph/node/update`
 - `POST /api/graph/node/delete`
+- `POST /api/graph/node/assist`
 - `POST /api/graph/edge`
 - `POST /api/graph/edge/update`
 - `POST /api/graph/edge/delete`
@@ -382,7 +383,6 @@ data/profile_exports/
 - `POST /api/project/wrapper/profile`
 - `POST /api/project/wrapper/feedback`
 - `POST /api/project/user-graph/update`
-- `POST /api/project/autoruns/import`
 - `GET /api/project/model-advisors`
 - `POST /api/client/introspect`
 - `GET /api/project/db/schema`
@@ -423,7 +423,7 @@ data/profile_exports/
 
 ## Demo Flow
 
-- Demo button now runs `watch_demo` scenario (`Alexa`) with LLM-first extraction and deterministic fallback.
+- Demo button now runs `watch_demo` with a user-centric persona (`You`) and LLM-first extraction plus deterministic fallback.
 - Daily Mode (`/api/project/daily-mode`) creates AI diary entries, extracts goals/problems/wins, returns 3-5 recommendations and improvement scores, and can project journal text into `profile_update_json`.
 - User semantic dimensions can be updated via `/api/project/user-graph/update` using both structured lists and free-text narrative:
   - `fears`, `desires`, `goals`, `principles`, `opportunities`,
@@ -516,52 +516,14 @@ WebSocket stream notes:
 - re-runs verification checks,
 - writes verified/candidate updates into dedicated archive graph branch.
 
-## Sysinternals Autoruns Integration
+## Graph Node Assist
 
-Project supports importing Sysinternals Autoruns exports into the semantic graph:
-- source reference: https://learn.microsoft.com/en-us/sysinternals/downloads/autoruns
-- endpoint: `POST /api/project/autoruns/import`
-- parser supports CSV/TSV (`autoruns` GUI export or `autorunsc` text export)
-- fallback mode supports semantic auto-detection from client telemetry when CSV/TSV is not provided (`auto_detect=true`)
-
-Example:
-
-```bash
-curl -s -X POST "http://127.0.0.1:8008/api/project/autoruns/import" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "Entry,Entry Location,Enabled,Category,Profile,Description,Publisher,Image Path,Launch String,Signer,Verified,VirusTotal\nOneDrive,HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run,Enabled,Logon,user,OneDrive startup,Microsoft Corporation,C:\\\\Program Files\\\\Microsoft OneDrive\\\\OneDrive.exe,\\\"C:\\\\Program Files\\\\Microsoft OneDrive\\\\OneDrive.exe\\\",Microsoft Corporation,Signed,0/74",
-    "user_id": "web_user",
-    "session_id": "autoruns_session_1",
-    "host_label": "Workstation"
-  }'
-```
-
-Response includes:
-- scan metadata,
-- risk summary (`low|medium|high`),
-- semantic binding node IDs,
-- updated snapshot/metrics.
-
-Auto-detect example (no CSV text):
-
-```bash
-curl -s -X POST "http://127.0.0.1:8008/api/project/autoruns/import" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "",
-    "auto_detect": true,
-    "query": "show startup risks for browser updates",
-    "user_id": "web_user",
-    "session_id": "autoruns_session_2",
-    "host_label": "Web User",
-    "client": {
-      "platform": "Linux x86_64",
-      "user_agent": "Mozilla/5.0",
-      "language": "en-US"
-    }
-  }'
-```
+`POST /api/graph/node/assist` is the focused node analysis route used by the main graph UI:
+- accepts a selected `node_id`, `action`, and optional prompt/context,
+- reads the node plus nearby graph context,
+- runs the verified archive-chat pipeline,
+- returns conversational output plus reviewable updates,
+- writes assist sessions and suggested links back into the graph.
 
 ## User Graph Update API
 
@@ -732,7 +694,6 @@ CONTROL_READ_ONLY=0
 CONTROL_ALLOW_GRAPH_WRITES=1
 CONTROL_ALLOW_PROJECT_DEMO=1
 CONTROL_ALLOW_PROJECT_DAILY=1
-CONTROL_ALLOW_AUTORUNS_IMPORT=1
 CONTROL_ALLOW_CLIENT_INTROSPECTION=1
 CONTROL_ALLOW_LIVING_FILE_OPS=1
 CONTROL_ALLOW_KNOWLEDGE_MUTATIONS=1
@@ -773,7 +734,7 @@ curl -X POST http://127.0.0.1:8008/api/control/update \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <TOKEN>" \
   -H "X-Control-Key: <CONTROL_ADMIN_KEY>" \
-  -d '{"read_only": true, "allow_project_demo": false, "allow_autoruns_import": false}'
+  -d '{"read_only": true, "allow_project_demo": false}'
 ```
 
 ## Privacy Noise Plugin (Experimental)

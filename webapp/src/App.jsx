@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyProjectArchiveReview,
   clearGraph,
   checkProjectHallucination,
   createEdge,
+  createGraphFoundation,
   createNode,
   deleteEdge,
   deleteNode,
@@ -15,14 +16,15 @@ import {
   getProfilePrompt,
   getSnapshot,
   inferProfileGraph,
-  importProjectAutoruns,
   introspectClient,
   loadGraph,
   persistGraph,
   reinforceRelation,
   reportProjectHallucination,
   rewardEvent,
+  runGraphEdgeAssist,
   runProjectLLMDebate,
+  runGraphNodeAssist,
   runProjectGraphRagQuery,
   runProjectTaskRiskBoard,
   runProjectTimelineReplay,
@@ -48,6 +50,35 @@ import {
   viewProjectPersonalTree,
   watchProjectDemo,
 } from "./api";
+import {
+  AdvisorsSummaryPanel,
+  ClientSummaryPanel,
+  DataSummaryPanels,
+  ExecutionStatusPanel,
+  FlowReviewPanel,
+  HallucinationSummaryPanel,
+  IntegrationLayerResultPanel,
+  ResultSummaryPanel,
+  TextPreviewPanel,
+  UserGraphSummaryPanel,
+} from "./components/ProjectResultPanels";
+import {
+  buildGraphEdgeAssistActionOptions,
+  buildGraphEdgeAssistInsights,
+  buildGraphNodeAssistActionOptions,
+  GraphEdgeAssistPopover,
+  graphEdgePopoverText,
+  GraphNodeAssistPopover,
+} from "./components/GraphPopovers";
+import {
+  MultitoolDashboardSection,
+  MultitoolEntityEditorCard,
+} from "./components/MultitoolSections";
+import {
+  DailyOverviewSection,
+  DemoOverviewSection,
+  UserGraphOverviewSection,
+} from "./components/OverviewSections";
 import { createIntegrationLayerClient } from "./integrationLayerSdk";
 
 const RELATION_OPTIONS = [
@@ -114,7 +145,6 @@ const OVERVIEW_SECTION_KEYS = [
   "demo",
   "daily",
   "user_graph",
-  "autoruns",
   "multitool",
   "graph",
   "client",
@@ -959,7 +989,6 @@ const EXTRA_TRANSLATIONS = {
     overview_section_demo: "Demo",
     overview_section_daily: "Daily",
     overview_section_user_graph: "User Graph",
-    overview_section_autoruns: "Autoruns",
     overview_section_graph: "Graph",
     overview_section_editor: "Editor",
     overview_section_client: "Client",
@@ -973,7 +1002,7 @@ const EXTRA_TRANSLATIONS = {
     pager_modules: "Modules",
     demo_narrative: "Demo Narrative",
     scenario: "Scenario",
-    demo_narrative_placeholder: "Alexa: who is this person, how childhood went, what they are happy with, and what they want...",
+    demo_narrative_placeholder: "You: who is this person, how childhood went, what they are happy with, and what they want...",
     refresh_client_profile: "Refresh My Client Profile",
     daily_mode: "Daily Mode",
     daily_journal: "Journal",
@@ -996,14 +1025,6 @@ const EXTRA_TRANSLATIONS = {
     user_assets_placeholder: "physical, digital, spiritual...",
     apply_user_graph: "Apply User Graph",
     user_graph_update_result: "User Graph Update Result",
-    autoruns_import_title: "Sysinternals Autoruns Import",
-    autoruns_import_help:
-      "Paste Autoruns CSV/TSV or type a query; if no table is provided the system infers startup/process profile from client telemetry.",
-    autoruns_input_or_query: "Autoruns CSV/TSV or Query",
-    autoruns_placeholder:
-      "Entry,Entry Location,Enabled,Category,Profile,Description,Publisher,Image Path,Launch String,Signer,Verified,VirusTotal\n...",
-    import_autoruns: "Import Autoruns",
-    autoruns_import_result: "Autoruns Import Result",
     selected_node_editor: "Selected Node Editor",
     selected_edge_editor: "Selected Edge Editor",
     metadata_json: "Metadata JSON",
@@ -1016,11 +1037,9 @@ const EXTRA_TRANSLATIONS = {
     prompt_catalog: "Prompt Catalog",
     sql_table_schema_json: "SQL Table Schema (JSON)",
     error_daily_journal_empty: "Daily journal text is empty",
-    error_autoruns_text_empty: "Autoruns text is empty",
     error_profile_input_empty: "Narrative text is empty",
     action_daily_mode: "daily mode",
     action_user_graph_update: "user graph update",
-    action_autoruns_import: "autoruns import",
     action_update_node: "update node",
     action_delete_node: "delete node",
     action_update_edge: "update edge",
@@ -1179,7 +1198,6 @@ const EXTRA_TRANSLATIONS = {
     overview_section_demo: "Демо",
     overview_section_daily: "Дневник",
     overview_section_user_graph: "Граф пользователя",
-    overview_section_autoruns: "Autoruns",
     overview_section_graph: "Граф",
     overview_section_editor: "Редактор",
     overview_section_client: "Клиент",
@@ -1216,14 +1234,6 @@ const EXTRA_TRANSLATIONS = {
     user_assets_placeholder: "физическое, цифровое, духовное...",
     apply_user_graph: "Применить граф пользователя",
     user_graph_update_result: "Результат обновления графа пользователя",
-    autoruns_import_title: "Импорт Sysinternals Autoruns",
-    autoruns_import_help:
-      "Вставь CSV/TSV Autoruns или текстовый запрос; без таблицы система сама построит профиль автозапуска/процессов из клиентской телеметрии.",
-    autoruns_input_or_query: "Autoruns CSV/TSV или запрос",
-    autoruns_placeholder:
-      "Entry,Entry Location,Enabled,Category,Profile,Description,Publisher,Image Path,Launch String,Signer,Verified,VirusTotal\n...",
-    import_autoruns: "Импортировать Autoruns",
-    autoruns_import_result: "Результат импорта Autoruns",
     selected_node_editor: "Редактор выбранного узла",
     selected_edge_editor: "Редактор выбранной связи",
     metadata_json: "JSON метаданных",
@@ -1236,11 +1246,9 @@ const EXTRA_TRANSLATIONS = {
     prompt_catalog: "Каталог промптов",
     sql_table_schema_json: "Схема SQL-таблиц (JSON)",
     error_daily_journal_empty: "Текст дневника пуст",
-    error_autoruns_text_empty: "Текст Autoruns пуст",
     error_profile_input_empty: "Текст-описание пуст",
     action_daily_mode: "режим дневника",
     action_user_graph_update: "обновление графа пользователя",
-    action_autoruns_import: "импорт autoruns",
     action_update_node: "обновление узла",
     action_delete_node: "удаление узла",
     action_update_edge: "обновление связи",
@@ -1400,7 +1408,6 @@ const EXTRA_TRANSLATIONS = {
     overview_section_demo: "Դեմո",
     overview_section_daily: "Օրագիր",
     overview_section_user_graph: "Օգտատիրոջ գրաֆ",
-    overview_section_autoruns: "Autoruns",
     overview_section_graph: "Գրաֆ",
     overview_section_editor: "Խմբագրիչ",
     overview_section_client: "Հաճախորդ",
@@ -1436,14 +1443,6 @@ const EXTRA_TRANSLATIONS = {
     user_assets_placeholder: "ֆիզիկական, թվային, հոգևոր...",
     apply_user_graph: "Կիրառել օգտատիրոջ գրաֆը",
     user_graph_update_result: "Օգտատիրոջ գրաֆի թարմացման արդյունք",
-    autoruns_import_title: "Sysinternals Autoruns ներմուծում",
-    autoruns_import_help:
-      "Տեղադրիր Autoruns CSV/TSV կամ գրիր հարցում․ եթե աղյուսակ չկա, համակարգը կկազմի startup/process պրոֆիլը հաճախորդի telemetry-ից։",
-    autoruns_input_or_query: "Autoruns CSV/TSV կամ հարցում",
-    autoruns_placeholder:
-      "Entry,Entry Location,Enabled,Category,Profile,Description,Publisher,Image Path,Launch String,Signer,Verified,VirusTotal\n...",
-    import_autoruns: "Ներմուծել Autoruns",
-    autoruns_import_result: "Autoruns ներմուծման արդյունք",
     selected_node_editor: "Ընտրված հանգույցի խմբագրիչ",
     selected_edge_editor: "Ընտրված կապի խմբագրիչ",
     metadata_json: "Մետատվյալների JSON",
@@ -1456,11 +1455,9 @@ const EXTRA_TRANSLATIONS = {
     prompt_catalog: "Պրոմպտների կատալոգ",
     sql_table_schema_json: "SQL աղյուսակների սխեմա (JSON)",
     error_daily_journal_empty: "Օրագրի տեքստը դատարկ է",
-    error_autoruns_text_empty: "Autoruns տեքստը դատարկ է",
     error_profile_input_empty: "Պատմողական տեքստը դատարկ է",
     action_daily_mode: "օրագրի ռեժիմ",
     action_user_graph_update: "օգտատիրոջ գրաֆի թարմացում",
-    action_autoruns_import: "autoruns ներմուծում",
     action_update_node: "հանգույցի թարմացում",
     action_delete_node: "հանգույցի ջնջում",
     action_update_edge: "կապի թարմացում",
@@ -1488,7 +1485,6 @@ const EXTRA_TRANSLATIONS = {
     overview_section_demo: "演示",
     overview_section_daily: "日记",
     overview_section_user_graph: "用户图谱",
-    overview_section_autoruns: "Autoruns",
     overview_section_graph: "图谱",
     overview_section_editor: "编辑器",
     overview_section_client: "客户端",
@@ -1501,7 +1497,7 @@ const EXTRA_TRANSLATIONS = {
     pager_modules: "模块",
     demo_narrative: "演示叙述",
     scenario: "场景",
-    demo_narrative_placeholder: "Alexa：这个人是谁，童年如何，满意什么，想要什么……",
+    demo_narrative_placeholder: "You：这个人是谁，童年如何，满意什么，想要什么……",
     refresh_client_profile: "刷新我的客户端画像",
     daily_mode: "日记模式",
     daily_journal: "记录",
@@ -1523,13 +1519,6 @@ const EXTRA_TRANSLATIONS = {
     user_assets_placeholder: "实体、数字、精神……",
     apply_user_graph: "应用用户图谱",
     user_graph_update_result: "用户图谱更新结果",
-    autoruns_import_title: "Sysinternals Autoruns 导入",
-    autoruns_import_help: "粘贴 Autoruns CSV/TSV 或输入查询；若未提供表格，系统将基于客户端遥测推断启动/进程画像。",
-    autoruns_input_or_query: "Autoruns CSV/TSV 或查询",
-    autoruns_placeholder:
-      "Entry,Entry Location,Enabled,Category,Profile,Description,Publisher,Image Path,Launch String,Signer,Verified,VirusTotal\n...",
-    import_autoruns: "导入 Autoruns",
-    autoruns_import_result: "Autoruns 导入结果",
     selected_node_editor: "所选节点编辑器",
     selected_edge_editor: "所选边编辑器",
     metadata_json: "元数据 JSON",
@@ -1542,11 +1531,9 @@ const EXTRA_TRANSLATIONS = {
     prompt_catalog: "提示词目录",
     sql_table_schema_json: "SQL 表结构（JSON）",
     error_daily_journal_empty: "日记文本为空",
-    error_autoruns_text_empty: "Autoruns 文本为空",
     error_profile_input_empty: "叙述文本为空",
     action_daily_mode: "日记模式",
     action_user_graph_update: "更新用户图谱",
-    action_autoruns_import: "导入 autoruns",
     action_update_node: "更新节点",
     action_delete_node: "删除节点",
     action_update_edge: "更新边",
@@ -1574,7 +1561,6 @@ const EXTRA_TRANSLATIONS = {
     overview_section_demo: "Demo",
     overview_section_daily: "Diario",
     overview_section_user_graph: "Grafo del usuario",
-    overview_section_autoruns: "Autoruns",
     overview_section_graph: "Grafo",
     overview_section_editor: "Editor",
     overview_section_client: "Cliente",
@@ -1587,7 +1573,7 @@ const EXTRA_TRANSLATIONS = {
     pager_modules: "Módulos",
     demo_narrative: "Narrativa demo",
     scenario: "Escenario",
-    demo_narrative_placeholder: "Alexa: quién es, cómo fue su infancia, con qué está satisfecho y qué quiere...",
+    demo_narrative_placeholder: "You: quién es, cómo fue su infancia, con qué está satisfecho y qué quiere...",
     refresh_client_profile: "Actualizar mi perfil de cliente",
     daily_mode: "Modo diario",
     daily_journal: "Diario",
@@ -1610,14 +1596,6 @@ const EXTRA_TRANSLATIONS = {
     user_assets_placeholder: "físico, digital, espiritual...",
     apply_user_graph: "Aplicar grafo del usuario",
     user_graph_update_result: "Resultado de actualización del grafo del usuario",
-    autoruns_import_title: "Importación de Sysinternals Autoruns",
-    autoruns_import_help:
-      "Pega CSV/TSV de Autoruns o escribe una consulta; sin tabla, el sistema infiere el perfil de inicio/procesos desde la telemetría del cliente.",
-    autoruns_input_or_query: "Autoruns CSV/TSV o consulta",
-    autoruns_placeholder:
-      "Entry,Entry Location,Enabled,Category,Profile,Description,Publisher,Image Path,Launch String,Signer,Verified,VirusTotal\n...",
-    import_autoruns: "Importar Autoruns",
-    autoruns_import_result: "Resultado de importación de Autoruns",
     selected_node_editor: "Editor de nodo seleccionado",
     selected_edge_editor: "Editor de relación seleccionada",
     metadata_json: "JSON de metadatos",
@@ -1630,11 +1608,9 @@ const EXTRA_TRANSLATIONS = {
     prompt_catalog: "Catálogo de prompts",
     sql_table_schema_json: "Esquema de tablas SQL (JSON)",
     error_daily_journal_empty: "El texto del diario está vacío",
-    error_autoruns_text_empty: "El texto de Autoruns está vacío",
     error_profile_input_empty: "El texto narrativo está vacío",
     action_daily_mode: "modo diario",
     action_user_graph_update: "actualización del grafo del usuario",
-    action_autoruns_import: "importación de autoruns",
     action_update_node: "actualización de nodo",
     action_delete_node: "eliminación de nodo",
     action_update_edge: "actualización de relación",
@@ -1662,7 +1638,6 @@ const EXTRA_TRANSLATIONS = {
     overview_section_demo: "Demo",
     overview_section_daily: "Diário",
     overview_section_user_graph: "Grafo do usuário",
-    overview_section_autoruns: "Autoruns",
     overview_section_graph: "Grafo",
     overview_section_editor: "Editor",
     overview_section_client: "Cliente",
@@ -1675,7 +1650,7 @@ const EXTRA_TRANSLATIONS = {
     pager_modules: "Módulos",
     demo_narrative: "Narrativa de demo",
     scenario: "Cenário",
-    demo_narrative_placeholder: "Alexa: quem é, como foi a infância, com o que está satisfeito e o que deseja...",
+    demo_narrative_placeholder: "You: quem é, como foi a infância, com o que está satisfeito e o que deseja...",
     refresh_client_profile: "Atualizar meu perfil de cliente",
     daily_mode: "Modo diário",
     daily_journal: "Diário",
@@ -1698,14 +1673,6 @@ const EXTRA_TRANSLATIONS = {
     user_assets_placeholder: "físico, digital, espiritual...",
     apply_user_graph: "Aplicar grafo do usuário",
     user_graph_update_result: "Resultado da atualização do grafo do usuário",
-    autoruns_import_title: "Importação do Sysinternals Autoruns",
-    autoruns_import_help:
-      "Cole CSV/TSV do Autoruns ou escreva uma consulta; sem tabela, o sistema infere perfil de inicialização/processos a partir da telemetria do cliente.",
-    autoruns_input_or_query: "Autoruns CSV/TSV ou consulta",
-    autoruns_placeholder:
-      "Entry,Entry Location,Enabled,Category,Profile,Description,Publisher,Image Path,Launch String,Signer,Verified,VirusTotal\n...",
-    import_autoruns: "Importar Autoruns",
-    autoruns_import_result: "Resultado da importação do Autoruns",
     selected_node_editor: "Editor do nó selecionado",
     selected_edge_editor: "Editor da aresta selecionada",
     metadata_json: "JSON de metadados",
@@ -1718,11 +1685,9 @@ const EXTRA_TRANSLATIONS = {
     prompt_catalog: "Catálogo de prompts",
     sql_table_schema_json: "Esquema das tabelas SQL (JSON)",
     error_daily_journal_empty: "O texto do diário está vazio",
-    error_autoruns_text_empty: "O texto do Autoruns está vazio",
     error_profile_input_empty: "O texto narrativo está vazio",
     action_daily_mode: "modo diário",
     action_user_graph_update: "atualização do grafo do usuário",
-    action_autoruns_import: "importação do autoruns",
     action_update_node: "atualização de nó",
     action_delete_node: "exclusão de nó",
     action_update_edge: "atualização de aresta",
@@ -2371,7 +2336,6 @@ const EXTRA_TRANSLATION_EXTENSIONS = {
     overview_section_demo: "Démo",
     overview_section_daily: "Journal",
     overview_section_user_graph: "Graphe utilisateur",
-    overview_section_autoruns: "Autoruns",
     overview_section_graph: "Graphe",
     overview_section_editor: "Éditeur",
     overview_section_client: "Client",
@@ -2402,10 +2366,6 @@ const EXTRA_TRANSLATION_EXTENSIONS = {
     user_assets: "Actifs",
     apply_user_graph: "Appliquer le graphe utilisateur",
     user_graph_update_result: "Résultat de mise à jour du graphe utilisateur",
-    autoruns_import_title: "Import Sysinternals Autoruns",
-    autoruns_input_or_query: "Autoruns CSV/TSV ou requête",
-    import_autoruns: "Importer Autoruns",
-    autoruns_import_result: "Résultat d'import Autoruns",
     selected_node_editor: "Éditeur du nœud sélectionné",
     selected_edge_editor: "Éditeur de l'arête sélectionnée",
     metadata_json: "JSON des métadonnées",
@@ -2496,7 +2456,6 @@ const EXTRA_TRANSLATION_EXTENSIONS = {
     overview_section_demo: "عرض",
     overview_section_daily: "اليومي",
     overview_section_user_graph: "رسم المستخدم",
-    overview_section_autoruns: "Autoruns",
     overview_section_graph: "الرسم",
     overview_section_editor: "المحرر",
     overview_section_client: "العميل",
@@ -2527,10 +2486,6 @@ const EXTRA_TRANSLATION_EXTENSIONS = {
     user_assets: "الأصول",
     apply_user_graph: "تطبيق رسم المستخدم",
     user_graph_update_result: "نتيجة تحديث رسم المستخدم",
-    autoruns_import_title: "استيراد Sysinternals Autoruns",
-    autoruns_input_or_query: "Autoruns CSV/TSV أو استعلام",
-    import_autoruns: "استيراد Autoruns",
-    autoruns_import_result: "نتيجة استيراد Autoruns",
     selected_node_editor: "محرر العقدة المحددة",
     selected_edge_editor: "محرر الحافة المحددة",
     metadata_json: "JSON البيانات الوصفية",
@@ -2621,7 +2576,6 @@ const EXTRA_TRANSLATION_EXTENSIONS = {
     overview_section_demo: "डेमो",
     overview_section_daily: "दैनिक",
     overview_section_user_graph: "यूज़र ग्राफ",
-    overview_section_autoruns: "Autoruns",
     overview_section_graph: "ग्राफ",
     overview_section_editor: "एडिटर",
     overview_section_client: "क्लाइंट",
@@ -2652,10 +2606,6 @@ const EXTRA_TRANSLATION_EXTENSIONS = {
     user_assets: "संसाधन",
     apply_user_graph: "यूज़र ग्राफ लागू करें",
     user_graph_update_result: "यूज़र ग्राफ अपडेट परिणाम",
-    autoruns_import_title: "Sysinternals Autoruns इम्पोर्ट",
-    autoruns_input_or_query: "Autoruns CSV/TSV या क्वेरी",
-    import_autoruns: "Autoruns इम्पोर्ट करें",
-    autoruns_import_result: "Autoruns इम्पोर्ट परिणाम",
     selected_node_editor: "चयनित नोड संपादक",
     selected_edge_editor: "चयनित एज संपादक",
     metadata_json: "मेटाडेटा JSON",
@@ -2746,7 +2696,6 @@ const EXTRA_TRANSLATION_EXTENSIONS = {
     overview_section_demo: "デモ",
     overview_section_daily: "日次",
     overview_section_user_graph: "ユーザーグラフ",
-    overview_section_autoruns: "Autoruns",
     overview_section_graph: "グラフ",
     overview_section_editor: "エディタ",
     overview_section_client: "クライアント",
@@ -2777,10 +2726,6 @@ const EXTRA_TRANSLATION_EXTENSIONS = {
     user_assets: "資産",
     apply_user_graph: "ユーザーグラフを適用",
     user_graph_update_result: "ユーザーグラフ更新結果",
-    autoruns_import_title: "Sysinternals Autoruns 取込",
-    autoruns_input_or_query: "Autoruns CSV/TSV またはクエリ",
-    import_autoruns: "Autoruns を取り込む",
-    autoruns_import_result: "Autoruns 取込結果",
     selected_node_editor: "選択ノード編集",
     selected_edge_editor: "選択エッジ編集",
     metadata_json: "メタデータ JSON",
@@ -3626,6 +3571,21 @@ const LOCALIZED_ADDITIONS = {
     action_integration_manifest_load: "integration manifest load",
     action_integration_invoke: "integration invoke",
     error_integration_message_empty: "Integration input message is empty",
+    graph_foundation_title: "Create Foundation",
+    graph_foundation_subtitle: "Use Mistral to build a visible concept branch and deepen the graph.",
+    graph_foundation_topic: "Foundation Topic",
+    graph_foundation_topic_placeholder: "Describe the base topic, problem, or area to expand...",
+    graph_foundation_context: "Context",
+    graph_foundation_context_placeholder: "Add constraints, goals, or notes for deeper concepts...",
+    graph_foundation_depth: "Depth",
+    graph_foundation_concept_limit: "Concepts Per Layer",
+    graph_foundation_target_current: "Current anchor",
+    graph_foundation_target_none: "No selected node: a new root branch will be created.",
+    graph_foundation_target_selected: "Selected node will be used as the anchor for the new branch.",
+    graph_foundation_result: "Foundation Result",
+    graph_foundation_execution: "Foundation Execution",
+    graph_foundation_action: "create foundation",
+    error_graph_foundation_topic_empty: "Enter a topic or select a node to deepen first.",
   },
   ru: {
     interaction_mode_title: "Режим взаимодействия",
@@ -3659,6 +3619,21 @@ const LOCALIZED_ADDITIONS = {
     action_integration_manifest_load: "загрузка integration manifest",
     action_integration_invoke: "вызов integration layer",
     error_integration_message_empty: "Пустое входное сообщение интеграции",
+    graph_foundation_title: "Создать основу",
+    graph_foundation_subtitle: "Использовать Mistral для построения видимой ветки понятий и углубления графа.",
+    graph_foundation_topic: "Тема основы",
+    graph_foundation_topic_placeholder: "Опиши базовую тему, задачу или область для расширения...",
+    graph_foundation_context: "Контекст",
+    graph_foundation_context_placeholder: "Добавь ограничения, цели или заметки для более глубоких понятий...",
+    graph_foundation_depth: "Глубина",
+    graph_foundation_concept_limit: "Понятий на слой",
+    graph_foundation_target_current: "Текущая опора",
+    graph_foundation_target_none: "Узел не выбран: будет создана новая корневая ветка.",
+    graph_foundation_target_selected: "Выбранный узел станет опорой для новой ветки.",
+    graph_foundation_result: "Результат основы",
+    graph_foundation_execution: "Выполнение основы",
+    graph_foundation_action: "создать основу",
+    error_graph_foundation_topic_empty: "Введи тему или сначала выбери узел для углубления.",
   },
   hy: {
     interaction_mode_title: "Փոխազդեցության ռեժիմ",
@@ -3691,6 +3666,21 @@ const LOCALIZED_ADDITIONS = {
     action_integration_manifest_load: "integration manifest բեռնում",
     action_integration_invoke: "integration layer կանչ",
     error_integration_message_empty: "Ինտեգրացիայի մուտքային հաղորդագրությունը դատարկ է",
+    graph_foundation_title: "Ստեղծել հիմք",
+    graph_foundation_subtitle: "Օգտագործիր Mistral-ը, որ գրաֆում կառուցվի տեսանելի գաղափարային ճյուղ և խորացում։",
+    graph_foundation_topic: "Հիմքի թեմա",
+    graph_foundation_topic_placeholder: "Նկարագրիր հիմնական թեման, խնդիրը կամ ոլորտը...",
+    graph_foundation_context: "Կոնտեքստ",
+    graph_foundation_context_placeholder: "Ավելացրու սահմանափակումներ, նպատակներ կամ նշումներ...",
+    graph_foundation_depth: "Խորություն",
+    graph_foundation_concept_limit: "Գաղափարներ մեկ շերտում",
+    graph_foundation_target_current: "Ընթացիկ հենակետ",
+    graph_foundation_target_none: "Ընտրված հանգույց չկա․ կստեղծվի նոր արմատային ճյուղ։",
+    graph_foundation_target_selected: "Ընտրված հանգույցը կդառնա նոր ճյուղի հենակետը։",
+    graph_foundation_result: "Հիմքի արդյունք",
+    graph_foundation_execution: "Հիմքի կատարում",
+    graph_foundation_action: "ստեղծել հիմք",
+    error_graph_foundation_topic_empty: "Մուտքագրիր թեմա կամ նախ ընտրիր խորացվող հանգույց։",
   },
   fr: {
     interaction_mode_title: "Mode d'interaction",
@@ -3725,6 +3715,21 @@ const LOCALIZED_ADDITIONS = {
     action_integration_manifest_load: "chargement du manifest d'intégration",
     action_integration_invoke: "invocation de la couche d'intégration",
     error_integration_message_empty: "Le message d'entrée d'intégration est vide",
+    graph_foundation_title: "Créer une base",
+    graph_foundation_subtitle: "Utiliser Mistral pour créer une branche de concepts visible et approfondir le graphe.",
+    graph_foundation_topic: "Sujet de base",
+    graph_foundation_topic_placeholder: "Décrivez le sujet, le problème ou le domaine à développer...",
+    graph_foundation_context: "Contexte",
+    graph_foundation_context_placeholder: "Ajoutez contraintes, objectifs ou notes pour aller plus en profondeur...",
+    graph_foundation_depth: "Profondeur",
+    graph_foundation_concept_limit: "Concepts par niveau",
+    graph_foundation_target_current: "Ancrage actuel",
+    graph_foundation_target_none: "Aucun nœud sélectionné : une nouvelle branche racine sera créée.",
+    graph_foundation_target_selected: "Le nœud sélectionné servira d'ancrage pour la nouvelle branche.",
+    graph_foundation_result: "Résultat de la base",
+    graph_foundation_execution: "Exécution de la base",
+    graph_foundation_action: "créer une base",
+    error_graph_foundation_topic_empty: "Entrez un sujet ou sélectionnez d'abord un nœud à approfondir.",
   },
   es: {
     interaction_mode_title: "Modo de interacción",
@@ -3759,6 +3764,21 @@ const LOCALIZED_ADDITIONS = {
     action_integration_manifest_load: "carga de manifest de integración",
     action_integration_invoke: "invocación de la capa de integración",
     error_integration_message_empty: "El mensaje de entrada de integración está vacío",
+    graph_foundation_title: "Crear base",
+    graph_foundation_subtitle: "Usa Mistral para crear una rama visible de conceptos y profundizar el grafo.",
+    graph_foundation_topic: "Tema base",
+    graph_foundation_topic_placeholder: "Describe el tema, problema o área que quieres expandir...",
+    graph_foundation_context: "Contexto",
+    graph_foundation_context_placeholder: "Agrega restricciones, objetivos o notas para profundizar...",
+    graph_foundation_depth: "Profundidad",
+    graph_foundation_concept_limit: "Conceptos por nivel",
+    graph_foundation_target_current: "Ancla actual",
+    graph_foundation_target_none: "No hay nodo seleccionado: se creará una nueva rama raíz.",
+    graph_foundation_target_selected: "El nodo seleccionado se usará como ancla de la nueva rama.",
+    graph_foundation_result: "Resultado de la base",
+    graph_foundation_execution: "Ejecución de la base",
+    graph_foundation_action: "crear base",
+    error_graph_foundation_topic_empty: "Escribe un tema o selecciona primero un nodo para profundizar.",
   },
   pt: {
     interaction_mode_title: "Modo de interação",
@@ -3793,6 +3813,21 @@ const LOCALIZED_ADDITIONS = {
     action_integration_manifest_load: "carregamento do manifest de integração",
     action_integration_invoke: "invocação da camada de integração",
     error_integration_message_empty: "A mensagem de entrada da integração está vazia",
+    graph_foundation_title: "Criar base",
+    graph_foundation_subtitle: "Use o Mistral para criar um ramo visível de conceitos e aprofundar o grafo.",
+    graph_foundation_topic: "Tema base",
+    graph_foundation_topic_placeholder: "Descreva o tema, problema ou área para expandir...",
+    graph_foundation_context: "Contexto",
+    graph_foundation_context_placeholder: "Adicione restrições, metas ou notas para aprofundar os conceitos...",
+    graph_foundation_depth: "Profundidade",
+    graph_foundation_concept_limit: "Conceitos por camada",
+    graph_foundation_target_current: "Âncora atual",
+    graph_foundation_target_none: "Nenhum nó selecionado: um novo ramo raiz será criado.",
+    graph_foundation_target_selected: "O nó selecionado será a âncora do novo ramo.",
+    graph_foundation_result: "Resultado da base",
+    graph_foundation_execution: "Execução da base",
+    graph_foundation_action: "criar base",
+    error_graph_foundation_topic_empty: "Informe um tema ou selecione um nó para aprofundar primeiro.",
   },
   ar: {
     interaction_mode_title: "وضع التفاعل",
@@ -3825,6 +3860,21 @@ const LOCALIZED_ADDITIONS = {
     action_integration_manifest_load: "تحميل manifest للتكامل",
     action_integration_invoke: "تشغيل طبقة التكامل",
     error_integration_message_empty: "رسالة إدخال التكامل فارغة",
+    graph_foundation_title: "إنشاء أساس",
+    graph_foundation_subtitle: "استخدم Mistral لبناء فرع مفاهيمي مرئي وتعميق الرسم البياني.",
+    graph_foundation_topic: "موضوع الأساس",
+    graph_foundation_topic_placeholder: "صف الموضوع أو المشكلة أو المجال الذي تريد توسيعه...",
+    graph_foundation_context: "السياق",
+    graph_foundation_context_placeholder: "أضف قيودًا أو أهدافًا أو ملاحظات لتعميق المفاهيم...",
+    graph_foundation_depth: "العمق",
+    graph_foundation_concept_limit: "المفاهيم لكل طبقة",
+    graph_foundation_target_current: "المرتكز الحالي",
+    graph_foundation_target_none: "لا توجد عقدة محددة: سيتم إنشاء فرع جذري جديد.",
+    graph_foundation_target_selected: "سيتم استخدام العقدة المحددة كمرتكز للفرع الجديد.",
+    graph_foundation_result: "نتيجة الأساس",
+    graph_foundation_execution: "تنفيذ الأساس",
+    graph_foundation_action: "إنشاء أساس",
+    error_graph_foundation_topic_empty: "أدخل موضوعًا أو حدّد عقدة أولًا لتعميقها.",
   },
   hi: {
     interaction_mode_title: "इंटरैक्शन मोड",
@@ -3859,6 +3909,21 @@ const LOCALIZED_ADDITIONS = {
     action_integration_manifest_load: "integration manifest लोड",
     action_integration_invoke: "integration layer invoke",
     error_integration_message_empty: "Integration इनपुट संदेश खाली है",
+    graph_foundation_title: "आधार बनाएं",
+    graph_foundation_subtitle: "Mistral का उपयोग करके दिखाई देने वाली कॉन्सेप्ट शाखा बनाएं और ग्राफ को गहरा करें।",
+    graph_foundation_topic: "आधार विषय",
+    graph_foundation_topic_placeholder: "वह विषय, समस्या या क्षेत्र लिखें जिसे बढ़ाना है...",
+    graph_foundation_context: "संदर्भ",
+    graph_foundation_context_placeholder: "गहरे कॉन्सेप्ट के लिए सीमाएँ, लक्ष्य या नोट्स जोड़ें...",
+    graph_foundation_depth: "गहराई",
+    graph_foundation_concept_limit: "प्रति स्तर कॉन्सेप्ट",
+    graph_foundation_target_current: "वर्तमान एंकर",
+    graph_foundation_target_none: "कोई नोड चयनित नहीं है: नई रूट शाखा बनाई जाएगी।",
+    graph_foundation_target_selected: "चयनित नोड नई शाखा का एंकर बनेगा।",
+    graph_foundation_result: "आधार परिणाम",
+    graph_foundation_execution: "आधार निष्पादन",
+    graph_foundation_action: "आधार बनाएं",
+    error_graph_foundation_topic_empty: "कोई विषय लिखें या पहले गहराई के लिए एक नोड चुनें।",
   },
   zh: {
     interaction_mode_title: "交互模式",
@@ -3891,6 +3956,21 @@ const LOCALIZED_ADDITIONS = {
     action_integration_manifest_load: "加载集成 manifest",
     action_integration_invoke: "执行集成层调用",
     error_integration_message_empty: "集成输入消息为空",
+    graph_foundation_title: "创建基础",
+    graph_foundation_subtitle: "使用 Mistral 构建可见的概念分支，并让图谱向下展开。",
+    graph_foundation_topic: "基础主题",
+    graph_foundation_topic_placeholder: "描述要扩展的主题、问题或领域...",
+    graph_foundation_context: "上下文",
+    graph_foundation_context_placeholder: "补充约束、目标或备注，以便生成更深层概念...",
+    graph_foundation_depth: "深度",
+    graph_foundation_concept_limit: "每层概念数",
+    graph_foundation_target_current: "当前锚点",
+    graph_foundation_target_none: "未选择节点：将创建新的根分支。",
+    graph_foundation_target_selected: "所选节点将作为新分支的锚点。",
+    graph_foundation_result: "基础结果",
+    graph_foundation_execution: "基础执行",
+    graph_foundation_action: "创建基础",
+    error_graph_foundation_topic_empty: "请输入主题，或先选择一个要深化的节点。",
   },
   ja: {
     interaction_mode_title: "対話モード",
@@ -3923,6 +4003,21 @@ const LOCALIZED_ADDITIONS = {
     action_integration_manifest_load: "integration manifest 読み込み",
     action_integration_invoke: "integration layer 実行",
     error_integration_message_empty: "Integration の入力メッセージが空です",
+    graph_foundation_title: "土台を作成",
+    graph_foundation_subtitle: "Mistral で見える概念ブランチを作り、グラフを深掘りします。",
+    graph_foundation_topic: "土台のテーマ",
+    graph_foundation_topic_placeholder: "広げたいテーマ、課題、領域を入力してください...",
+    graph_foundation_context: "コンテキスト",
+    graph_foundation_context_placeholder: "より深い概念のために制約、目標、メモを追加してください...",
+    graph_foundation_depth: "深さ",
+    graph_foundation_concept_limit: "各レイヤーの概念数",
+    graph_foundation_target_current: "現在のアンカー",
+    graph_foundation_target_none: "ノード未選択: 新しいルートブランチを作成します。",
+    graph_foundation_target_selected: "選択したノードを新しいブランチのアンカーとして使います。",
+    graph_foundation_result: "土台の結果",
+    graph_foundation_execution: "土台の実行",
+    graph_foundation_action: "土台を作成",
+    error_graph_foundation_topic_empty: "テーマを入力するか、先に深掘りするノードを選択してください。",
   },
 };
 
@@ -3930,7 +4025,6 @@ const OVERVIEW_SECTION_TRANSLATION_KEYS = {
   demo: "overview_section_demo",
   daily: "overview_section_daily",
   user_graph: "overview_section_user_graph",
-  autoruns: "overview_section_autoruns",
   multitool: "overview_section_multitool",
   graph: "overview_section_graph",
   client: "overview_section_client",
@@ -4015,6 +4109,50 @@ function countRowsFromObject(value) {
     }))
     .filter((row) => row.name && Number.isFinite(row.count) && row.count > 0)
     .sort((a, b) => b.count - a.count);
+}
+
+function extractFocusedSnapshot(sourceSnapshot, seedNodeIds, maxNodes = 18) {
+  const nodes = Array.isArray(sourceSnapshot?.nodes) ? sourceSnapshot.nodes : [];
+  const edges = Array.isArray(sourceSnapshot?.edges) ? sourceSnapshot.edges : [];
+  const orderedSeedIds = (Array.isArray(seedNodeIds) ? seedNodeIds : [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  if (!orderedSeedIds.length) {
+    return { nodes: [], edges: [] };
+  }
+
+  const allowedIds = new Set(orderedSeedIds);
+  const seenQueue = new Set(orderedSeedIds);
+  const queue = [...orderedSeedIds];
+
+  while (queue.length && allowedIds.size < Math.max(4, Number(maxNodes || 18))) {
+    const currentId = Number(queue.shift());
+    for (const edge of edges) {
+      const fromId = Number(edge?.from || 0);
+      const toId = Number(edge?.to || 0);
+      let neighborId = 0;
+      if (fromId === currentId && toId > 0) neighborId = toId;
+      if (toId === currentId && fromId > 0) neighborId = fromId;
+      if (!neighborId || allowedIds.has(neighborId)) continue;
+      allowedIds.add(neighborId);
+      if (!seenQueue.has(neighborId)) {
+        seenQueue.add(neighborId);
+        queue.push(neighborId);
+      }
+      if (allowedIds.size >= Math.max(4, Number(maxNodes || 18))) {
+        break;
+      }
+    }
+  }
+
+  return {
+    nodes: nodes.filter((node) => allowedIds.has(Number(node?.id || 0))),
+    edges: edges.filter((edge) => {
+      const fromId = Number(edge?.from || 0);
+      const toId = Number(edge?.to || 0);
+      return allowedIds.has(fromId) && allowedIds.has(toId);
+    }),
+  };
 }
 
 function normalizeRole(value, fallback = "general") {
@@ -5494,12 +5632,27 @@ function GraphCanvas({
   selectedEdgeSig,
   tracePath,
   edgeEffectsBySig,
+  pendingPreview,
+  renderNodePopover,
+  renderEdgePopover,
   onSelectNode,
   onSelectEdge,
 }) {
   const nodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
   const edges = Array.isArray(snapshot?.edges) ? snapshot.edges : [];
   const [hoveredNodeId, setHoveredNodeId] = useState(null);
+
+  function matchesPendingEdgeCandidate(edge, candidate) {
+    const current = edge && typeof edge === "object" ? edge : {};
+    const pending = candidate && typeof candidate === "object" ? candidate : {};
+    if (Number(current.from || 0) !== Number(pending.from_node || 0)) return false;
+    if (Number(current.to || 0) !== Number(pending.to_node || 0)) return false;
+    const pendingRelation = String(pending.relation_type || "").trim();
+    if (pendingRelation && pendingRelation !== String(current.relation_type || "").trim()) return false;
+    const pendingDirection = String(pending.direction || "").trim();
+    if (pendingDirection && pendingDirection !== String(current.direction || "directed").trim()) return false;
+    return true;
+  }
 
   useEffect(() => {
     if (hoveredNodeId == null) return;
@@ -5557,6 +5710,40 @@ function GraphCanvas({
     () => new Set(exploration.descendantEdgeSigs || []),
     [exploration.descendantEdgeSigs]
   );
+  const pendingNodeSet = useMemo(() => {
+    const rows = Array.isArray(pendingPreview?.nodeIds) ? pendingPreview.nodeIds : [];
+    return new Set(rows.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0));
+  }, [pendingPreview]);
+  const pendingEdgeRefs = useMemo(() => {
+    const rows = Array.isArray(pendingPreview?.edgeRefs) ? pendingPreview.edgeRefs : [];
+    return rows
+      .map((row) => {
+        const item = row && typeof row === "object" ? row : {};
+        const fromNode = Number(item.from_node || 0);
+        const toNode = Number(item.to_node || 0);
+        if (!Number.isFinite(fromNode) || fromNode <= 0 || !Number.isFinite(toNode) || toNode <= 0) {
+          return null;
+        }
+        return {
+          from_node: fromNode,
+          to_node: toNode,
+          relation_type: String(item.relation_type || "").trim(),
+          direction: String(item.direction || "").trim() || "directed",
+          action: String(item.action || "").trim() || "update",
+          weight: Number(item.weight || 0) || 0,
+        };
+      })
+      .filter(Boolean);
+  }, [pendingPreview]);
+  const pendingEdgeBySig = useMemo(() => {
+    const map = new Map();
+    for (const edge of edges) {
+      const match = pendingEdgeRefs.find((candidate) => matchesPendingEdgeCandidate(edge, candidate));
+      if (!match) continue;
+      map.set(edgeSignature(edge), match);
+    }
+    return map;
+  }, [edges, pendingEdgeRefs]);
 
   const layout = useMemo(() => {
     const width = 1080;
@@ -5647,6 +5834,77 @@ function GraphCanvas({
 
     return { width, height, byId };
   }, [nodes, edges]);
+  const syntheticPendingEdges = useMemo(() => {
+    if (!pendingEdgeRefs.length) {
+      return [];
+    }
+    return pendingEdgeRefs.filter((candidate) => {
+      if (!layout.byId.has(candidate.from_node) || !layout.byId.has(candidate.to_node)) {
+        return false;
+      }
+      return !edges.some((edge) => matchesPendingEdgeCandidate(edge, candidate));
+    });
+  }, [edges, layout.byId, pendingEdgeRefs]);
+  const popoverNode = useMemo(() => {
+    if (typeof renderNodePopover !== "function") {
+      return null;
+    }
+    const selected = Number(selectedNodeId);
+    if (!Number.isFinite(selected) || selected <= 0) {
+      return null;
+    }
+    return nodes.find((node) => Number(node?.id) === selected) || null;
+  }, [nodes, renderNodePopover, selectedNodeId]);
+  const popoverLayout = useMemo(() => {
+    if (!popoverNode) {
+      return null;
+    }
+    const point = layout.byId.get(Number(popoverNode.id));
+    if (!point) {
+      return null;
+    }
+    const width = 338;
+    const height = 324;
+    const x =
+      point.x + 42 + width <= layout.width - 12
+        ? point.x + 42
+        : Math.max(12, point.x - width - 42);
+    const y = Math.max(12, Math.min(layout.height - height - 12, point.y - height / 2));
+    return { x, y, width, height, node: popoverNode };
+  }, [layout, popoverNode]);
+  const edgePopoverLayout = useMemo(() => {
+    if (typeof renderEdgePopover !== "function") {
+      return null;
+    }
+    const sig = String(selectedEdgeSig || "").trim();
+    if (!sig) {
+      return null;
+    }
+    const edge = edges.find((item) => edgeSignature(item) === sig);
+    if (!edge) {
+      return null;
+    }
+    const a = layout.byId.get(edge.from);
+    const b = layout.byId.get(edge.to);
+    if (!a || !b) {
+      return null;
+    }
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const length = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+    const nx = -dy / length;
+    const ny = dx / length;
+    const curve = 18;
+    const cx = (a.x + b.x) / 2 + nx * curve;
+    const cy = (a.y + b.y) / 2 + ny * curve;
+    const midX = (a.x + 2 * cx + b.x) / 4;
+    const midY = (a.y + 2 * cy + b.y) / 4;
+    const width = 320;
+    const height = 268;
+    const x = Math.max(12, Math.min(layout.width - width - 12, midX - width / 2));
+    const y = Math.max(12, Math.min(layout.height - height - 12, midY - height - 26));
+    return { x, y, width, height, edge };
+  }, [edges, layout, renderEdgePopover, selectedEdgeSig]);
 
   if (!nodes.length) {
     return <div className="empty-canvas">{t("graph_empty")}</div>;
@@ -5680,6 +5938,9 @@ function GraphCanvas({
         <marker id="arrow-descendant" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
           <polygon points="0 0, 10 5, 0 10" fill="#2b74b0" />
         </marker>
+        <marker id="arrow-pending" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+          <polygon points="0 0, 10 5, 0 10" fill="#7f5b00" />
+        </marker>
         <filter id="node-glow" x="-40%" y="-40%" width="180%" height="180%">
           <feDropShadow dx="0" dy="1.5" stdDeviation="2.2" floodColor="#12395e" floodOpacity="0.2" />
         </filter>
@@ -5699,6 +5960,7 @@ function GraphCanvas({
 
         const sig = edgeSignature(edge);
         const liveEffect = edgeEffectsBySig && typeof edgeEffectsBySig === "object" ? edgeEffectsBySig[sig] : null;
+        const pendingEdge = pendingEdgeBySig.get(sig) || null;
         const active = selectedEdgeSig === sig;
         const inPath = pathEdgeSet.has(sig);
         const inAncestors = ancestorEdgeSet.has(sig);
@@ -5752,6 +6014,7 @@ function GraphCanvas({
           inPath ? "edge-line-path" : "",
           inAncestors ? "edge-line-ancestor" : "",
           inDescendants ? "edge-line-descendant" : "",
+          pendingEdge ? "edge-line-pending" : "",
           active ? "edge-line-active" : "",
           liveEffect?.kind === "added" ? "edge-live-added" : "",
           liveEffect?.kind === "updated" ? "edge-live-updated" : "",
@@ -5794,8 +6057,52 @@ function GraphCanvas({
                 markerEnd={markerEnd}
               />
             )}
+            {pendingEdge && (
+              <path
+                d={path}
+                fill="none"
+                pointerEvents="none"
+                className="edge-pending-overlay"
+                stroke="#9a7000"
+                strokeWidth={2.2 + Math.max(0, Number(edge.weight || 0)) * 2.4}
+                markerEnd={markerEnd}
+              />
+            )}
             <text x={midX} y={midY - 5} className="edge-label" fill={edgeLabelColor} opacity={edgeLabelOpacity}>
               {edge.relation_type} · {Number(edge.weight || 0).toFixed(2)}
+            </text>
+          </g>
+        );
+      })}
+
+      {syntheticPendingEdges.map((edge, idx) => {
+        const a = layout.byId.get(edge.from_node);
+        const b = layout.byId.get(edge.to_node);
+        if (!a || !b) {
+          return null;
+        }
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const length = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+        const nx = -dy / length;
+        const ny = dx / length;
+        const cx = (a.x + b.x) / 2 + nx * 16;
+        const cy = (a.y + b.y) / 2 + ny * 16;
+        const path = `M ${a.x} ${a.y} Q ${cx} ${cy} ${b.x} ${b.y}`;
+        const midX = (a.x + 2 * cx + b.x) / 4;
+        const midY = (a.y + 2 * cy + b.y) / 4;
+        return (
+          <g key={`pending-edge-${edge.from_node}-${edge.to_node}-${edge.relation_type}-${idx}`} pointerEvents="none">
+            <path
+              d={path}
+              fill="none"
+              className="edge-pending-overlay edge-pending-overlay-synthetic"
+              stroke="#8b6a10"
+              strokeWidth={2.6}
+              markerEnd={edge.direction === "undirected" ? undefined : "url(#arrow-pending)"}
+            />
+            <text x={midX} y={midY - 6} className="edge-label" fill="#7c5f0f">
+              {(edge.relation_type || "pending").trim()}
             </text>
           </g>
         );
@@ -5813,6 +6120,7 @@ function GraphCanvas({
         const onPath = pathNodeSet.has(nodeId);
         const ancestor = ancestorNodeSet.has(nodeId);
         const descendant = descendantNodeSet.has(nodeId);
+        const pending = pendingNodeSet.has(nodeId);
         const related = focused || onPath || ancestor || descendant;
         const muted = hasFocus && !related && !selected;
         let fill = "#f7fbff";
@@ -5846,6 +6154,12 @@ function GraphCanvas({
           strokeWidth = 3.2;
           textColor = "#6e2c0c";
         }
+        if (pending && !selected && !focused && !onPath && !ancestor && !descendant) {
+          fill = "#fff8dd";
+          stroke = "#b88506";
+          strokeWidth = 2.8;
+          textColor = "#7c5a0e";
+        }
         if (muted) {
           fill = "#f2f7fc";
           stroke = "#a4b6c8";
@@ -5877,6 +6191,15 @@ function GraphCanvas({
                 className={`node-aura ${selected ? "node-aura-selected" : focused ? "node-aura-focus" : "node-aura-path"}`}
               />
             )}
+            {pending && (
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={selected ? 45 : focused ? 42 : 39}
+                fill="none"
+                className="node-aura node-aura-pending"
+              />
+            )}
             <circle
               cx={p.x}
               cy={p.y}
@@ -5896,6 +6219,54 @@ function GraphCanvas({
           </g>
         );
       })}
+      {popoverLayout && (
+        <foreignObject
+          x={popoverLayout.x}
+          y={popoverLayout.y}
+          width={popoverLayout.width}
+          height={popoverLayout.height}
+          className="graph-node-popover-fo"
+          onClick={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <div
+            xmlns="http://www.w3.org/1999/xhtml"
+            className="graph-node-popover"
+            onClick={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            {renderNodePopover({
+              node: popoverLayout.node,
+              width: popoverLayout.width,
+              height: popoverLayout.height,
+            })}
+          </div>
+        </foreignObject>
+      )}
+      {edgePopoverLayout && (
+        <foreignObject
+          x={edgePopoverLayout.x}
+          y={edgePopoverLayout.y}
+          width={edgePopoverLayout.width}
+          height={edgePopoverLayout.height}
+          className="graph-node-popover-fo"
+          onClick={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <div
+            xmlns="http://www.w3.org/1999/xhtml"
+            className="graph-node-popover graph-edge-popover"
+            onClick={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            {renderEdgePopover({
+              edge: edgePopoverLayout.edge,
+              width: edgePopoverLayout.width,
+              height: edgePopoverLayout.height,
+            })}
+          </div>
+        </foreignObject>
+      )}
     </svg>
   );
 }
@@ -5967,6 +6338,7 @@ export default function App() {
   const [selectedEdgeLogicRule, setSelectedEdgeLogicRule] = useState("explicit");
   const [selectedEdgeMetadataText, setSelectedEdgeMetadataText] = useState("{}");
   const [demoNarrative, setDemoNarrative] = useState("");
+  const [demoResult, setDemoResult] = useState(null);
   const [dailyJournalText, setDailyJournalText] = useState("");
   const [dailyModeResult, setDailyModeResult] = useState(null);
   const [userNarrativeText, setUserNarrativeText] = useState("");
@@ -5980,8 +6352,11 @@ export default function App() {
   const [userKnowledgeText, setUserKnowledgeText] = useState("");
   const [userAssetsText, setUserAssetsText] = useState("");
   const [userGraphResult, setUserGraphResult] = useState(null);
-  const [autorunsImportText, setAutorunsImportText] = useState("");
-  const [autorunsImportResult, setAutorunsImportResult] = useState(null);
+  const [flowReviewPreviews, setFlowReviewPreviews] = useState({
+    demo: null,
+    daily: null,
+    user_graph: null,
+  });
   const [debatePromptText, setDebatePromptText] = useState("");
   const [debateHypothesisCount, setDebateHypothesisCount] = useState("3");
   const [debateAttachGraph, setDebateAttachGraph] = useState(true);
@@ -5997,6 +6372,17 @@ export default function App() {
   const [archiveChatAttachGraph, setArchiveChatAttachGraph] = useState(true);
   const [archiveChatResult, setArchiveChatResult] = useState(null);
   const [archiveChatMessages, setArchiveChatMessages] = useState([]);
+  const [graphFoundationPrompt, setGraphFoundationPrompt] = useState("");
+  const [graphFoundationContext, setGraphFoundationContext] = useState("");
+  const [graphFoundationDepth, setGraphFoundationDepth] = useState("2");
+  const [graphFoundationConceptLimit, setGraphFoundationConceptLimit] = useState("4");
+  const [graphFoundationResult, setGraphFoundationResult] = useState(null);
+  const [graphQuickAction, setGraphQuickAction] = useState("improve");
+  const [graphQuickPrompt, setGraphQuickPrompt] = useState("");
+  const [graphQuickResult, setGraphQuickResult] = useState(null);
+  const [graphEdgeAction, setGraphEdgeAction] = useState("improve");
+  const [graphEdgePrompt, setGraphEdgePrompt] = useState("");
+  const [graphEdgeResult, setGraphEdgeResult] = useState(null);
   const [archiveReviewUpdatesText, setArchiveReviewUpdatesText] = useState("[]");
   const [archiveReviewResult, setArchiveReviewResult] = useState(null);
   const [hallucinationPromptText, setHallucinationPromptText] = useState("");
@@ -6537,10 +6923,73 @@ export default function App() {
     () => summarizeEdgeReasoning(selectedEdge, selectedNodeNameById),
     [selectedEdge, selectedNodeNameById]
   );
+  const selectedEdgePanelResult = useMemo(() => {
+    if (!selectedEdge) return null;
+    const metadata =
+      selectedEdge?.metadata && typeof selectedEdge.metadata === "object" ? selectedEdge.metadata : {};
+    return {
+      edge: {
+        from_node: Number(selectedEdge.from || 0),
+        to_node: Number(selectedEdge.to || 0),
+        relation_type: String(selectedEdge.relation_type || "related_to"),
+        direction: String(selectedEdge.direction || "directed"),
+        weight: Number(Number(selectedEdge.weight || 0).toFixed(2)),
+        metadata_fields: Object.keys(metadata).length,
+        reasoning: String(selectedEdgeReasoning.summary || "").trim() || "-",
+      },
+    };
+  }, [selectedEdge, selectedEdgeReasoning.summary]);
+  const selectedEdgeQuickInsights = useMemo(() => {
+    return buildGraphEdgeAssistInsights({
+      edge: selectedEdge,
+      nodes: snapshot.nodes || [],
+      nodeNameById: selectedNodeNameById,
+      uiLanguage,
+    });
+  }, [selectedEdge, selectedNodeNameById, snapshot.nodes, uiLanguage]);
   const selectedEdgeHistory = useMemo(
     () => deriveEdgeHistory(safeEvents, selectedEdgeSig),
     [safeEvents, selectedEdgeSig]
   );
+  const selectedNodePanelResult = useMemo(() => {
+    if (!selectedNode) return null;
+    const attrs = selectedNode?.attributes && typeof selectedNode.attributes === "object" ? selectedNode.attributes : {};
+    const state = selectedNode?.state && typeof selectedNode.state === "object" ? selectedNode.state : {};
+    return {
+      node: {
+        id: Number(selectedNode.id || 0),
+        type: String(selectedNode.type || "generic"),
+        label: nodeLabel(selectedNode),
+        attribute_fields: Object.keys(attrs).length,
+        state_fields: Object.keys(state).length,
+        summary: String(attrs.summary || attrs.name || attrs.title || attrs.description || "").trim() || "-",
+      },
+    };
+  }, [selectedNode]);
+  const combinedReviewPreview = useMemo(() => {
+    const nodeIds = new Set();
+    const edgeRefs = [];
+    for (const preview of Object.values(flowReviewPreviews || {})) {
+      if (!preview || typeof preview !== "object") continue;
+      for (const nodeId of Array.isArray(preview.nodeIds) ? preview.nodeIds : []) {
+        const num = Number(nodeId);
+        if (Number.isFinite(num) && num > 0) {
+          nodeIds.add(num);
+        }
+      }
+      for (const edge of Array.isArray(preview.edgeRefs) ? preview.edgeRefs : []) {
+        if (!edge || typeof edge !== "object") continue;
+        edgeRefs.push(edge);
+      }
+    }
+    if (!nodeIds.size && !edgeRefs.length) {
+      return null;
+    }
+    return {
+      nodeIds: Array.from(nodeIds),
+      edgeRefs,
+    };
+  }, [flowReviewPreviews]);
   const personalizationPayload = useMemo(
     () => buildPersonalizationPayload(personalizationDraft, uiLanguage),
     [personalizationDraft, uiLanguage]
@@ -6628,6 +7077,79 @@ export default function App() {
       },
     };
   }, [integrationDraft, integrationManifest, uiLanguage]);
+  const dailyRecommendations = useMemo(() => {
+    const rows = Array.isArray(dailyModeResult?.recommendations) ? dailyModeResult.recommendations : [];
+    return rows.filter((item) => item && typeof item === "object");
+  }, [dailyModeResult]);
+  const dailySignalRows = useMemo(() => {
+    const signals = dailyModeResult?.signals && typeof dailyModeResult.signals === "object" ? dailyModeResult.signals : {};
+    return countRowsFromObject({
+      goals: Array.isArray(signals.goals) ? signals.goals.length : 0,
+      problems: Array.isArray(signals.problems) ? signals.problems.length : 0,
+      wins: Array.isArray(signals.wins) ? signals.wins.length : 0,
+    });
+  }, [dailyModeResult]);
+  const dailyScoreRows = useMemo(() => {
+    const scoreBlock =
+      dailyModeResult?.improvement_scores &&
+      typeof dailyModeResult.improvement_scores === "object" &&
+      dailyModeResult.improvement_scores.metrics &&
+      typeof dailyModeResult.improvement_scores.metrics === "object"
+        ? dailyModeResult.improvement_scores.metrics
+        : {};
+    return Object.entries(scoreBlock)
+      .map(([name, value]) => ({
+        name: humanizeToken(name),
+        count: Number((Number(value || 0) || 0).toFixed(1)),
+      }))
+      .filter((row) => Number.isFinite(row.count) && row.count > 0)
+      .sort((a, b) => Number(b.count || 0) - Number(a.count || 0));
+  }, [dailyModeResult]);
+  const dailyOverallScore = useMemo(() => {
+    const raw = Number(dailyModeResult?.improvement_scores?.overall || 0);
+    if (!Number.isFinite(raw)) return 0;
+    return Number(raw.toFixed(1));
+  }, [dailyModeResult]);
+  const dailyBranchNodeIds = useMemo(() => {
+    const graphBinding =
+      dailyModeResult?.graph_binding && typeof dailyModeResult.graph_binding === "object" ? dailyModeResult.graph_binding : {};
+    const profileUpdate =
+      dailyModeResult?.profile_update && typeof dailyModeResult.profile_update === "object" ? dailyModeResult.profile_update : {};
+    const userProfile =
+      profileUpdate.user_profile && typeof profileUpdate.user_profile === "object" ? profileUpdate.user_profile : {};
+    const rawIds = [
+      graphBinding.person_node_id,
+      graphBinding.entry_node_id,
+      userProfile.profile_node_id,
+      ...(Array.isArray(graphBinding.goal_node_ids) ? graphBinding.goal_node_ids : []),
+      ...(Array.isArray(graphBinding.problem_node_ids) ? graphBinding.problem_node_ids : []),
+      ...(Array.isArray(graphBinding.recommendation_node_ids) ? graphBinding.recommendation_node_ids : []),
+    ];
+    return [...new Set(rawIds.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0))];
+  }, [dailyModeResult]);
+  const dailyBranchSnapshot = useMemo(() => {
+    if (dailyBranchNodeIds.length) {
+      return extractFocusedSnapshot(snapshot, dailyBranchNodeIds, 16);
+    }
+    if (personalTreeSnapshot.nodes.length) {
+      return personalTreeSnapshot;
+    }
+    return { nodes: [], edges: [] };
+  }, [dailyBranchNodeIds, personalTreeSnapshot, snapshot]);
+  const dailyBranchSelectedNodeId = useMemo(() => {
+    if (dailyBranchNodeIds.length) return Number(dailyBranchNodeIds[0]);
+    if (personalTreeSelectedNodeId) return Number(personalTreeSelectedNodeId);
+    const firstNode = Array.isArray(dailyBranchSnapshot.nodes) ? dailyBranchSnapshot.nodes[0] : null;
+    return Number(firstNode?.id || 0);
+  }, [dailyBranchNodeIds, personalTreeSelectedNodeId, dailyBranchSnapshot]);
+  const demoFocusNodeId = useMemo(() => {
+    const nodeId = Number(demoResult?.demo?.root_node_id || 0);
+    return Number.isFinite(nodeId) && nodeId > 0 ? nodeId : 0;
+  }, [demoResult]);
+  const demoFocusSnapshot = useMemo(() => {
+    if (!demoFocusNodeId) return { nodes: [], edges: [] };
+    return extractFocusedSnapshot(snapshot, [demoFocusNodeId], 14);
+  }, [snapshot, demoFocusNodeId]);
 
   const t = useMemo(() => {
     const localized = {
@@ -6642,6 +7164,9 @@ export default function App() {
     };
     return (key) => localized[key] ?? fallback[key] ?? key;
   }, [uiLanguage]);
+  const graphQuickActionOptions = useMemo(() => buildGraphNodeAssistActionOptions(uiLanguage), [uiLanguage]);
+  const graphEdgeActionOptions = useMemo(() => buildGraphEdgeAssistActionOptions(uiLanguage), [uiLanguage]);
+  const edgePopoverLabels = useMemo(() => graphEdgePopoverText(uiLanguage), [uiLanguage]);
 
   const boundedOverviewIndex = Math.max(
     0,
@@ -6763,6 +7288,26 @@ export default function App() {
     setSelectedEdgeLogicRule(String(selectedEdge.logic_rule || "explicit"));
     setSelectedEdgeMetadataText(stringifySafe(selectedEdge.metadata || {}));
   }, [selectedEdgeSig, selectedEdge]);
+
+  useEffect(() => {
+    if (!selectedNode) {
+      setGraphQuickPrompt("");
+      setGraphQuickResult(null);
+      return;
+    }
+    setGraphQuickResult(null);
+    setGraphQuickPrompt(buildGraphQuickPrompt(graphQuickAction, selectedNode));
+  }, [graphQuickAction, selectedNodeId]);
+
+  useEffect(() => {
+    if (!selectedEdge) {
+      setGraphEdgePrompt("");
+      setGraphEdgeResult(null);
+      return;
+    }
+    setGraphEdgeResult(null);
+    setGraphEdgePrompt(buildGraphEdgePrompt(graphEdgeAction, selectedEdge));
+  }, [graphEdgeAction, selectedEdgeSig]);
 
   useEffect(() => {
     const suggested = Number(personalTreePayload?.focus_node_id || 0);
@@ -7050,6 +7595,220 @@ export default function App() {
 
   function patchIntegrationDraft(patch) {
     setIntegrationDraft((prev) => normalizeIntegrationDraft({ ...(prev || {}), ...(patch || {}) }));
+  }
+
+  function openOverviewSection(sectionKey) {
+    const nextIndex = OVERVIEW_SECTION_KEYS.indexOf(sectionKey);
+    if (nextIndex >= 0) {
+      setOverviewSectionIndex(nextIndex);
+    }
+  }
+
+  function seedDailyWorkspaceDrafts(sourceResult = dailyModeResult, sourceText = dailyJournalText) {
+    const safeResult = sourceResult && typeof sourceResult === "object" ? sourceResult : {};
+    const signals = safeResult.signals && typeof safeResult.signals === "object" ? safeResult.signals : {};
+    const recommendations = Array.isArray(safeResult.recommendations) ? safeResult.recommendations : [];
+    const goals = Array.isArray(signals.goals) ? signals.goals.slice(0, 3).map((item) => String(item || "").trim()).filter(Boolean) : [];
+    const problems = Array.isArray(signals.problems)
+      ? signals.problems.slice(0, 3).map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+    const wins = Array.isArray(signals.wins) ? signals.wins.slice(0, 2).map((item) => String(item || "").trim()).filter(Boolean) : [];
+    const primary = recommendations[0] && typeof recommendations[0] === "object" ? recommendations[0] : {};
+    const todayLabel = new Date().toISOString().slice(0, 10);
+    const title = String(primary.title || "").trim() || `Daily Plan ${todayLabel}`;
+    const detailLines = [];
+    const journalBody = String(sourceText || "").trim();
+    if (journalBody) {
+      detailLines.push(`Journal: ${journalBody}`);
+    }
+    if (String(primary.advice || "").trim()) {
+      detailLines.push(`Next move: ${String(primary.advice).trim()}`);
+    }
+    if (goals.length) {
+      detailLines.push(`Goals: ${goals.join("; ")}`);
+    }
+    if (problems.length) {
+      detailLines.push(`Risks: ${problems.join("; ")}`);
+    }
+    if (wins.length) {
+      detailLines.push(`Strengths: ${wins.join("; ")}`);
+    }
+    const desiredOutput =
+      String(primary.rationale || "").trim() ||
+      (goals.length ? `Convert "${goals[0]}" into one concrete next action.` : "Turn this into a short actionable plan.");
+
+    patchMultitoolRequestDraft({
+      title,
+      details: detailLines.join("\n"),
+      desired_output: desiredOutput,
+      layout_mode: "taskboard",
+      status: "active",
+    });
+    patchPersonalTreeIngestDraft({
+      title,
+      topic: goals[0] || title,
+      text: [
+        journalBody,
+        ...recommendations
+          .slice(0, 4)
+          .map((item) =>
+            [String(item?.title || "").trim(), String(item?.advice || "").trim(), String(item?.rationale || "").trim()]
+              .filter(Boolean)
+              .join(" | ")
+          )
+          .filter(Boolean),
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      source_type: "note",
+      source_title: title,
+    });
+  }
+
+  function seedDemoWorkspaceDrafts(sourceResult = demoResult, sourceText = demoNarrative) {
+    const safeResult = sourceResult && typeof sourceResult === "object" ? sourceResult : {};
+    const demoBlock = safeResult.demo && typeof safeResult.demo === "object" ? safeResult.demo : {};
+    const personaName = String(demoBlock.persona_name || "You").trim() || "You";
+    const narrative = String(sourceText || demoBlock.narrative || "").trim();
+    const llmError = String(demoBlock.llm_error || "").trim();
+    const title = `${personaName} Scenario`;
+    const detailLines = [];
+    if (narrative) {
+      detailLines.push(`Scenario: ${narrative}`);
+    }
+    if (llmError) {
+      detailLines.push(`LLM note: ${llmError}`);
+    }
+
+    patchMultitoolRequestDraft({
+      title,
+      details: detailLines.join("\n"),
+      desired_output: "Turn the scenario into concrete next actions and verify contradictions.",
+      layout_mode: "taskboard",
+      status: "active",
+      priority: "medium",
+      domain: "general",
+      country: "global",
+    });
+    patchPersonalTreeIngestDraft({
+      title,
+      topic: personaName,
+      text: narrative || `Scenario for ${personaName}`,
+      source_type: "note",
+      source_title: title,
+    });
+
+    const rootNodeId = Number(demoBlock.root_node_id || 0);
+    if (Number.isFinite(rootNodeId) && rootNodeId > 0) {
+      setSelectedNodeId(rootNodeId);
+      setPersonalTreeFocusNodeId(rootNodeId);
+    }
+  }
+
+  function selectedNodeSourceText(node = selectedNode) {
+    if (!node || typeof node !== "object") {
+      return "";
+    }
+    const attrs = node?.attributes && typeof node.attributes === "object" ? node.attributes : {};
+    const parts = [
+      String(attrs.summary || "").trim(),
+      String(attrs.details || "").trim(),
+      String(attrs.description || "").trim(),
+      String(attrs.notes || "").trim(),
+    ].filter(Boolean);
+    if (parts.length) {
+      return parts.join("\n");
+    }
+    return nodeLabel(node);
+  }
+
+  function seedSelectedNodeIntoMultitool(target, options = {}) {
+    if (!selectedNode) {
+      appendLog(`${t("log_error")}: ${t("graph_empty")}`);
+      return;
+    }
+    const label = nodeLabel(selectedNode);
+    const sourceText = selectedNodeSourceText(selectedNode);
+    const detailText = [sourceText, `Source node #${Number(selectedNode.id || 0)} · ${String(selectedNode.type || "generic")}`]
+      .filter(Boolean)
+      .join("\n");
+
+    if (target === "request") {
+      setSelectedRequestNodeId(0);
+      patchMultitoolRequestDraft({
+        title: label,
+        details: detailText,
+        desired_output: "Turn this into a concrete, verified action plan.",
+        status: "active",
+        layout_mode: "taskboard",
+      });
+    } else if (target === "task") {
+      setSelectedTaskNodeId(0);
+      patchMultitoolTaskDraft({
+        title: label,
+        description: detailText,
+        status: "active",
+      });
+    } else if (target === "risk") {
+      setSelectedRiskNodeId(0);
+      patchMultitoolRiskDraft({
+        title: label,
+        description: detailText,
+        probability: "medium",
+        impact: "medium",
+        mitigation_text: "Review facts, validate assumptions, define rollback.",
+      });
+    } else if (target === "note") {
+      patchPersonalTreeIngestDraft({
+        topic: label,
+        title: label,
+        text: detailText,
+        source_type: "note",
+        source_title: label,
+      });
+    }
+    if (options?.openPanel !== false) {
+      openOverviewSection("multitool");
+    }
+  }
+
+  function buildGraphQuickPrompt(action, node = selectedNode) {
+    if (!node) {
+      return "";
+    }
+    const label = nodeLabel(node);
+    const sourceText = selectedNodeSourceText(node);
+    const actions = {
+      explain: `Explain the key meaning of "${label}" in plain language. Highlight dependencies and what matters most.\n\n${sourceText}`,
+      improve: `Suggest concrete improvements for "${label}". Return practical next steps, not theory.\n\n${sourceText}`,
+      risks: `Analyze risks around "${label}". Identify contradictions, blind spots, and what should be verified.\n\n${sourceText}`,
+      tasks: `Turn "${label}" into a short task board with execution order and checkpoints.\n\n${sourceText}`,
+      memory: `Extract only durable memory from "${label}". Keep what is worth remembering and drop noise.\n\n${sourceText}`,
+    };
+    return actions[String(action || "improve")] || actions.improve;
+  }
+
+  function buildGraphEdgePrompt(action, edge = selectedEdge) {
+    if (!edge) {
+      return "";
+    }
+    const fromName = selectedNodeNameById.get(Number(edge.from)) || `#${Number(edge.from || 0)}`;
+    const toName = selectedNodeNameById.get(Number(edge.to)) || `#${Number(edge.to || 0)}`;
+    const relationLabel = humanizeToken(edge.relation_type) || String(edge.relation_type || "relation");
+    const edgeFacts = [
+      `${fromName} -> ${toName}`,
+      `relation: ${relationLabel}`,
+      `weight: ${Number(edge.weight || 0).toFixed(2)}`,
+      `logic: ${String(edge.logic_rule || "explicit")}`,
+    ].join(" | ");
+    const actions = {
+      explain: `Explain what the relation "${relationLabel}" means between "${fromName}" and "${toName}". Clarify why it exists and how it should be interpreted.\n\n${edgeFacts}`,
+      improve: `Suggest a better, more precise version of the relation "${relationLabel}" between "${fromName}" and "${toName}". Focus on semantics and confidence.\n\n${edgeFacts}`,
+      risks: `Analyze risks, ambiguity, and hidden failure modes in the relation "${relationLabel}" between "${fromName}" and "${toName}".\n\n${edgeFacts}`,
+      merge: `Assess whether "${fromName}" and "${toName}" should be merged or kept separate. Use the relation "${relationLabel}" as evidence.\n\n${edgeFacts}`,
+      split: `Assess whether the relation "${relationLabel}" between "${fromName}" and "${toName}" should be split into multiple clearer edges.\n\n${edgeFacts}`,
+    };
+    return actions[String(action || "improve")] || actions.improve;
   }
 
   function onSavePersonalization() {
@@ -8155,6 +8914,30 @@ export default function App() {
     };
   }, []);
 
+  const updateFlowReviewPreview = useCallback((flowKey, preview) => {
+    setFlowReviewPreviews((current) => {
+      if (current?.[flowKey] === preview) {
+        return current;
+      }
+      return {
+        ...(current || {}),
+        [flowKey]: preview,
+      };
+    });
+  }, []);
+
+  const onDemoReviewPreviewChange = useCallback(
+    (preview) => updateFlowReviewPreview("demo", preview),
+    [updateFlowReviewPreview]
+  );
+  const onDailyReviewPreviewChange = useCallback(
+    (preview) => updateFlowReviewPreview("daily", preview),
+    [updateFlowReviewPreview]
+  );
+  const onUserGraphReviewPreviewChange = useCallback(
+    (preview) => updateFlowReviewPreview("user_graph", preview),
+    [updateFlowReviewPreview]
+  );
   async function runAction(actionName, fn) {
     try {
       setBusy(true);
@@ -8198,6 +8981,107 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function onApplyReviewedArchiveUpdates(flowKey, updates, sourceResult) {
+    const rows = Array.isArray(updates) ? updates : [];
+    if (!rows.length) {
+      throw new Error("updates draft is empty");
+    }
+    const source = sourceResult && typeof sourceResult === "object" ? sourceResult : {};
+    const sessionId = getClientSessionId();
+    const out = await runAction(`${flowKey} review`, () =>
+      applyProjectArchiveReview({
+        user_id: `web_${sessionId}`,
+        session_id: `${String(flowKey || "flow").replace(/[^\w.-]+/g, "_")}_review_${sessionId}`,
+        message: String(source?.journal_entry?.text || source?.demo?.narrative || source?.scan?.scan_id || "Manual flow review"),
+        context: `${flowKey} manual review`,
+        summary: String(
+          source?.input_extraction?.summary ||
+          source?.summary?.summary ||
+          source?.summary?.title ||
+          source?.summary?.persona_name ||
+          ""
+        ).trim(),
+        archive_updates: rows,
+        verification_mode: "balanced",
+        apply_to_graph: true,
+        top_k: 5,
+      })
+    );
+    setArchiveReviewResult(out?.review || out || null);
+    updateFlowReviewPreview(String(flowKey || ""), null);
+    return out;
+  }
+
+  async function onApplyReviewedGraphMonitorPatches(flowKey, patchBundle) {
+    const root = patchBundle && typeof patchBundle === "object" ? patchBundle : {};
+    const nodePatches = Array.isArray(root.node_patches) ? root.node_patches : [];
+    const edgePatches = Array.isArray(root.edge_patches) ? root.edge_patches : [];
+    if (!nodePatches.length && !edgePatches.length) {
+      throw new Error("monitor patches draft is empty");
+    }
+    return runAction(`${flowKey} monitor apply`, async () => {
+      let appliedNodes = 0;
+      let appliedEdges = 0;
+      for (const row of nodePatches) {
+        const patch = row && typeof row === "object" ? row : {};
+        const nodeId = Number(patch.node_id || 0);
+        const summary = String(patch.summary || "").trim();
+        if (!nodeId || !summary) {
+          continue;
+        }
+        await updateNode({
+          node_id: nodeId,
+          attributes: {
+            summary,
+            monitor_summary: summary,
+            monitor_reason: String(patch.reason || "").trim(),
+            monitor_manual_review: true,
+            monitor_updated_at: new Date().toISOString(),
+          },
+          state: {
+            monitor_confidence: Number(patch.confidence || 0.6) || 0.6,
+          },
+        });
+        appliedNodes += 1;
+      }
+      for (const row of edgePatches) {
+        const patch = row && typeof row === "object" ? row : {};
+        const payload = {
+          from_node: Number(patch.from_node || 0),
+          to_node: Number(patch.to_node || 0),
+          relation_type: String(patch.relation_type || "related_to").trim() || "related_to",
+          weight: Number(patch.weight || 0.58) || 0.58,
+          direction: "directed",
+          logic_rule: "graph_monitor_manual_review",
+          metadata: {
+            source: String(flowKey || "flow"),
+            reason: String(patch.reason || "").trim(),
+            action: String(patch.action || "update").trim() || "update",
+            manual_review: true,
+          },
+        };
+        try {
+          if (String(patch.action || "update").trim().toLowerCase() === "create") {
+            await createEdge(payload);
+          } else {
+            await updateEdge(payload);
+          }
+        } catch (_error) {
+          await createEdge(payload);
+        }
+        appliedEdges += 1;
+      }
+      const result = {
+        ok: true,
+        node_patch_count: appliedNodes,
+        edge_patch_count: appliedEdges,
+        persisted: appliedNodes + appliedEdges > 0,
+      };
+      updateFlowReviewPreview(String(flowKey || ""), null);
+      return result;
+    });
   }
 
   async function onCreateNode() {
@@ -8244,6 +9128,40 @@ export default function App() {
     );
   }
 
+  async function onCreateGraphFoundation() {
+    const topic = String(graphFoundationPrompt || "").trim();
+    if (!topic && !selectedNode) {
+      appendLog(`${t("log_error")}: ${t("error_graph_foundation_topic_empty")}`);
+      return;
+    }
+    const sessionId = getClientSessionId();
+    try {
+      const out = await runAction(t("graph_foundation_action"), () =>
+        createGraphFoundation({
+          topic,
+          context: String(graphFoundationContext || "").trim(),
+          target_node_id: Number(selectedNode?.id || 0),
+          depth: Math.max(1, Math.min(3, Number(graphFoundationDepth || 2) || 2)),
+          concept_limit: Math.max(2, Math.min(6, Number(graphFoundationConceptLimit || 4) || 4)),
+          user_id: `web_${sessionId}`,
+          session_id: `graph_foundation_${sessionId}`,
+        })
+      );
+      setGraphFoundationResult(out || null);
+      const focusNodeId = Number(out?.foundation?.focus_node_id || out?.foundation?.root_node_id || 0);
+      if (focusNodeId > 0) {
+        setSelectedNodeId(focusNodeId);
+      }
+      const createdNodes = Number(out?.foundation?.created_nodes || 0);
+      const createdEdges = Number(out?.foundation?.created_edges || 0);
+      appendLog(
+        `${t("log_system")}: ${t("graph_foundation_action")} -> ${createdNodes} nodes, ${createdEdges} edges`
+      );
+    } catch (error) {
+      appendLog(`${t("log_error")}: ${error.message}`);
+    }
+  }
+
   async function onSimulate() {
     const payload = {
       seed_node_ids: simSeedIds,
@@ -8288,27 +9206,37 @@ export default function App() {
   async function onClear() {
     await runAction(t("action_clear"), () => clearGraph());
     setLastSimulation(null);
+    setDemoResult(null);
     setDailyModeResult(null);
     setUserGraphResult(null);
-    setAutorunsImportResult(null);
     setDebateResult(null);
     setArchiveChatResult(null);
     setArchiveChatMessages([]);
     setArchiveReviewUpdatesText("[]");
     setArchiveReviewResult(null);
+    setGraphFoundationResult(null);
+    setGraphQuickResult(null);
+    setGraphEdgeResult(null);
   }
 
   async function onSeedDemo() {
-    const narrativeText = String(demoNarrative || "").trim();
-    await runAction(t("action_seed_demo"), () =>
-      watchProjectDemo({
-        persona_name: "Alexa",
-        narrative: narrativeText,
-        language: String(uiLanguage || "en"),
-        reset_graph: true,
-        use_llm: true,
-      })
-    );
+    const text = String(demoNarrative || "").trim();
+    const useLlmProfile = interactionMode === "ai";
+    try {
+      const out = await runAction(t("action_seed_demo"), () =>
+        watchProjectDemo({
+          persona_name: "You",
+          language: String(uiLanguage || "en"),
+          narrative: text,
+          reset_graph: false,
+          use_llm: useLlmProfile,
+        })
+      );
+      setDemoResult(out || null);
+      seedDemoWorkspaceDrafts(out || null, text);
+    } catch (error) {
+      appendLog(`${t("log_error")}: ${error.message}`);
+    }
   }
 
   async function onRunDailyMode() {
@@ -8344,6 +9272,7 @@ export default function App() {
         })
       );
       setDailyModeResult(out || null);
+      seedDailyWorkspaceDrafts(out || null, text);
     } catch (error) {
       appendLog(`${t("log_error")}: ${error.message}`);
     }
@@ -8424,30 +9353,6 @@ export default function App() {
     }
   }
 
-  async function onImportAutoruns() {
-    const text = String(autorunsImportText || "").trim();
-    const sessionId = getClientSessionId();
-    const clientContext = collectClientContext();
-    try {
-      const out = await runAction(t("action_autoruns_import"), () =>
-        importProjectAutoruns({
-          text,
-          auto_detect: true,
-          query: text,
-          language: String(uiLanguage || "en"),
-          client: clientContext,
-          user_id: `web_${sessionId}`,
-          session_id: `autoruns_${sessionId}`,
-          host_label: "Web User",
-          max_rows: 1200,
-        })
-      );
-      setAutorunsImportResult(out || null);
-    } catch (error) {
-      appendLog(`${t("log_error")}: ${error.message}`);
-    }
-  }
-
   async function onRunLLMDebate() {
     const topic = String(debatePromptText || "").trim();
     if (!topic) {
@@ -8482,6 +9387,117 @@ export default function App() {
         })
       );
       setDebateResult(out || null);
+    } catch (error) {
+      appendLog(`${t("log_error")}: ${error.message}`);
+    }
+  }
+
+  async function onRunGraphQuickAssist() {
+    if (!selectedNode) {
+      appendLog(`${t("log_error")}: ${t("graph_empty")}`);
+      return;
+    }
+    const message = String(graphQuickPrompt || "").trim() || buildGraphQuickPrompt(graphQuickAction, selectedNode);
+    if (!message) {
+      appendLog(`${t("log_error")}: ${t("error_archive_chat_message_empty")}`);
+      return;
+    }
+    const sessionId = getClientSessionId();
+    const label = nodeLabel(selectedNode);
+    const contextLines = [
+      `Selected node #${Number(selectedNode.id || 0)} · ${String(selectedNode.type || "generic")}`,
+      `Label: ${label}`,
+      selectedNodeSourceText(selectedNode),
+    ].filter(Boolean);
+
+    const defaultRole =
+      graphQuickAction === "tasks"
+        ? "planner"
+        : graphQuickAction === "risks"
+          ? "analyst"
+          : graphQuickAction === "memory"
+            ? "analyst"
+            : "general";
+
+    try {
+      const out = await runAction(`graph ${graphQuickAction}`, () =>
+        runGraphNodeAssist({
+          node_id: Number(selectedNode.id || 0),
+          action: graphQuickAction,
+          user_id: `web_${sessionId}`,
+          session_id: `graph_node_${Number(selectedNode.id || 0)}_${sessionId}`,
+          message,
+          context: contextLines.join("\n"),
+          model_path: String(archiveChatModelPath || "").trim(),
+          model_role: normalizeRole(defaultRole, defaultRole),
+          apply_to_graph: true,
+          verification_mode: "balanced",
+          top_k: 5,
+        })
+      );
+      setGraphQuickResult(out || null);
+      setArchiveReviewUpdatesText(stringifySafe(out?.archive_updates || []));
+      if (Array.isArray(out?.archive_updates) && out.archive_updates.length) {
+        seedSelectedNodeIntoMultitool(
+          graphQuickAction === "tasks" ? "task" : graphQuickAction === "risks" ? "risk" : "request",
+          { openPanel: false }
+        );
+      }
+    } catch (error) {
+      appendLog(`${t("log_error")}: ${error.message}`);
+    }
+  }
+
+  async function onRunGraphEdgeAssist() {
+    if (!selectedEdge) {
+      appendLog(`${t("log_error")}: ${t("graph_empty")}`);
+      return;
+    }
+    const message = String(graphEdgePrompt || "").trim() || buildGraphEdgePrompt(graphEdgeAction, selectedEdge);
+    if (!message) {
+      appendLog(`${t("log_error")}: ${t("error_archive_chat_message_empty")}`);
+      return;
+    }
+    const sessionId = getClientSessionId();
+    const fromName = selectedNodeNameById.get(Number(selectedEdge.from)) || `#${Number(selectedEdge.from || 0)}`;
+    const toName = selectedNodeNameById.get(Number(selectedEdge.to)) || `#${Number(selectedEdge.to || 0)}`;
+    const relationType = String(selectedEdge.relation_type || "").trim() || "related_to";
+    const contextLines = [
+      `Selected edge ${fromName} -> ${toName}`,
+      `Relation: ${relationType}`,
+      `Direction: ${String(selectedEdge.direction || "directed")}`,
+      `Weight: ${Number(selectedEdge.weight || 0).toFixed(2)}`,
+      `Logic: ${String(selectedEdge.logic_rule || "explicit")}`,
+      String(selectedEdgeReasoning.summary || "").trim(),
+    ].filter(Boolean);
+    const defaultRole =
+      graphEdgeAction === "merge" || graphEdgeAction === "split"
+        ? "planner"
+        : graphEdgeAction === "risks"
+          ? "analyst"
+          : "general";
+
+    try {
+      const out = await runAction(`edge ${graphEdgeAction}`, () =>
+        runGraphEdgeAssist({
+          from_node: Number(selectedEdge.from || 0),
+          to_node: Number(selectedEdge.to || 0),
+          relation_type: relationType,
+          direction: String(selectedEdge.direction || "directed"),
+          action: graphEdgeAction,
+          user_id: `web_${sessionId}`,
+          session_id: `graph_edge_${Number(selectedEdge.from || 0)}_${Number(selectedEdge.to || 0)}_${sessionId}`,
+          message,
+          context: contextLines.join("\n"),
+          model_path: String(archiveChatModelPath || "").trim(),
+          model_role: normalizeRole(defaultRole, defaultRole),
+          apply_to_graph: true,
+          verification_mode: "balanced",
+          top_k: 5,
+        })
+      );
+      setGraphEdgeResult(out || null);
+      setArchiveReviewUpdatesText(stringifySafe(out?.archive_updates || []));
     } catch (error) {
       appendLog(`${t("log_error")}: ${error.message}`);
     }
@@ -8804,6 +9820,40 @@ export default function App() {
     }
   }
 
+  async function onAdjustSelectedEdgeWeight(delta) {
+    if (!selectedEdge) return;
+    const currentWeight = Math.max(0, Number(selectedEdge.weight || 0));
+    const nextWeight = Math.max(0, Math.min(1.5, Number((currentWeight + Number(delta || 0)).toFixed(2))));
+    const existingMetadata =
+      selectedEdge?.metadata && typeof selectedEdge.metadata === "object" ? selectedEdge.metadata : {};
+    const draftMetadata = parseJsonSafe(selectedEdgeMetadataText, existingMetadata, t("error_invalid_json_payload"));
+    const nextMetadata = {
+      ...existingMetadata,
+      ...(draftMetadata && typeof draftMetadata === "object" ? draftMetadata : {}),
+      last_manual_edge_tune_at: new Date().toISOString(),
+      last_manual_edge_delta: Number(delta || 0),
+    };
+    try {
+      await runAction(
+        delta >= 0 ? edgePopoverLabels.strengthenLog || t("action_update_edge") : edgePopoverLabels.weakenLog || t("action_update_edge"),
+        () =>
+          updateEdge({
+            from_node: Number(selectedEdge.from),
+            to_node: Number(selectedEdge.to),
+            relation_type: String(selectedEdge.relation_type || ""),
+            direction: String(selectedEdge.direction || "directed"),
+            weight: nextWeight,
+            logic_rule: String(selectedEdgeLogicRule || selectedEdge.logic_rule || "explicit"),
+            metadata: nextMetadata,
+          })
+      );
+      setSelectedEdgeWeight(String(nextWeight));
+      setSelectedEdgeMetadataText(stringifySafe(nextMetadata));
+    } catch (error) {
+      appendLog(`${t("log_error")}: ${error.message}`);
+    }
+  }
+
   async function onRefreshClientProfile() {
     try {
       const sessionId = getClientSessionId();
@@ -9043,17 +10093,92 @@ export default function App() {
           </div>
 
           <div className="integration-layer-output">
-            <h3>{t("integration_layer_manifest")}</h3>
-            <pre>{stringifySafe(integrationManifest || {})}</pre>
-            <h3>{t("integration_layer_result")}</h3>
-            <pre>{stringifySafe(integrationInvokeResult || {})}</pre>
-            <h3>{t("integration_layer_embed_preview")}</h3>
-            <pre>{stringifySafe(integrationEmbedPreviewPayload)}</pre>
+            <IntegrationLayerResultPanel
+              t={t}
+              manifest={integrationManifest}
+              invokeResult={integrationInvokeResult}
+              embedPreview={integrationEmbedPreviewPayload}
+              selectedAction={selectedAction}
+            />
           </div>
         </div>
       </section>
     );
   }
+
+  const multitoolRequestFields = [
+    { key: "title", label: t("multitool_request_title"), type: "input" },
+    { key: "details", label: t("multitool_request_details"), type: "textarea", rows: 3 },
+    { key: "desired_output", label: t("multitool_request_output"), type: "textarea", rows: 2 },
+    {
+      key: "status",
+      label: t("multitool_request_status"),
+      type: "select",
+      options: REQUEST_STATUS_OPTIONS.map((item) => ({ value: item, label: humanizeToken(item) })),
+    },
+    {
+      key: "priority",
+      label: t("multitool_request_priority"),
+      type: "select",
+      options: TASK_PRIORITY_OPTIONS.map((item) => ({ value: item, label: humanizeToken(item) })),
+    },
+    {
+      key: "layout_mode",
+      label: t("multitool_request_layout"),
+      type: "select",
+      options: ["graph", "cards", "charts", "lists", "taskboard"].map((item) => ({ value: item, label: item })),
+    },
+    { key: "domain", label: t("multitool_domain"), type: "input", listId: "multitool-domain-options" },
+    { key: "country", label: t("multitool_country"), type: "input", listId: "multitool-country-options" },
+  ];
+  const multitoolPreferenceFields = [
+    { key: "profile_name", label: t("multitool_preferences_profile_name"), type: "input" },
+    { key: "likes_text", label: t("multitool_preferences_likes"), type: "textarea", rows: 2 },
+    { key: "dislikes_text", label: t("multitool_preferences_dislikes"), type: "textarea", rows: 2 },
+    { key: "style_examples_text", label: t("multitool_preferences_style"), type: "textarea", rows: 2 },
+    { key: "tool_examples_text", label: t("multitool_preferences_tools"), type: "textarea", rows: 2 },
+    { key: "notes", label: t("multitool_preferences_notes"), type: "textarea", rows: 3 },
+    { key: "domain", label: t("multitool_domain"), type: "input", listId: "multitool-domain-options" },
+    { key: "country", label: t("multitool_country"), type: "input", listId: "multitool-country-options" },
+  ];
+  const multitoolTaskFields = [
+    { key: "title", label: t("multitool_task_title"), type: "input" },
+    { key: "description", label: t("multitool_task_description"), type: "textarea", rows: 3 },
+    {
+      key: "status",
+      label: t("multitool_task_status"),
+      type: "select",
+      options: TASK_STATUS_OPTIONS.map((item) => ({ value: item, label: humanizeToken(item) })),
+    },
+    {
+      key: "priority",
+      label: t("multitool_task_priority"),
+      type: "select",
+      options: TASK_PRIORITY_OPTIONS.map((item) => ({ value: item, label: humanizeToken(item) })),
+    },
+    { key: "due_at", label: t("multitool_task_due"), type: "input", placeholder: "YYYY-MM-DD" },
+    { key: "domain", label: t("multitool_domain"), type: "input", listId: "multitool-domain-options" },
+    { key: "country", label: t("multitool_country"), type: "input", listId: "multitool-country-options" },
+  ];
+  const multitoolRiskFields = [
+    { key: "title", label: t("multitool_risk_title"), type: "input" },
+    { key: "description", label: t("multitool_risk_description"), type: "textarea", rows: 3 },
+    {
+      key: "probability",
+      label: t("multitool_risk_probability"),
+      type: "select",
+      options: RISK_PROBABILITY_OPTIONS.map((item) => ({ value: item, label: humanizeToken(item) })),
+    },
+    {
+      key: "impact",
+      label: t("multitool_risk_impact"),
+      type: "select",
+      options: RISK_IMPACT_OPTIONS.map((item) => ({ value: item, label: humanizeToken(item) })),
+    },
+    { key: "mitigation_text", label: t("multitool_risk_mitigation"), type: "textarea", rows: 4 },
+    { key: "domain", label: t("multitool_domain"), type: "input", listId: "multitool-domain-options" },
+    { key: "country", label: t("multitool_country"), type: "input", listId: "multitool-country-options" },
+  ];
 
   function renderOverviewPage() {
     const sectionKey = OVERVIEW_SECTION_KEYS[boundedOverviewIndex] || OVERVIEW_SECTION_KEYS[0];
@@ -9086,59 +10211,138 @@ export default function App() {
         </section>
 
         {sectionKey === "demo" && (
-          <section className="card">
-            <h2>{t("demo_narrative")}</h2>
-            <div className="row">
-              <label>{t("scenario")}</label>
-              <textarea
-                value={demoNarrative}
-                onChange={(e) => setDemoNarrative(e.target.value)}
-                rows={4}
-                placeholder={t("demo_narrative_placeholder")}
+          <DemoOverviewSection
+            t={t}
+            busy={busy}
+            interactionModePanel={renderInteractionModePanel("interaction-mode-inline")}
+            demoNarrative={demoNarrative}
+            onDemoNarrativeChange={setDemoNarrative}
+            onSeedDemo={onSeedDemo}
+            onOpenMultitool={() => {
+              seedDemoWorkspaceDrafts(demoResult, demoNarrative);
+              openOverviewSection("multitool");
+            }}
+            demoResult={demoResult}
+            graphNodeCount={demoFocusSnapshot.nodes.length}
+            graphElement={
+              demoFocusSnapshot.nodes.length ? (
+                <GraphCanvas
+                  snapshot={demoFocusSnapshot}
+                  t={t}
+                  selectedNodeId={demoFocusNodeId || null}
+                  selectedEdgeSig={null}
+                  pendingPreview={flowReviewPreviews.demo}
+                  tracePath={null}
+                  edgeEffectsBySig={{}}
+                  onSelectNode={(nodeId) => {
+                    const nextNodeId = Number(nodeId || 0);
+                    setSelectedNodeId(nextNodeId);
+                    setPersonalTreeFocusNodeId(nextNodeId);
+                  }}
+                  onSelectEdge={() => {}}
+                />
+              ) : (
+                <p className="multitool-empty">{t("graph_empty")}</p>
+              )
+            }
+            onRunPersonalTreeIngest={onRunPersonalTreeIngest}
+            onRefreshDrafts={() => seedDemoWorkspaceDrafts(demoResult, demoNarrative)}
+            executionPanel={<ExecutionStatusPanel execution={demoResult?.execution || demoResult} title="Graph Write" />}
+            reviewPanel={
+              <FlowReviewPanel
+                title="Demo Review"
+                result={demoResult}
+                busy={busy}
+                onPreviewChange={onDemoReviewPreviewChange}
+                onApplyArchiveUpdates={(updates, sourceResult) =>
+                  onApplyReviewedArchiveUpdates("demo", updates, sourceResult)
+                }
+                onApplyGraphMonitorPatches={(patches) =>
+                  onApplyReviewedGraphMonitorPatches("demo", patches)
+                }
               />
-            </div>
-            <div className="row-actions">
-              <button disabled={busy} onClick={onSeedDemo}>
-                {t("action_seed_demo")}
-              </button>
-              <button disabled={busy} onClick={onRefreshClientProfile}>
-                {t("refresh_client_profile")}
-              </button>
-            </div>
-          </section>
+            }
+          />
         )}
 
         {sectionKey === "daily" && (
-          <section className="card grid-2">
-            <div>
-              {renderInteractionModePanel("interaction-mode-inline")}
-              <h2>{t("daily_mode")}</h2>
-              <div className="row">
-                <label>{t("daily_journal")}</label>
-                <textarea
-                  value={dailyJournalText}
-                  onChange={(e) => setDailyJournalText(e.target.value)}
-                  rows={8}
-                  placeholder={t("daily_journal_placeholder")}
+          <DailyOverviewSection
+            t={t}
+            busy={busy}
+            interactionModePanel={renderInteractionModePanel("interaction-mode-inline")}
+            dailyJournalText={dailyJournalText}
+            onDailyJournalChange={setDailyJournalText}
+            onRunDailyMode={onRunDailyMode}
+            dailyModeResult={dailyModeResult}
+            dailyOverallScore={dailyOverallScore}
+            dailyRecommendations={dailyRecommendations}
+            dailySignalChart={
+              dailySignalRows.length ? (
+                renderMiniBars(dailySignalRows, "daily-signals")
+              ) : (
+                <p className="multitool-empty">{t("multitool_no_items")}</p>
+              )
+            }
+            dailyScoreChart={
+              dailyScoreRows.length ? (
+                renderMiniBars(dailyScoreRows, "daily-scores")
+              ) : (
+                <p className="multitool-empty">{t("multitool_no_items")}</p>
+              )
+            }
+            graphElement={
+              dailyBranchSnapshot.nodes.length ? (
+                <GraphCanvas
+                  snapshot={dailyBranchSnapshot}
+                  t={t}
+                  selectedNodeId={dailyBranchSelectedNodeId || null}
+                  selectedEdgeSig={null}
+                  pendingPreview={flowReviewPreviews.daily}
+                  tracePath={null}
+                  edgeEffectsBySig={{}}
+                  onSelectNode={(nodeId) => {
+                    const nextNodeId = Number(nodeId || 0);
+                    if (personalTreeSnapshot.nodes.length) {
+                      setPersonalTreeFocusNodeId(nextNodeId);
+                    } else {
+                      setSelectedNodeId(nextNodeId);
+                    }
+                  }}
+                  onSelectEdge={() => {}}
                 />
-              </div>
-              <div className="row-actions">
-                <button disabled={busy} onClick={onRunDailyMode}>
-                  {t("run_daily_analysis")}
-                </button>
-              </div>
-            </div>
-            <div>
-              <h2>{t("daily_recommendations_scores")}</h2>
-              <pre>{stringifySafe(dailyModeResult)}</pre>
-            </div>
-          </section>
+              ) : (
+                <p className="multitool-empty">{t("graph_empty")}</p>
+              )
+            }
+            onRunPersonalTreeIngest={onRunPersonalTreeIngest}
+            onRefreshDrafts={() => seedDailyWorkspaceDrafts(dailyModeResult, dailyJournalText)}
+            requestDraft={multitoolRequestDraft}
+            onRequestPatch={patchMultitoolRequestDraft}
+            onSaveRequest={onSaveMultitoolRequest}
+            executionPanel={<ExecutionStatusPanel execution={dailyModeResult?.execution || dailyModeResult} title="Input Pipeline" />}
+            reviewPanel={
+              <FlowReviewPanel
+                title="Daily Review"
+                result={dailyModeResult}
+                busy={busy}
+                onPreviewChange={onDailyReviewPreviewChange}
+                onApplyArchiveUpdates={(updates, sourceResult) =>
+                  onApplyReviewedArchiveUpdates("daily", updates, sourceResult)
+                }
+                onApplyGraphMonitorPatches={(patches) =>
+                  onApplyReviewedGraphMonitorPatches("daily", patches)
+                }
+              />
+            }
+          />
         )}
 
         {sectionKey === "user_graph" && (
-          <section className="card grid-2">
-            <div>
-              {renderInteractionModePanel("interaction-mode-inline")}
+          <UserGraphOverviewSection
+            t={t}
+            busy={busy}
+            interactionModePanel={renderInteractionModePanel("interaction-mode-inline")}
+            personalizationStudio={
               <div className="personalization-studio">
                 <div className="personalization-studio-head">
                   <h3>{t("personalization_studio")}</h3>
@@ -9312,68 +10516,79 @@ export default function App() {
                   </button>
                 </div>
               </div>
-              <h2>{t("user_semantic_graph")}</h2>
-              <div className="row">
-                <label>{t("user_graph_narrative")}</label>
-                <textarea
-                  value={userNarrativeText}
-                  onChange={(e) => setUserNarrativeText(e.target.value)}
-                  rows={5}
-                  placeholder={t("user_graph_narrative_placeholder")}
-                />
-              </div>
-              <div className="row">
-                <label>{t("user_fears")}</label>
-                <textarea value={userFearsText} onChange={(e) => setUserFearsText(e.target.value)} rows={2} />
-              </div>
-              <div className="row">
-                <label>{t("user_desires")}</label>
-                <textarea value={userDesiresText} onChange={(e) => setUserDesiresText(e.target.value)} rows={2} />
-              </div>
-              <div className="row">
-                <label>{t("user_goals")}</label>
-                <textarea value={userGoalsText} onChange={(e) => setUserGoalsText(e.target.value)} rows={2} />
-              </div>
-              <div className="row">
-                <label>{t("user_principles")}</label>
-                <textarea value={userPrinciplesText} onChange={(e) => setUserPrinciplesText(e.target.value)} rows={2} />
-              </div>
-              <div className="row">
-                <label>{t("user_opportunities")}</label>
-                <textarea value={userOpportunitiesText} onChange={(e) => setUserOpportunitiesText(e.target.value)} rows={2} />
-              </div>
-              <div className="row">
-                <label>{t("user_abilities")}</label>
-                <textarea value={userAbilitiesText} onChange={(e) => setUserAbilitiesText(e.target.value)} rows={2} />
-              </div>
-              <div className="row">
-                <label>{t("user_access")}</label>
-                <textarea value={userAccessText} onChange={(e) => setUserAccessText(e.target.value)} rows={2} />
-              </div>
-              <div className="row">
-                <label>{t("user_knowledge")}</label>
-                <textarea value={userKnowledgeText} onChange={(e) => setUserKnowledgeText(e.target.value)} rows={2} />
-              </div>
-              <div className="row">
-                <label>{t("user_assets")}</label>
-                <textarea
-                  value={userAssetsText}
-                  onChange={(e) => setUserAssetsText(e.target.value)}
-                  rows={2}
-                  placeholder={t("user_assets_placeholder")}
-                />
-              </div>
-              <div className="row-actions">
-                <button disabled={busy} onClick={onApplyUserGraph}>
-                  {t("apply_user_graph")}
-                </button>
-              </div>
-            </div>
-            <div>
-              <h2>{t("user_graph_update_result")}</h2>
-              <pre>{stringifySafe(userGraphResult)}</pre>
-            </div>
-          </section>
+            }
+            userForm={
+              <>
+                <h2>{t("user_semantic_graph")}</h2>
+                <div className="row">
+                  <label>{t("user_graph_narrative")}</label>
+                  <textarea
+                    value={userNarrativeText}
+                    onChange={(e) => setUserNarrativeText(e.target.value)}
+                    rows={5}
+                    placeholder={t("user_graph_narrative_placeholder")}
+                  />
+                </div>
+                <div className="row">
+                  <label>{t("user_fears")}</label>
+                  <textarea value={userFearsText} onChange={(e) => setUserFearsText(e.target.value)} rows={2} />
+                </div>
+                <div className="row">
+                  <label>{t("user_desires")}</label>
+                  <textarea value={userDesiresText} onChange={(e) => setUserDesiresText(e.target.value)} rows={2} />
+                </div>
+                <div className="row">
+                  <label>{t("user_goals")}</label>
+                  <textarea value={userGoalsText} onChange={(e) => setUserGoalsText(e.target.value)} rows={2} />
+                </div>
+                <div className="row">
+                  <label>{t("user_principles")}</label>
+                  <textarea value={userPrinciplesText} onChange={(e) => setUserPrinciplesText(e.target.value)} rows={2} />
+                </div>
+                <div className="row">
+                  <label>{t("user_opportunities")}</label>
+                  <textarea value={userOpportunitiesText} onChange={(e) => setUserOpportunitiesText(e.target.value)} rows={2} />
+                </div>
+                <div className="row">
+                  <label>{t("user_abilities")}</label>
+                  <textarea value={userAbilitiesText} onChange={(e) => setUserAbilitiesText(e.target.value)} rows={2} />
+                </div>
+                <div className="row">
+                  <label>{t("user_access")}</label>
+                  <textarea value={userAccessText} onChange={(e) => setUserAccessText(e.target.value)} rows={2} />
+                </div>
+                <div className="row">
+                  <label>{t("user_knowledge")}</label>
+                  <textarea value={userKnowledgeText} onChange={(e) => setUserKnowledgeText(e.target.value)} rows={2} />
+                </div>
+                <div className="row">
+                  <label>{t("user_assets")}</label>
+                  <textarea
+                    value={userAssetsText}
+                    onChange={(e) => setUserAssetsText(e.target.value)}
+                    rows={2}
+                    placeholder={t("user_assets_placeholder")}
+                  />
+                </div>
+              </>
+            }
+            onApplyUserGraph={onApplyUserGraph}
+            summaryPanel={<UserGraphSummaryPanel t={t} result={userGraphResult} />}
+            reviewPanel={
+              <FlowReviewPanel
+                title="User Graph Review"
+                result={userGraphResult}
+                busy={busy}
+                onPreviewChange={onUserGraphReviewPreviewChange}
+                onApplyArchiveUpdates={(updates, sourceResult) =>
+                  onApplyReviewedArchiveUpdates("user_graph", updates, sourceResult)
+                }
+                onApplyGraphMonitorPatches={(patches) =>
+                  onApplyReviewedGraphMonitorPatches("user_graph", patches)
+                }
+              />
+            }
+          />
         )}
 
         {sectionKey === "multitool" && (
@@ -9383,458 +10598,172 @@ export default function App() {
               <p>{t("multitool_subtitle")}</p>
             </div>
             <div className="multitool-grid">
-              <article className="multitool-card">
-                <h3>{t("multitool_section_requests")}</h3>
-                <div className="row">
-                  <label>{t("multitool_choose_existing")}</label>
-                  <select
-                    value={String(selectedRequestNodeId || 0)}
-                    onChange={(e) => setSelectedRequestNodeId(Number(e.target.value || 0))}
-                  >
-                    <option value="0">-</option>
-                    {multitoolRequestNodes.map((node) => {
-                      const attrs = node?.attributes && typeof node.attributes === "object" ? node.attributes : {};
-                      const title = String(attrs.title || attrs.name || `#${node.id}`);
-                      return (
-                        <option key={`request-node-${node.id}`} value={String(node.id)}>
-                          {`${node.id} · ${title}`}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-                <div className="row">
-                  <label>{t("multitool_request_title")}</label>
-                  <input
-                    value={multitoolRequestDraft.title}
-                    onChange={(e) => patchMultitoolRequestDraft({ title: e.target.value })}
-                  />
-                </div>
-                <div className="row">
-                  <label>{t("multitool_request_details")}</label>
-                  <textarea
-                    value={multitoolRequestDraft.details}
-                    onChange={(e) => patchMultitoolRequestDraft({ details: e.target.value })}
-                    rows={3}
-                  />
-                </div>
-                <div className="row">
-                  <label>{t("multitool_request_output")}</label>
-                  <textarea
-                    value={multitoolRequestDraft.desired_output}
-                    onChange={(e) => patchMultitoolRequestDraft({ desired_output: e.target.value })}
-                    rows={2}
-                  />
-                </div>
-                <div className="grid-3">
-                  <div className="row">
-                    <label>{t("multitool_request_status")}</label>
-                    <select
-                      value={multitoolRequestDraft.status}
-                      onChange={(e) => patchMultitoolRequestDraft({ status: e.target.value })}
-                    >
-                      {REQUEST_STATUS_OPTIONS.map((item) => (
-                        <option key={`request-status-${item}`} value={item}>
-                          {humanizeToken(item)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="row">
-                    <label>{t("multitool_request_priority")}</label>
-                    <select
-                      value={multitoolRequestDraft.priority}
-                      onChange={(e) => patchMultitoolRequestDraft({ priority: e.target.value })}
-                    >
-                      {TASK_PRIORITY_OPTIONS.map((item) => (
-                        <option key={`request-priority-${item}`} value={item}>
-                          {humanizeToken(item)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="row">
-                    <label>{t("multitool_request_layout")}</label>
-                    <select
-                      value={multitoolRequestDraft.layout_mode}
-                      onChange={(e) => patchMultitoolRequestDraft({ layout_mode: e.target.value })}
-                    >
-                      <option value="graph">graph</option>
-                      <option value="cards">cards</option>
-                      <option value="charts">charts</option>
-                      <option value="lists">lists</option>
-                      <option value="taskboard">taskboard</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="grid-2">
-                  <div className="row">
-                    <label>{t("multitool_domain")}</label>
-                    <input
-                      list="multitool-domain-options"
-                      value={multitoolRequestDraft.domain}
-                      onChange={(e) =>
-                        patchMultitoolRequestDraft({ domain: normalizeMultitoolDomain(e.target.value) })
-                      }
-                    />
-                  </div>
-                  <div className="row">
-                    <label>{t("multitool_country")}</label>
-                    <input
-                      list="multitool-country-options"
-                      value={multitoolRequestDraft.country}
-                      onChange={(e) =>
-                        patchMultitoolRequestDraft({ country: normalizeLegislationCountry(e.target.value) })
-                      }
-                    />
-                  </div>
-                </div>
+              <article className="multitool-card multitool-card-wide">
+                <h3>{t("selected_node_editor")}</h3>
+                <p className="multitool-empty">
+                  The multitool is the user workspace: turn a selected graph node into a request, task, risk, or note and keep editing from there.
+                </p>
+                <ResultSummaryPanel
+                  title={t("selected_node_editor")}
+                  result={selectedNodePanelResult}
+                  emptyLabel={t("graph_empty")}
+                />
                 <div className="row-actions">
-                  <button type="button" disabled={busy} onClick={onSaveMultitoolRequest}>
-                    {t("multitool_save")}
+                  <button type="button" disabled={!selectedNode} onClick={() => seedSelectedNodeIntoMultitool("request")}>
+                    {t("multitool_section_requests")}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedRequestNodeId(0);
-                      setMultitoolRequestDraft({ ...DEFAULT_MULTITOOL_REQUEST_DRAFT });
-                    }}
-                  >
-                    {t("multitool_new_item")}
+                  <button type="button" disabled={!selectedNode} onClick={() => seedSelectedNodeIntoMultitool("task")}>
+                    {t("multitool_section_tasks")}
+                  </button>
+                  <button type="button" disabled={!selectedNode} onClick={() => seedSelectedNodeIntoMultitool("risk")}>
+                    {t("multitool_section_risks")}
+                  </button>
+                  <button type="button" disabled={!selectedNode} onClick={() => seedSelectedNodeIntoMultitool("note")}>
+                    {t("personal_tree_title")}
                   </button>
                 </div>
-                <h4>{t("multitool_request_result")}</h4>
-                <pre>{stringifySafe(multitoolRequestSaveResult)}</pre>
               </article>
+            </div>
+            <div className="multitool-grid">
+              <MultitoolEntityEditorCard
+                title={t("multitool_section_requests")}
+                selectLabel={t("multitool_choose_existing")}
+                selectedId={selectedRequestNodeId}
+                onSelectId={setSelectedRequestNodeId}
+                nodes={multitoolRequestNodes}
+                optionLabel={(node) => {
+                  const attrs = node?.attributes && typeof node.attributes === "object" ? node.attributes : {};
+                  return `${node.id} · ${String(attrs.title || attrs.name || `#${node.id}`)}`;
+                }}
+                draft={multitoolRequestDraft}
+                fields={multitoolRequestFields}
+                onPatchDraft={(patch) => {
+                  const next = { ...patch };
+                  if (Object.prototype.hasOwnProperty.call(next, "domain")) {
+                    next.domain = normalizeMultitoolDomain(next.domain);
+                  }
+                  if (Object.prototype.hasOwnProperty.call(next, "country")) {
+                    next.country = normalizeLegislationCountry(next.country);
+                  }
+                  patchMultitoolRequestDraft(next);
+                }}
+                onSave={onSaveMultitoolRequest}
+                onReset={() => {
+                  setSelectedRequestNodeId(0);
+                  setMultitoolRequestDraft({ ...DEFAULT_MULTITOOL_REQUEST_DRAFT });
+                }}
+                busy={busy}
+                saveLabel={t("multitool_save")}
+                resetLabel={t("multitool_new_item")}
+                resultTitle={t("multitool_request_result")}
+                result={multitoolRequestSaveResult}
+                emptyLabel={t("multitool_no_items")}
+              />
 
-              <article className="multitool-card">
-                <h3>{t("multitool_section_preferences")}</h3>
-                <div className="row">
-                  <label>{t("multitool_choose_existing")}</label>
-                  <select
-                    value={String(selectedPreferenceNodeId || 0)}
-                    onChange={(e) => setSelectedPreferenceNodeId(Number(e.target.value || 0))}
-                  >
-                    <option value="0">-</option>
-                    {multitoolPreferenceNodes.map((node) => {
-                      const attrs = node?.attributes && typeof node.attributes === "object" ? node.attributes : {};
-                      const profileName = String(attrs.profile_name || attrs.name || `#${node.id}`);
-                      return (
-                        <option key={`preference-node-${node.id}`} value={String(node.id)}>
-                          {`${node.id} · ${profileName}`}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-                <div className="row">
-                  <label>{t("multitool_preferences_profile_name")}</label>
-                  <input
-                    value={multitoolPreferenceDraft.profile_name}
-                    onChange={(e) => patchMultitoolPreferenceDraft({ profile_name: e.target.value })}
-                  />
-                </div>
-                <div className="row">
-                  <label>{t("multitool_preferences_likes")}</label>
-                  <textarea
-                    value={multitoolPreferenceDraft.likes_text}
-                    onChange={(e) => patchMultitoolPreferenceDraft({ likes_text: e.target.value })}
-                    rows={2}
-                  />
-                </div>
-                <div className="row">
-                  <label>{t("multitool_preferences_dislikes")}</label>
-                  <textarea
-                    value={multitoolPreferenceDraft.dislikes_text}
-                    onChange={(e) => patchMultitoolPreferenceDraft({ dislikes_text: e.target.value })}
-                    rows={2}
-                  />
-                </div>
-                <div className="row">
-                  <label>{t("multitool_preferences_style")}</label>
-                  <textarea
-                    value={multitoolPreferenceDraft.style_examples_text}
-                    onChange={(e) => patchMultitoolPreferenceDraft({ style_examples_text: e.target.value })}
-                    rows={2}
-                  />
-                </div>
-                <div className="row">
-                  <label>{t("multitool_preferences_tools")}</label>
-                  <textarea
-                    value={multitoolPreferenceDraft.tool_examples_text}
-                    onChange={(e) => patchMultitoolPreferenceDraft({ tool_examples_text: e.target.value })}
-                    rows={2}
-                  />
-                </div>
-                <div className="row">
-                  <label>{t("multitool_preferences_notes")}</label>
-                  <textarea
-                    value={multitoolPreferenceDraft.notes}
-                    onChange={(e) => patchMultitoolPreferenceDraft({ notes: e.target.value })}
-                    rows={3}
-                  />
-                </div>
-                <div className="grid-2">
-                  <div className="row">
-                    <label>{t("multitool_domain")}</label>
-                    <input
-                      list="multitool-domain-options"
-                      value={multitoolPreferenceDraft.domain}
-                      onChange={(e) =>
-                        patchMultitoolPreferenceDraft({ domain: normalizeMultitoolDomain(e.target.value) })
-                      }
-                    />
-                  </div>
-                  <div className="row">
-                    <label>{t("multitool_country")}</label>
-                    <input
-                      list="multitool-country-options"
-                      value={multitoolPreferenceDraft.country}
-                      onChange={(e) =>
-                        patchMultitoolPreferenceDraft({ country: normalizeLegislationCountry(e.target.value) })
-                      }
-                    />
-                  </div>
-                </div>
-                <div className="row-actions">
-                  <button type="button" disabled={busy} onClick={onSaveMultitoolPreference}>
-                    {t("multitool_save")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedPreferenceNodeId(0);
-                      setMultitoolPreferenceDraft({ ...DEFAULT_MULTITOOL_PREFERENCE_DRAFT });
-                    }}
-                  >
-                    {t("multitool_new_item")}
-                  </button>
-                </div>
-                <h4>{t("multitool_preferences_result")}</h4>
-                <pre>{stringifySafe(multitoolPreferenceSaveResult)}</pre>
-              </article>
+              <MultitoolEntityEditorCard
+                title={t("multitool_section_preferences")}
+                selectLabel={t("multitool_choose_existing")}
+                selectedId={selectedPreferenceNodeId}
+                onSelectId={setSelectedPreferenceNodeId}
+                nodes={multitoolPreferenceNodes}
+                optionLabel={(node) => {
+                  const attrs = node?.attributes && typeof node.attributes === "object" ? node.attributes : {};
+                  return `${node.id} · ${String(attrs.profile_name || attrs.name || `#${node.id}`)}`;
+                }}
+                draft={multitoolPreferenceDraft}
+                fields={multitoolPreferenceFields}
+                onPatchDraft={(patch) => {
+                  const next = { ...patch };
+                  if (Object.prototype.hasOwnProperty.call(next, "domain")) {
+                    next.domain = normalizeMultitoolDomain(next.domain);
+                  }
+                  if (Object.prototype.hasOwnProperty.call(next, "country")) {
+                    next.country = normalizeLegislationCountry(next.country);
+                  }
+                  patchMultitoolPreferenceDraft(next);
+                }}
+                onSave={onSaveMultitoolPreference}
+                onReset={() => {
+                  setSelectedPreferenceNodeId(0);
+                  setMultitoolPreferenceDraft({ ...DEFAULT_MULTITOOL_PREFERENCE_DRAFT });
+                }}
+                busy={busy}
+                saveLabel={t("multitool_save")}
+                resetLabel={t("multitool_new_item")}
+                resultTitle={t("multitool_preferences_result")}
+                result={multitoolPreferenceSaveResult}
+                emptyLabel={t("multitool_no_items")}
+              />
 
-              <article className="multitool-card">
-                <h3>{t("multitool_section_tasks")}</h3>
-                <div className="row">
-                  <label>{t("multitool_choose_existing")}</label>
-                  <select
-                    value={String(selectedTaskNodeId || 0)}
-                    onChange={(e) => setSelectedTaskNodeId(Number(e.target.value || 0))}
-                  >
-                    <option value="0">-</option>
-                    {multitoolTaskNodes.map((node) => {
-                      const attrs = node?.attributes && typeof node.attributes === "object" ? node.attributes : {};
-                      const title = String(attrs.title || attrs.name || `#${node.id}`);
-                      return (
-                        <option key={`task-node-${node.id}`} value={String(node.id)}>
-                          {`${node.id} · ${title}`}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-                <div className="row">
-                  <label>{t("multitool_task_title")}</label>
-                  <input
-                    value={multitoolTaskDraft.title}
-                    onChange={(e) => patchMultitoolTaskDraft({ title: e.target.value })}
-                  />
-                </div>
-                <div className="row">
-                  <label>{t("multitool_task_description")}</label>
-                  <textarea
-                    value={multitoolTaskDraft.description}
-                    onChange={(e) => patchMultitoolTaskDraft({ description: e.target.value })}
-                    rows={3}
-                  />
-                </div>
-                <div className="grid-2">
-                  <div className="row">
-                    <label>{t("multitool_task_status")}</label>
-                    <select
-                      value={multitoolTaskDraft.status}
-                      onChange={(e) => patchMultitoolTaskDraft({ status: e.target.value })}
-                    >
-                      {TASK_STATUS_OPTIONS.map((item) => (
-                        <option key={`task-status-${item}`} value={item}>
-                          {humanizeToken(item)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="row">
-                    <label>{t("multitool_task_priority")}</label>
-                    <select
-                      value={multitoolTaskDraft.priority}
-                      onChange={(e) => patchMultitoolTaskDraft({ priority: e.target.value })}
-                    >
-                      {TASK_PRIORITY_OPTIONS.map((item) => (
-                        <option key={`task-priority-${item}`} value={item}>
-                          {humanizeToken(item)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="row">
-                  <label>{t("multitool_task_due")}</label>
-                  <input
-                    value={multitoolTaskDraft.due_at}
-                    onChange={(e) => patchMultitoolTaskDraft({ due_at: e.target.value })}
-                    placeholder="YYYY-MM-DD"
-                  />
-                </div>
-                <div className="grid-2">
-                  <div className="row">
-                    <label>{t("multitool_domain")}</label>
-                    <input
-                      list="multitool-domain-options"
-                      value={multitoolTaskDraft.domain}
-                      onChange={(e) =>
-                        patchMultitoolTaskDraft({ domain: normalizeMultitoolDomain(e.target.value) })
-                      }
-                    />
-                  </div>
-                  <div className="row">
-                    <label>{t("multitool_country")}</label>
-                    <input
-                      list="multitool-country-options"
-                      value={multitoolTaskDraft.country}
-                      onChange={(e) =>
-                        patchMultitoolTaskDraft({ country: normalizeLegislationCountry(e.target.value) })
-                      }
-                    />
-                  </div>
-                </div>
-                <div className="row-actions">
-                  <button type="button" disabled={busy} onClick={onSaveMultitoolTask}>
-                    {t("multitool_save")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedTaskNodeId(0);
-                      setMultitoolTaskDraft({ ...DEFAULT_MULTITOOL_TASK_DRAFT });
-                    }}
-                  >
-                    {t("multitool_new_item")}
-                  </button>
-                </div>
-                <h4>{t("multitool_task_result")}</h4>
-                <pre>{stringifySafe(multitoolTaskSaveResult)}</pre>
-              </article>
+              <MultitoolEntityEditorCard
+                title={t("multitool_section_tasks")}
+                selectLabel={t("multitool_choose_existing")}
+                selectedId={selectedTaskNodeId}
+                onSelectId={setSelectedTaskNodeId}
+                nodes={multitoolTaskNodes}
+                optionLabel={(node) => {
+                  const attrs = node?.attributes && typeof node.attributes === "object" ? node.attributes : {};
+                  return `${node.id} · ${String(attrs.title || attrs.name || `#${node.id}`)}`;
+                }}
+                draft={multitoolTaskDraft}
+                fields={multitoolTaskFields}
+                onPatchDraft={(patch) => {
+                  const next = { ...patch };
+                  if (Object.prototype.hasOwnProperty.call(next, "domain")) {
+                    next.domain = normalizeMultitoolDomain(next.domain);
+                  }
+                  if (Object.prototype.hasOwnProperty.call(next, "country")) {
+                    next.country = normalizeLegislationCountry(next.country);
+                  }
+                  patchMultitoolTaskDraft(next);
+                }}
+                onSave={onSaveMultitoolTask}
+                onReset={() => {
+                  setSelectedTaskNodeId(0);
+                  setMultitoolTaskDraft({ ...DEFAULT_MULTITOOL_TASK_DRAFT });
+                }}
+                busy={busy}
+                saveLabel={t("multitool_save")}
+                resetLabel={t("multitool_new_item")}
+                resultTitle={t("multitool_task_result")}
+                result={multitoolTaskSaveResult}
+                emptyLabel={t("multitool_no_items")}
+              />
 
-              <article className="multitool-card">
-                <h3>{t("multitool_section_risks")}</h3>
-                <div className="row">
-                  <label>{t("multitool_choose_existing")}</label>
-                  <select
-                    value={String(selectedRiskNodeId || 0)}
-                    onChange={(e) => setSelectedRiskNodeId(Number(e.target.value || 0))}
-                  >
-                    <option value="0">-</option>
-                    {multitoolRiskNodes.map((node) => {
-                      const attrs = node?.attributes && typeof node.attributes === "object" ? node.attributes : {};
-                      const title = String(attrs.title || attrs.name || `#${node.id}`);
-                      return (
-                        <option key={`risk-node-${node.id}`} value={String(node.id)}>
-                          {`${node.id} · ${title}`}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-                <div className="row">
-                  <label>{t("multitool_risk_title")}</label>
-                  <input
-                    value={multitoolRiskDraft.title}
-                    onChange={(e) => patchMultitoolRiskDraft({ title: e.target.value })}
-                  />
-                </div>
-                <div className="row">
-                  <label>{t("multitool_risk_description")}</label>
-                  <textarea
-                    value={multitoolRiskDraft.description}
-                    onChange={(e) => patchMultitoolRiskDraft({ description: e.target.value })}
-                    rows={3}
-                  />
-                </div>
-                <div className="grid-2">
-                  <div className="row">
-                    <label>{t("multitool_risk_probability")}</label>
-                    <select
-                      value={multitoolRiskDraft.probability}
-                      onChange={(e) => patchMultitoolRiskDraft({ probability: e.target.value })}
-                    >
-                      {RISK_PROBABILITY_OPTIONS.map((item) => (
-                        <option key={`risk-prob-${item}`} value={item}>
-                          {humanizeToken(item)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="row">
-                    <label>{t("multitool_risk_impact")}</label>
-                    <select
-                      value={multitoolRiskDraft.impact}
-                      onChange={(e) => patchMultitoolRiskDraft({ impact: e.target.value })}
-                    >
-                      {RISK_IMPACT_OPTIONS.map((item) => (
-                        <option key={`risk-impact-${item}`} value={item}>
-                          {humanizeToken(item)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="row">
-                  <label>{t("multitool_risk_mitigation")}</label>
-                  <textarea
-                    value={multitoolRiskDraft.mitigation_text}
-                    onChange={(e) => patchMultitoolRiskDraft({ mitigation_text: e.target.value })}
-                    rows={4}
-                  />
-                </div>
-                <div className="grid-2">
-                  <div className="row">
-                    <label>{t("multitool_domain")}</label>
-                    <input
-                      list="multitool-domain-options"
-                      value={multitoolRiskDraft.domain}
-                      onChange={(e) =>
-                        patchMultitoolRiskDraft({ domain: normalizeMultitoolDomain(e.target.value) })
-                      }
-                    />
-                  </div>
-                  <div className="row">
-                    <label>{t("multitool_country")}</label>
-                    <input
-                      list="multitool-country-options"
-                      value={multitoolRiskDraft.country}
-                      onChange={(e) =>
-                        patchMultitoolRiskDraft({ country: normalizeLegislationCountry(e.target.value) })
-                      }
-                    />
-                  </div>
-                </div>
-                <div className="row-actions">
-                  <button type="button" disabled={busy} onClick={onSaveMultitoolRisk}>
-                    {t("multitool_save")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedRiskNodeId(0);
-                      setMultitoolRiskDraft({ ...DEFAULT_MULTITOOL_RISK_DRAFT });
-                    }}
-                  >
-                    {t("multitool_new_item")}
-                  </button>
-                </div>
-                <h4>{t("multitool_risk_result")}</h4>
-                <pre>{stringifySafe(multitoolRiskSaveResult)}</pre>
-              </article>
+              <MultitoolEntityEditorCard
+                title={t("multitool_section_risks")}
+                selectLabel={t("multitool_choose_existing")}
+                selectedId={selectedRiskNodeId}
+                onSelectId={setSelectedRiskNodeId}
+                nodes={multitoolRiskNodes}
+                optionLabel={(node) => {
+                  const attrs = node?.attributes && typeof node.attributes === "object" ? node.attributes : {};
+                  return `${node.id} · ${String(attrs.title || attrs.name || `#${node.id}`)}`;
+                }}
+                draft={multitoolRiskDraft}
+                fields={multitoolRiskFields}
+                onPatchDraft={(patch) => {
+                  const next = { ...patch };
+                  if (Object.prototype.hasOwnProperty.call(next, "domain")) {
+                    next.domain = normalizeMultitoolDomain(next.domain);
+                  }
+                  if (Object.prototype.hasOwnProperty.call(next, "country")) {
+                    next.country = normalizeLegislationCountry(next.country);
+                  }
+                  patchMultitoolRiskDraft(next);
+                }}
+                onSave={onSaveMultitoolRisk}
+                onReset={() => {
+                  setSelectedRiskNodeId(0);
+                  setMultitoolRiskDraft({ ...DEFAULT_MULTITOOL_RISK_DRAFT });
+                }}
+                busy={busy}
+                saveLabel={t("multitool_save")}
+                resetLabel={t("multitool_new_item")}
+                resultTitle={t("multitool_risk_result")}
+                result={multitoolRiskSaveResult}
+                emptyLabel={t("multitool_no_items")}
+              />
 
               <article className="multitool-card multitool-card-wide">
                 <h3>{t("personal_tree_title")}</h3>
@@ -9914,8 +10843,11 @@ export default function App() {
                     {t("personal_tree_refresh_tree")}
                   </button>
                 </div>
-                <h4>{t("personal_tree_extraction_result")}</h4>
-                <pre>{stringifySafe(personalTreeIngestResult?.extraction || personalTreeIngestResult)}</pre>
+                <ResultSummaryPanel
+                  title={t("personal_tree_extraction_result")}
+                  result={personalTreeIngestResult?.extraction || personalTreeIngestResult}
+                  emptyLabel={t("multitool_no_items")}
+                />
 
                 <h4>{t("personal_tree_note_title")}</h4>
                 <div className="grid-2">
@@ -9996,8 +10928,11 @@ export default function App() {
                     {t("multitool_new_item")}
                   </button>
                 </div>
-                <h4>{t("personal_tree_note_result")}</h4>
-                <pre>{stringifySafe(personalTreeNoteResult?.note || personalTreeNoteResult)}</pre>
+                <ResultSummaryPanel
+                  title={t("personal_tree_note_result")}
+                  result={personalTreeNoteResult?.note || personalTreeNoteResult}
+                  emptyLabel={t("multitool_no_items")}
+                />
 
                 <h4>{t("personal_tree_small_window_title")}</h4>
                 <div className="personal-tree-mini-window">
@@ -10007,6 +10942,7 @@ export default function App() {
                       t={t}
                       selectedNodeId={personalTreeSelectedNodeId}
                       selectedEdgeSig={null}
+                      pendingPreview={combinedReviewPreview}
                       tracePath={null}
                       edgeEffectsBySig={{}}
                       onSelectNode={(nodeId) => {
@@ -10064,8 +11000,11 @@ export default function App() {
                     {t("personal_tree_refresh_tree")}
                   </button>
                 </div>
-                <h4>{t("personal_tree_view_result")}</h4>
-                <pre>{stringifySafe(personalTreePayload?.stats || personalTreeViewResult)}</pre>
+                <ResultSummaryPanel
+                  title={t("personal_tree_view_result")}
+                  result={personalTreePayload?.stats || personalTreeViewResult}
+                  emptyLabel={t("multitool_no_items")}
+                />
               </article>
 
               <article className="multitool-card multitool-card-wide">
@@ -10177,8 +11116,11 @@ export default function App() {
                         )}
                       </div>
                     </div>
-                    <h4>{t("packages_result")}</h4>
-                    <pre>{stringifySafe(packagesResult)}</pre>
+                    <ResultSummaryPanel
+                      title={t("packages_result")}
+                      result={packagesResult}
+                      emptyLabel={t("multitool_no_items")}
+                    />
                   </section>
 
                   <section className="multitool-ops-panel">
@@ -10275,8 +11217,11 @@ export default function App() {
                         <p className="multitool-empty">{t("multitool_no_items")}</p>
                       )}
                     </div>
-                    <h4>{t("memory_result")}</h4>
-                    <pre>{stringifySafe(memoryNamespaceApplyResult || memoryNamespaceViewResult)}</pre>
+                    <ResultSummaryPanel
+                      title={t("memory_result")}
+                      result={memoryNamespaceApplyResult || memoryNamespaceViewResult}
+                      emptyLabel={t("multitool_no_items")}
+                    />
                   </section>
 
                   <section className="multitool-ops-panel">
@@ -10365,8 +11310,11 @@ export default function App() {
                         {t("rag_run")}
                       </button>
                     </div>
-                    <h4>{t("rag_result")}</h4>
-                    <pre>{stringifySafe(graphRagResult)}</pre>
+                    <ResultSummaryPanel
+                      title={t("rag_result")}
+                      result={graphRagResult}
+                      emptyLabel={t("multitool_no_items")}
+                    />
                   </section>
 
                   <section className="multitool-ops-panel">
@@ -10453,8 +11401,11 @@ export default function App() {
                         <p className="multitool-empty">{t("multitool_no_items")}</p>
                       )}
                     </div>
-                    <h4>{t("contradiction_result")}</h4>
-                    <pre>{stringifySafe(contradictionScanResult)}</pre>
+                    <ResultSummaryPanel
+                      title={t("contradiction_result")}
+                      result={contradictionScanResult}
+                      emptyLabel={t("multitool_no_items")}
+                    />
 
                     <h4>{t("task_risk_title")}</h4>
                     <div className="row">
@@ -10487,8 +11438,11 @@ export default function App() {
                         <p className="multitool-empty">{t("multitool_no_items")}</p>
                       )}
                     </div>
-                    <h4>{t("task_risk_result")}</h4>
-                    <pre>{stringifySafe(taskRiskResult)}</pre>
+                    <ResultSummaryPanel
+                      title={t("task_risk_result")}
+                      result={taskRiskResult}
+                      emptyLabel={t("multitool_no_items")}
+                    />
                   </section>
 
                   <section className="multitool-ops-panel">
@@ -10540,8 +11494,11 @@ export default function App() {
                         <p className="multitool-empty">{t("multitool_no_items")}</p>
                       )}
                     </div>
-                    <h4>{t("timeline_result")}</h4>
-                    <pre>{stringifySafe(timelineReplayResult)}</pre>
+                    <ResultSummaryPanel
+                      title={t("timeline_result")}
+                      result={timelineReplayResult}
+                      emptyLabel={t("multitool_no_items")}
+                    />
 
                     <h4>{t("policy_title")}</h4>
                     <div className="grid-2">
@@ -10603,8 +11560,11 @@ export default function App() {
                         {t("policy_save")}
                       </button>
                     </div>
-                    <h4>{t("policy_result")}</h4>
-                    <pre>{stringifySafe(llmPolicyResult)}</pre>
+                    <ResultSummaryPanel
+                      title={t("policy_result")}
+                      result={llmPolicyResult}
+                      emptyLabel={t("multitool_no_items")}
+                    />
                   </section>
 
                   <section className="multitool-ops-panel">
@@ -10629,8 +11589,11 @@ export default function App() {
                         <p className="multitool-empty">{t("multitool_no_items")}</p>
                       )}
                     </div>
-                    <h4>{t("quality_result")}</h4>
-                    <pre>{stringifySafe(qualityResult)}</pre>
+                    <ResultSummaryPanel
+                      title={t("quality_result")}
+                      result={qualityResult}
+                      emptyLabel={t("multitool_no_items")}
+                    />
 
                     <h4>{t("backup_title")}</h4>
                     <div className="grid-2">
@@ -10714,8 +11677,11 @@ export default function App() {
                         {t("backup_restore")}
                       </button>
                     </div>
-                    <h4>{t("backup_result")}</h4>
-                    <pre>{stringifySafe({ create: backupCreateResult, restore: backupRestoreResult })}</pre>
+                    <ResultSummaryPanel
+                      title={t("backup_result")}
+                      result={{ create: backupCreateResult, restore: backupRestoreResult }}
+                      emptyLabel={t("multitool_no_items")}
+                    />
 
                     <div className="grid-2">
                       <div className="row">
@@ -10744,187 +11710,118 @@ export default function App() {
                         {t("audit_load")}
                       </button>
                     </div>
-                    <h4>{t("audit_result")}</h4>
-                    <pre>{stringifySafe(auditResult)}</pre>
+                    <ResultSummaryPanel
+                      title={t("audit_result")}
+                      result={auditResult}
+                      emptyLabel={t("multitool_no_items")}
+                    />
                   </section>
                 </div>
               </article>
             </div>
-            <div className="multitool-dashboard">
-              <h3>{t("multitool_dashboard")}</h3>
-              <div className="multitool-stats-grid">
-                <div>
-                  <h4>{t("multitool_chart_task_status")}</h4>
-                  {multitoolTaskStatusRows.length ? (
-                    renderMiniBars(multitoolTaskStatusRows, "multitool-task-status")
-                  ) : (
-                    <p className="multitool-empty">{t("multitool_no_items")}</p>
-                  )}
-                </div>
-                <div>
-                  <h4>{t("multitool_chart_task_priority")}</h4>
-                  {multitoolTaskPriorityRows.length ? (
-                    renderMiniBars(multitoolTaskPriorityRows, "multitool-task-priority")
-                  ) : (
-                    <p className="multitool-empty">{t("multitool_no_items")}</p>
-                  )}
-                </div>
-                <div>
-                  <h4>{t("multitool_chart_risk_probability")}</h4>
-                  {multitoolRiskProbabilityRows.length ? (
-                    renderMiniBars(multitoolRiskProbabilityRows, "multitool-risk-prob")
-                  ) : (
-                    <p className="multitool-empty">{t("multitool_no_items")}</p>
-                  )}
-                </div>
-                <div>
-                  <h4>{t("multitool_chart_risk_impact")}</h4>
-                  {multitoolRiskImpactRows.length ? (
-                    renderMiniBars(multitoolRiskImpactRows, "multitool-risk-impact")
-                  ) : (
-                    <p className="multitool-empty">{t("multitool_no_items")}</p>
-                  )}
-                </div>
-              </div>
-              <div className="multitool-stats-grid">
-                <div>
-                  <h4>{t("multitool_chart_domain_coverage")}</h4>
-                  {multitoolDomainCoverageRows.length ? (
-                    renderMiniBars(multitoolDomainCoverageRows, "multitool-domain")
-                  ) : (
-                    <p className="multitool-empty">{t("multitool_no_items")}</p>
-                  )}
-                </div>
-                <div>
-                  <h4>{t("multitool_open_tasks")}</h4>
-                  <ul className="insight-list">
-                    {multitoolOpenTasks.length ? (
-                      multitoolOpenTasks.slice(0, 6).map((node) => {
-                        const attrs = node?.attributes && typeof node.attributes === "object" ? node.attributes : {};
-                        return (
-                          <li key={`open-task-${node.id}`}>
-                            <strong>{String(attrs.title || attrs.name || `#${node.id}`)}</strong>
-                            <span>{`${attrs.status || "backlog"} · ${attrs.priority || "medium"}`}</span>
-                          </li>
-                        );
-                      })
-                    ) : (
-                      <li>
-                        <span>{t("multitool_no_items")}</span>
-                      </li>
-                    )}
-                  </ul>
-                </div>
-                <div>
-                  <h4>{t("multitool_top_risks")}</h4>
-                  <ul className="insight-list">
-                    {multitoolTopRisks.length ? (
-                      multitoolTopRisks.map((node) => {
-                        const attrs = node?.attributes && typeof node.attributes === "object" ? node.attributes : {};
-                        return (
-                          <li key={`top-risk-${node.id}`}>
-                            <strong>{String(attrs.title || attrs.name || `#${node.id}`)}</strong>
-                            <span>{`${attrs.probability || "medium"} · ${attrs.impact || "medium"}`}</span>
-                          </li>
-                        );
-                      })
-                    ) : (
-                      <li>
-                        <span>{t("multitool_no_items")}</span>
-                      </li>
-                    )}
-                  </ul>
-                </div>
-              </div>
-              <div className="multitool-stats-grid">
-                <div>
-                  <h4>{t("multitool_widget_contradictions")}</h4>
-                  <ul className="insight-list">
-                    {contradictionTopIssues.length ? (
-                      contradictionTopIssues.map((row, idx) => (
-                        <li key={`contr-top-${idx}`}>
-                          <strong>{String(row?.left_preview || `#${row?.left_node_id || idx + 1}`)}</strong>
-                          <span>{String(row?.right_preview || `#${row?.right_node_id || idx + 1}`)}</span>
-                          <span>{`score ${(Number(row?.score || 0) || 0).toFixed(2)}`}</span>
-                        </li>
-                      ))
-                    ) : (
-                      <li>
-                        <span>{t("multitool_no_items")}</span>
-                      </li>
-                    )}
-                  </ul>
-                </div>
-                <div>
-                  <h4>{t("multitool_widget_quality_trend")}</h4>
-                  {qualityTrendRows.length ? (
-                    renderMiniBars(qualityTrendRows, "quality-trend")
-                  ) : (
-                    <p className="multitool-empty">{t("multitool_no_items")}</p>
-                  )}
-                </div>
-                <div>
-                  <h4>{t("multitool_widget_backup_history")}</h4>
-                  <ul className="insight-list">
-                    {backupHistoryRows.length ? (
-                      backupHistoryRows.map((row, idx) => {
-                        const path = String(row?.path || "");
-                        const name = path ? path.split("/").pop() : `backup-${idx + 1}`;
-                        return (
-                          <li key={`backup-history-${idx}`}>
-                            <strong>{name}</strong>
-                            <span>{formatEpochLabel(row?.modified_at)}</span>
-                            <span>{`${Number(row?.size_bytes || 0)} B`}</span>
-                          </li>
-                        );
-                      })
-                    ) : (
-                      <li>
-                        <span>{t("multitool_no_items")}</span>
-                      </li>
-                    )}
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {sectionKey === "autoruns" && (
-          <section className="card grid-2">
-            <div>
-              <h2>{t("autoruns_import_title")}</h2>
-              <p>{t("autoruns_import_help")}</p>
-              <div className="row">
-                <label>{t("autoruns_input_or_query")}</label>
-                <textarea
-                  value={autorunsImportText}
-                  onChange={(e) => setAutorunsImportText(e.target.value)}
-                  rows={10}
-                  placeholder={t("autoruns_placeholder")}
-                />
-              </div>
-              <div className="row-actions">
-                <button disabled={busy} onClick={onImportAutoruns}>
-                  {t("import_autoruns")}
-                </button>
-              </div>
-            </div>
-            <div>
-              <h2>{t("autoruns_import_result")}</h2>
-              <pre>{stringifySafe(autorunsImportResult)}</pre>
-            </div>
+            <MultitoolDashboardSection
+              t={t}
+              renderMiniBars={renderMiniBars}
+              taskStatusRows={multitoolTaskStatusRows}
+              taskPriorityRows={multitoolTaskPriorityRows}
+              riskProbabilityRows={multitoolRiskProbabilityRows}
+              riskImpactRows={multitoolRiskImpactRows}
+              domainCoverageRows={multitoolDomainCoverageRows}
+              openTasks={multitoolOpenTasks}
+              topRisks={multitoolTopRisks}
+              contradictionTopIssues={contradictionTopIssues}
+              qualityTrendRows={qualityTrendRows}
+              backupHistoryRows={backupHistoryRows}
+              formatEpochLabel={formatEpochLabel}
+            />
           </section>
         )}
 
         {sectionKey === "graph" && (
           <section className="card">
             <h2>{t("graph_visualization")}</h2>
+            <section className="card graph-foundation-builder">
+              <div className="branch-visual-head">
+                <div>
+                  <h3>{t("graph_foundation_title")}</h3>
+                  <p className="graph-hint">{t("graph_foundation_subtitle")}</p>
+                </div>
+                <span className="branch-scope-chip">
+                  {`${t("graph_foundation_target_current")}: ${
+                    selectedNode ? nodeLabel(selectedNode) : t("graph_foundation_target_none")
+                  }`}
+                </span>
+              </div>
+              <p className="graph-hint">
+                {selectedNode ? t("graph_foundation_target_selected") : t("graph_foundation_target_none")}
+              </p>
+              <div className="grid-2">
+                <div className="row">
+                  <label>{t("graph_foundation_topic")}</label>
+                  <textarea
+                    value={graphFoundationPrompt}
+                    onChange={(e) => setGraphFoundationPrompt(e.target.value)}
+                    rows={3}
+                    placeholder={t("graph_foundation_topic_placeholder")}
+                  />
+                </div>
+                <div className="row">
+                  <label>{t("graph_foundation_context")}</label>
+                  <textarea
+                    value={graphFoundationContext}
+                    onChange={(e) => setGraphFoundationContext(e.target.value)}
+                    rows={3}
+                    placeholder={t("graph_foundation_context_placeholder")}
+                  />
+                </div>
+              </div>
+              <div className="grid-2">
+                <div className="row">
+                  <label>{t("graph_foundation_depth")}</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={3}
+                    value={graphFoundationDepth}
+                    onChange={(e) => setGraphFoundationDepth(e.target.value)}
+                  />
+                </div>
+                <div className="row">
+                  <label>{t("graph_foundation_concept_limit")}</label>
+                  <input
+                    type="number"
+                    min={2}
+                    max={6}
+                    value={graphFoundationConceptLimit}
+                    onChange={(e) => setGraphFoundationConceptLimit(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="row-actions">
+                <button type="button" disabled={busy} onClick={onCreateGraphFoundation}>
+                  {t("graph_foundation_title")}
+                </button>
+              </div>
+              <div className="project-panel-stack">
+                {graphFoundationResult ? (
+                  <ExecutionStatusPanel
+                    title={t("graph_foundation_execution")}
+                    execution={graphFoundationResult?.execution || null}
+                  />
+                ) : null}
+                <ResultSummaryPanel
+                  title={t("graph_foundation_result")}
+                  result={graphFoundationResult?.foundation || null}
+                  emptyLabel={t("multitool_no_items")}
+                />
+              </div>
+            </section>
             <GraphCanvas
               snapshot={snapshot}
               t={t}
               selectedNodeId={selectedNodeId}
               selectedEdgeSig={selectedEdgeSig}
+              pendingPreview={combinedReviewPreview}
               tracePath={
                 selectedTrace
                   ? {
@@ -10937,6 +11834,75 @@ export default function App() {
               edgeEffectsBySig={edgeEffectsBySig}
               onSelectNode={setSelectedNodeId}
               onSelectEdge={setSelectedEdgeSig}
+              renderNodePopover={
+                selectedNode
+                  ? ({ node }) => (
+                      <GraphNodeAssistPopover
+                        title={nodeLabel(node)}
+                        meta={`${String(node.type || "generic")} · #${Number(node.id || 0)}`}
+                        summary={
+                          String(selectedNodePanelResult?.node?.summary || "").trim() ||
+                          String(selectedNodeSourceText(node) || "").trim() ||
+                          String(nodeLabel(node) || "").trim()
+                        }
+                        actionLabel={t("archive_chat_model_role")}
+                        messageLabel={t("archive_chat_message")}
+                        action={graphQuickAction}
+                        actionOptions={graphQuickActionOptions}
+                        prompt={graphQuickPrompt}
+                        onActionChange={setGraphQuickAction}
+                        onPromptChange={setGraphQuickPrompt}
+                        busy={busy}
+                        disabled={!selectedNode}
+                        onRun={onRunGraphQuickAssist}
+                        onUseRequest={() => seedSelectedNodeIntoMultitool("request")}
+                        onUseTask={() => seedSelectedNodeIntoMultitool("task")}
+                        onUseRisk={() => seedSelectedNodeIntoMultitool("risk")}
+                        onUseNote={() => seedSelectedNodeIntoMultitool("note")}
+                        runLabel={t("archive_chat_run")}
+                        requestLabel={t("multitool_section_requests")}
+                        taskLabel={t("multitool_section_tasks")}
+                        riskLabel={t("multitool_section_risks")}
+                        noteLabel={t("multitool_section_notes")}
+                        resultTitle={t("archive_chat_result")}
+                        resultSummary={String(graphQuickResult?.assistant_reply || "").trim()}
+                        emptyResultLabel={t("multitool_no_items")}
+                      />
+                    )
+                  : null
+              }
+              renderEdgePopover={
+                selectedEdge && selectedEdgeQuickInsights
+                  ? () => (
+                      <GraphEdgeAssistPopover
+                        labels={edgePopoverLabels}
+                        summary={selectedEdgeQuickInsights.summary}
+                        relationMeta={`${selectedEdgeQuickInsights.fromName} -> ${selectedEdgeQuickInsights.toName}`}
+                        reasoningSummary={selectedEdgeReasoning.summary}
+                        riskSummary={selectedEdgeQuickInsights.riskSummary}
+                        riskBadge={`${selectedEdgeQuickInsights.riskLevel.toUpperCase()} · ${selectedEdgeQuickInsights.riskScore.toFixed(2)}`}
+                        mergeSuggestion={selectedEdgeQuickInsights.mergeSuggestion}
+                        splitSuggestion={selectedEdgeQuickInsights.splitSuggestion}
+                        actionLabel={t("archive_chat_model_role")}
+                        messageLabel={t("archive_chat_message")}
+                        action={graphEdgeAction}
+                        actionOptions={graphEdgeActionOptions}
+                        prompt={graphEdgePrompt}
+                        onActionChange={setGraphEdgeAction}
+                        onPromptChange={setGraphEdgePrompt}
+                        busy={busy}
+                        disabled={!selectedEdge}
+                        onRunAssist={onRunGraphEdgeAssist}
+                        onStrengthen={() => onAdjustSelectedEdgeWeight(0.1)}
+                        onWeaken={() => onAdjustSelectedEdgeWeight(-0.1)}
+                        runLabel={t("archive_chat_run")}
+                        resultTitle={t("archive_chat_result")}
+                        resultSummary={String(graphEdgeResult?.assistant_reply || "").trim()}
+                        emptyResultLabel={t("multitool_no_items")}
+                      />
+                    )
+                  : null
+              }
             />
             <p className="graph-hint">{t("graph_hover_dependencies_hint")}</p>
             <div className="reasoning-panel">
@@ -11101,8 +12067,11 @@ export default function App() {
                       {t("branch_report_save")}
                     </button>
                   </div>
-                  <h4>{t("branch_report_saved_result")}</h4>
-                  <pre>{stringifySafe(branchReportSaveResult)}</pre>
+                  <ResultSummaryPanel
+                    title={t("branch_report_saved_result")}
+                    result={branchReportSaveResult}
+                    emptyLabel={t("multitool_no_items")}
+                  />
                 </div>
               </section>
               <section className="style-node-panel">
@@ -11171,14 +12140,20 @@ export default function App() {
                     {t("style_nodes_reset")}
                   </button>
                 </div>
-                <h4>{t("style_nodes_saved_result")}</h4>
-                <pre>{stringifySafe(styleNodeSaveResult)}</pre>
+                <ResultSummaryPanel
+                  title={t("style_nodes_saved_result")}
+                  result={styleNodeSaveResult}
+                  emptyLabel={t("multitool_no_items")}
+                />
               </section>
             </div>
             <div className="grid-2" style={{ marginTop: "14px" }}>
               <div>
-                <h2>{t("selected_node_editor")}</h2>
-                <pre>{stringifySafe(selectedNode)}</pre>
+                <ResultSummaryPanel
+                  title={t("selected_node_editor")}
+                  result={selectedNodePanelResult}
+                  emptyLabel={t("graph_empty")}
+                />
                 <div className="row">
                   <label>{t("attributes_json")}</label>
                   <textarea
@@ -11207,7 +12182,11 @@ export default function App() {
                 </div>
               </div>
               <div>
-                <h2>{t("selected_edge_editor")}</h2>
+                <ResultSummaryPanel
+                  title={t("selected_edge_editor")}
+                  result={selectedEdgePanelResult}
+                  emptyLabel={t("graph_empty")}
+                />
                 <div className="edge-reasoning-panel">
                   <div className="edge-reasoning-title">{t("edge_reasoning")}</div>
                   {!selectedEdge ? (
@@ -11274,7 +12253,6 @@ export default function App() {
                     </div>
                   )}
                 </div>
-                <pre>{stringifySafe(selectedEdge)}</pre>
                 <div className="row">
                   <label>{t("weight")}</label>
                   <input
@@ -11314,10 +12292,16 @@ export default function App() {
         )}
 
         {sectionKey === "client" && (
-          <section className="card">
-            <h2>{t("client_profile_semantic_input")}</h2>
-            <pre>{stringifySafe(clientProfile)}</pre>
-          </section>
+          <>
+            <section className="card">
+              <div className="row-actions">
+                <button type="button" disabled={busy} onClick={onRefreshClientProfile}>
+                  {t("refresh_client_profile")}
+                </button>
+              </div>
+            </section>
+            <ClientSummaryPanel t={t} profile={clientProfile} />
+          </>
         )}
 
         {sectionKey === "advisors" && (
@@ -11386,17 +12370,6 @@ export default function App() {
                 <button disabled={busy} onClick={onRunLLMDebate}>
                   {t("debate_run")}
                 </button>
-              </div>
-            </section>
-
-            <section className="card grid-2">
-              <div>
-                <h2>{t("debate_result")}</h2>
-                <pre>{stringifySafe(debateResult)}</pre>
-              </div>
-              <div>
-                <h2>{t("mini_coders_advisors")}</h2>
-                <pre>{stringifySafe(modelAdvisors?.advisors || modelAdvisors || {})}</pre>
               </div>
             </section>
 
@@ -11482,7 +12455,17 @@ export default function App() {
                   </button>
                 </div>
                 <h3>{t("archive_chat_suggestions")}</h3>
-                <pre>{stringifySafe(advisorDetectedModels)}</pre>
+                {advisorDetectedModels.length ? (
+                  <div className="project-chip-row">
+                    {advisorDetectedModels.map((item) => (
+                      <span className="project-chip" key={`archive-suggestion-${item}`}>
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="project-muted">{t("multitool_no_items")}</p>
+                )}
               </div>
               <div>
                 <h2>{t("archive_review_title")}</h2>
@@ -11501,18 +12484,44 @@ export default function App() {
                   </button>
                 </div>
                 <h3>{t("archive_review_result")}</h3>
-                <pre>{stringifySafe(archiveReviewResult)}</pre>
+                <div className="project-key-lines">
+                  <div className="project-key-line">
+                    <strong>Summary</strong>
+                    <span>{String(archiveReviewResult?.summary || "-")}</span>
+                  </div>
+                  <div className="project-key-line">
+                    <strong>Updates</strong>
+                    <span>{Array.isArray(archiveReviewResult?.archive_updates) ? archiveReviewResult.archive_updates.length : 0}</span>
+                  </div>
+                </div>
                 <h3>{t("archive_chat_result")}</h3>
-                <pre>{stringifySafe(archiveChatResult?.verification || archiveChatResult || {})}</pre>
+                <div className="project-key-lines">
+                  <div className="project-key-line">
+                    <strong>Verified</strong>
+                    <span>{archiveChatResult?.verification?.verified ? "yes" : "no"}</span>
+                  </div>
+                  <div className="project-key-line">
+                    <strong>Score</strong>
+                    <span>{Number(archiveChatResult?.verification?.score || 0).toFixed(2)}</span>
+                  </div>
+                  <div className="project-key-line">
+                    <strong>Issues</strong>
+                    <span>{Number(archiveChatResult?.verification?.issue_count || 0)}</span>
+                  </div>
+                </div>
               </div>
             </section>
 
             {renderIntegrationLayerPanel()}
-
-            <section className="card">
-              <h2>{t("prompt_catalog")}</h2>
-              <pre>{stringifySafe(modelAdvisors?.prompts || [])}</pre>
-            </section>
+            <AdvisorsSummaryPanel
+              t={t}
+              debateResult={debateResult}
+              advisorDetectedModels={advisorDetectedModels}
+              advisorRoleModels={advisorRoleModels}
+              archiveChatResult={archiveChatResult}
+              archiveReviewResult={archiveReviewResult}
+              promptCatalog={modelAdvisors?.prompts || []}
+            />
           </>
         )}
 
@@ -11578,8 +12587,11 @@ export default function App() {
                   {t("hallucination_report_action")}
                 </button>
               </div>
-              <h3>{t("hallucination_report_result")}</h3>
-              <pre>{stringifySafe(hallucinationReportResult)}</pre>
+              <HallucinationSummaryPanel
+                t={t}
+                reportResult={hallucinationReportResult}
+                checkResult={hallucinationCheckResult}
+              />
             </div>
 
             <div>
@@ -11607,8 +12619,6 @@ export default function App() {
                   {t("hallucination_check_action")}
                 </button>
               </div>
-              <h3>{t("hallucination_check_result")}</h3>
-              <pre>{stringifySafe(hallucinationCheckResult)}</pre>
             </div>
           </section>
         )}
@@ -11791,10 +12801,16 @@ export default function App() {
           </div>
 
           <div>
-            <h2>{t("profile_prompt_preview")}</h2>
-            <pre>{stringifySafe(profilePromptPreview)}</pre>
-            <h3>{t("profile_result")}</h3>
-            <pre>{stringifySafe(profileResult)}</pre>
+            <TextPreviewPanel
+              title={t("profile_prompt_preview")}
+              text={typeof profilePromptPreview === "string" ? profilePromptPreview : stringifySafe(profilePromptPreview)}
+              emptyLabel={t("multitool_no_items")}
+            />
+            <ResultSummaryPanel
+              title={t("profile_result")}
+              result={profileResult}
+              emptyLabel={t("multitool_no_items")}
+            />
           </div>
         </section>
       </>
@@ -11881,8 +12897,11 @@ export default function App() {
           </div>
 
           <div>
-            <h2>{t("last_simulation_output")}</h2>
-            <pre>{stringifySafe(lastSimulation)}</pre>
+            <ResultSummaryPanel
+              title={t("last_simulation_output")}
+              result={lastSimulation}
+              emptyLabel={t("multitool_no_items")}
+            />
           </div>
         </section>
 
@@ -11941,7 +12960,27 @@ export default function App() {
               setPage: setEventsPage,
               label: t("pager_events"),
             })}
-            <pre>{stringifySafe(eventsView.items)}</pre>
+            <ul className="insight-list">
+              {eventsView.items.length ? (
+                eventsView.items.map((item, index) => {
+                  const payload =
+                    item?.payload && typeof item.payload === "object" && !Array.isArray(item.payload)
+                      ? item.payload
+                      : {};
+                  return (
+                    <li key={`sim-event-${item?.id || index}`}>
+                      <strong>{`${humanizeToken(item?.event_type || "event")} #${Number(item?.id || 0)}`}</strong>
+                      <span>{formatEventTimeLabel(item)}</span>
+                      <span>{String(payload.summary || payload.action || payload.reason || "-")}</span>
+                    </li>
+                  );
+                })
+              ) : (
+                <li>
+                  <span>{t("multitool_no_items")}</span>
+                </li>
+              )}
+            </ul>
           </div>
         </section>
       </>
@@ -11950,60 +12989,19 @@ export default function App() {
 
   function renderDataPage() {
     return (
-      <>
-        <section className="card grid-2">
-          <div>
-            <h2>{t("snapshot_nodes")}</h2>
-            {renderPager({
-              page: nodesView.page,
-              totalPages: nodesView.totalPages,
-              setPage: setNodesPage,
-              label: t("pager_nodes"),
-            })}
-            <pre>{stringifySafe(nodesView.items)}</pre>
-          </div>
-          <div>
-            <h2>{t("snapshot_edges")}</h2>
-            {renderPager({
-              page: edgesView.page,
-              totalPages: edgesView.totalPages,
-              setPage: setEdgesPage,
-              label: t("pager_edges"),
-            })}
-            <pre>{stringifySafe(edgesView.items)}</pre>
-          </div>
-        </section>
-
-        <section className="card">
-          <h2>{t("sql_table_schema_json")}</h2>
-          <pre>{stringifySafe(dbSchema)}</pre>
-        </section>
-
-        <section className="card">
-          <h2>{t("project_modules")}</h2>
-          {renderPager({
-            page: modulesView.page,
-            totalPages: modulesView.totalPages,
-            setPage: setModulesPage,
-            label: t("pager_modules"),
-          })}
-          <div className="modules-grid">
-            {modulesView.items.map((mod) => (
-              <article key={mod.name} className="module-card">
-                <h3>{mod.name}</h3>
-                <p>{mod.description}</p>
-                <p>
-                  {t("files")}: {mod.count}
-                </p>
-                <details>
-                  <summary>{t("show_files")}</summary>
-                  <pre>{(mod.files || []).join("\n")}</pre>
-                </details>
-              </article>
-            ))}
-          </div>
-        </section>
-      </>
+      <DataSummaryPanels
+        t={t}
+        eventsView={eventsView}
+        nodesView={nodesView}
+        edgesView={edgesView}
+        setEventsPage={setEventsPage}
+        setNodesPage={setNodesPage}
+        setEdgesPage={setEdgesPage}
+        modulesView={modulesView}
+        setModulesPage={setModulesPage}
+        renderPager={renderPager}
+        dbSchema={dbSchema}
+      />
     );
   }
 
@@ -12044,9 +13042,6 @@ export default function App() {
           <div className="row-actions">
             <button disabled={busy} onClick={refreshAll}>
               {t("action_refresh")}
-            </button>
-            <button disabled={busy} onClick={onSeedDemo}>
-              {t("action_seed_demo")}
             </button>
             <button disabled={busy} onClick={onClear}>
               {t("action_clear")}

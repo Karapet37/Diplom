@@ -14,7 +14,6 @@ import zlib
 
 from src.autonomous_graph.api import GraphAPI, build_graph_engine_from_env
 from src.living_system.core_engine import LivingSystemEngine
-from src.web.autoruns_import import parse_autoruns_text
 from src.web.client_introspection import build_client_profile
 
 
@@ -165,15 +164,8 @@ _USER_DIMENSION_BINDINGS: dict[str, dict[str, str]] = {
     },
 }
 
-_AUTORUNS_RISK_LOCATION_HINTS: tuple[str, ...] = (
-    "runonce",
-    "currentversion\\run",
-    "scheduled task",
-    "service",
-    "drivers",
-    "boot",
-    "winlogon",
-)
+_DEFAULT_STRUCTURED_INPUT_MODEL_PATH = "models/gguf/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
+_DEFAULT_GRAPH_MONITOR_MODEL_PATH = "models/gguf/textGen/mistral-7b-instruct-v0.3-q4_k_m.gguf"
 
 _PROFILE_ALIAS_PATTERNS: list[tuple[str, str, re.Pattern[str]]] = []
 for _canonical_key, _aliases in _PROFILE_KEY_ALIASES.items():
@@ -1634,6 +1626,75 @@ class GraphWorkspaceService:
             return list(value)
         return []
 
+    def _input_extraction_status(self, value: Any) -> dict[str, Any]:
+        root = self._as_mapping(value)
+        verification = self._as_mapping(root.get("verification"))
+        graph_binding = self._as_mapping(root.get("graph_binding"))
+        subject_binding = self._as_mapping(graph_binding.get("subject_binding"))
+        model = self._as_mapping(root.get("model"))
+        return {
+            "enabled": bool(root.get("enabled", False)),
+            "source": str(root.get("source", "") or "").strip(),
+            "summary": " ".join(str(root.get("summary", "") or "").split()).strip(),
+            "updates_count": len(self._as_list(root.get("updates"))),
+            "verified": bool(verification.get("verified", False)),
+            "issue_count": self._to_int(verification.get("issue_count", 0), 0),
+            "warning_count": self._to_int(verification.get("warning_count", 0), 0),
+            "score": round(self._to_float(verification.get("score", 0.0), 0.0), 4),
+            "graph_attached": bool(graph_binding.get("attached", False)),
+            "branch_node_id": self._to_int(graph_binding.get("branch_node_id", 0), 0),
+            "session_node_id": self._to_int(graph_binding.get("session_node_id", 0), 0),
+            "subject_branch_count": len(self._as_list(subject_binding.get("subject_branch_node_ids"))),
+            "used_fallback": bool(model.get("used_fallback", False)),
+            "model_path": str(
+                model.get("selected_model_path", model.get("requested_model_path", "")) or ""
+            ).strip(),
+        }
+
+    def _graph_monitor_status(self, value: Any) -> dict[str, Any]:
+        root = self._as_mapping(value)
+        model = self._as_mapping(root.get("model"))
+        node_patch_count = self._to_int(root.get("node_patch_count", 0), 0)
+        edge_patch_count = self._to_int(root.get("edge_patch_count", 0), 0)
+        return {
+            "enabled": bool(root.get("enabled", False)),
+            "attached": bool(root.get("attached", False)),
+            "session_node_id": self._to_int(root.get("session_node_id", 0), 0),
+            "node_patch_count": node_patch_count,
+            "edge_patch_count": edge_patch_count,
+            "patch_total": max(0, node_patch_count + edge_patch_count),
+            "used_fallback": bool(model.get("used_fallback", False)),
+            "model_path": str(
+                model.get("selected_model_path", model.get("requested_model_path", "")) or ""
+            ).strip(),
+        }
+
+    def _execution_status(
+        self,
+        *,
+        action: str,
+        persisted: Any,
+        input_extraction: Any = None,
+        graph_monitor: Any = None,
+        extra: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        extraction = self._input_extraction_status(input_extraction)
+        monitor = self._graph_monitor_status(graph_monitor)
+        persisted_flag = bool(persisted)
+        status = "persisted" if persisted_flag else "in_memory"
+        if not persisted_flag and (extraction.get("graph_attached") or monitor.get("attached")):
+            status = "graph_updated_not_persisted"
+        payload = {
+            "action": str(action or "").strip(),
+            "status": status,
+            "persisted": persisted_flag,
+            "input_extraction": extraction,
+            "graph_monitor": monitor,
+        }
+        if extra:
+            payload.update(dict(extra))
+        return payload
+
     @staticmethod
     def _debate_role(role: Any, *, fallback: str) -> str:
         token = re.sub(r"[^a-z0-9_]+", "_", str(role or "").strip().lower())
@@ -1816,6 +1877,697 @@ class GraphWorkspaceService:
     def _safe_slug(value: Any, *, default: str) -> str:
         token = re.sub(r"[^a-z0-9_]+", "_", str(value or "").strip().lower()).strip("_")
         return token or default
+
+    def _heuristic_input_updates(
+        self,
+        *,
+        source: str,
+        text: str,
+        context: str,
+        limit: int = 4,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        clean_text = " ".join(str(text or "").split()).strip()
+        clean_context = " ".join(str(context or "").split()).strip()
+        source_token = self._safe_slug(source, default="input")
+        summary = self._to_title(clean_text, fallback=f"{source_token} input captured", limit=160)
+        sentences = self._split_sentences(clean_text, limit=max(1, int(limit)))
+        if not sentences and clean_text:
+            sentences = [clean_text[:320]]
+
+        updates: list[dict[str, Any]] = []
+        for idx, sentence in enumerate(sentences[: max(1, int(limit))], start=1):
+            field = "intent" if idx == 1 else f"detail_{idx}"
+            updates.append(
+                {
+                    "entity": source_token,
+                    "field": field,
+                    "operation": "append",
+                    "value": sentence[:320],
+                    "reason": "Structured fallback capture from user input text.",
+                    "source": "input_capture_fallback",
+                    "confidence": 0.58,
+                    "tags": [source_token, "input_capture", "fallback"],
+                }
+            )
+        if clean_context:
+            updates.append(
+                {
+                    "entity": source_token,
+                    "field": "context",
+                    "operation": "append",
+                    "value": clean_context[:320],
+                    "reason": "Context line linked to the captured input.",
+                    "source": "input_capture_context",
+                    "confidence": 0.61,
+                    "tags": [source_token, "context"],
+                }
+            )
+        return summary, updates[: max(1, int(limit))]
+
+    def _link_input_capture_to_related_nodes(
+        self,
+        *,
+        graph_binding: Mapping[str, Any],
+        related_node_ids: list[int],
+        source: str,
+    ) -> None:
+        session_node_id = self._to_int(self._as_mapping(graph_binding).get("session_node_id", 0), 0)
+        if session_node_id <= 0:
+            return
+        update_node_ids = [
+            self._to_int(item, 0)
+            for item in self._as_list(self._as_mapping(graph_binding).get("update_node_ids"))
+            if self._to_int(item, 0) > 0
+        ]
+        relation_type = f"{self._safe_slug(source, default='input')}_input"
+        for related_node_id in related_node_ids:
+            if related_node_id <= 0:
+                continue
+            self._connect_nodes(
+                from_node=session_node_id,
+                to_node=int(related_node_id),
+                relation_type=f"interprets_{relation_type}",
+                weight=0.74,
+                logic_rule="input_capture_link",
+            )
+            for update_node_id in update_node_ids[:6]:
+                self._connect_nodes(
+                    from_node=update_node_id,
+                    to_node=int(related_node_id),
+                    relation_type="updates_related_context",
+                    weight=0.68,
+                    logic_rule="input_capture_link",
+                )
+
+    def _run_graph_monitor(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        source: str,
+        focus_node_ids: list[int],
+        hint_text: str = "",
+        model_path: str = "",
+        model_role: str = "planner",
+        apply_changes: bool = True,
+    ) -> dict[str, Any]:
+        normalized_focus = [
+            self._to_int(item, 0)
+            for item in list(focus_node_ids or [])
+            if self._to_int(item, 0) > 0
+        ]
+        seen_focus: set[int] = set()
+        focus_ids: list[int] = []
+        for node_id in normalized_focus:
+            if node_id in seen_focus:
+                continue
+            seen_focus.add(node_id)
+            focus_ids.append(node_id)
+            if len(focus_ids) >= 12:
+                break
+        if not focus_ids:
+            return {
+                "enabled": False,
+                "attached": False,
+                "session_node_id": 0,
+                "patch_node_ids": [],
+                "node_patches": [],
+                "edge_patches": [],
+                "node_patch_count": 0,
+                "edge_patch_count": 0,
+                "raw_output": "",
+                "model": {
+                    "requested_model_path": str(model_path or ""),
+                    "selected_model_path": "",
+                    "requested_role": str(model_role or "planner"),
+                    "resolution": {"mode": "skipped"},
+                    "used_fallback": True,
+                },
+            }
+
+        focus_nodes = [self.api.engine.get_node(node_id) for node_id in focus_ids]
+        focus_nodes = [node for node in focus_nodes if node is not None]
+        if not focus_nodes:
+            return {
+                "enabled": False,
+                "attached": False,
+                "session_node_id": 0,
+                "patch_node_ids": [],
+                "node_patches": [],
+                "edge_patches": [],
+                "node_patch_count": 0,
+                "edge_patch_count": 0,
+                "raw_output": "",
+                "model": {
+                    "requested_model_path": str(model_path or ""),
+                    "selected_model_path": "",
+                    "requested_role": str(model_role or "planner"),
+                    "resolution": {"mode": "skipped"},
+                    "used_fallback": True,
+                },
+            }
+
+        focus_payload = []
+        allowed_focus_ids = {int(node.id) for node in focus_nodes}
+        for node in focus_nodes:
+            attrs = self._as_mapping(getattr(node, "attributes", {}))
+            focus_payload.append(
+                {
+                    "node_id": int(node.id),
+                    "type": str(getattr(node, "type", "generic") or "generic"),
+                    "name": str(attrs.get("name", "") or attrs.get("title", "") or f"Node {node.id}"),
+                    "summary": self._node_text_blob(node)[:280],
+                    "state": self._as_mapping(getattr(node, "state", {})),
+                }
+            )
+
+        focus_edges = []
+        for edge in self.api.engine.store.edges:
+            from_node = int(getattr(edge, "from_node", 0) or 0)
+            to_node = int(getattr(edge, "to_node", 0) or 0)
+            if from_node not in allowed_focus_ids or to_node not in allowed_focus_ids:
+                continue
+            focus_edges.append(
+                {
+                    "from_node": from_node,
+                    "to_node": to_node,
+                    "relation_type": str(getattr(edge, "relation_type", "related_to") or "related_to"),
+                    "weight": round(self._to_float(getattr(edge, "weight", 0.0), 0.0), 4),
+                }
+            )
+            if len(focus_edges) >= 16:
+                break
+
+        requested_model_path = str(model_path or "").strip() or _DEFAULT_GRAPH_MONITOR_MODEL_PATH
+        resolved_role = self._debate_role(model_role, fallback="planner")
+        llm_fn, resolution = self._resolve_role_or_model_llm(
+            role=resolved_role,
+            model_path=requested_model_path,
+        )
+        raw_output = ""
+        parsed_output: dict[str, Any] = {}
+        used_fallback = True
+        if llm_fn is not None:
+            prompt = (
+                "You are a graph monitor.\n"
+                "Given a focused graph fragment, suggest small safe node/edge patches.\n"
+                "Return JSON only:\n"
+                '{ "node_patches":[{"node_id":0,"summary":"","confidence":0.0,"reason":""}],'
+                '"edge_patches":[{"from_node":0,"to_node":0,"relation_type":"related_to","weight":0.0,"action":"create|update","reason":""}] }\n'
+                "Keep patches minimal, only reference provided node ids, and never invent node ids.\n"
+                f"Source: {source}\n"
+                f"Hint: {' '.join(str(hint_text or '').split())[:600]}\n"
+                f"Nodes: {self._stable_json(focus_payload)}\n"
+                f"Edges: {self._stable_json(focus_edges)}\n"
+            )
+            try:
+                raw_output = str(llm_fn(prompt) or "").strip()
+                parsed_candidate = self._extract_json_from_llm_output(raw_output)
+                if isinstance(parsed_candidate, Mapping):
+                    parsed_output = dict(parsed_candidate)
+                    used_fallback = False
+            except Exception:
+                parsed_output = {}
+                used_fallback = True
+
+        node_patches_in = self._as_list(parsed_output.get("node_patches", []))
+        edge_patches_in = self._as_list(parsed_output.get("edge_patches", []))
+        if not node_patches_in:
+            node_patches_in = [
+                {
+                    "node_id": int(node["node_id"]),
+                    "summary": str(node.get("summary", "") or node.get("name", "") or "")[:240],
+                    "confidence": 0.62,
+                    "reason": "heuristic_monitor_summary",
+                }
+                for node in focus_payload[:4]
+                if str(node.get("summary", "") or node.get("name", "") or "").strip()
+            ]
+        if not edge_patches_in:
+            heuristic_edges: list[dict[str, Any]] = []
+            for idx in range(len(focus_nodes)):
+                left = focus_nodes[idx]
+                left_tokens = self._token_set(self._node_text_blob(left))
+                if not left_tokens:
+                    continue
+                for jdx in range(idx + 1, len(focus_nodes)):
+                    right = focus_nodes[jdx]
+                    right_tokens = self._token_set(self._node_text_blob(right))
+                    if not right_tokens:
+                        continue
+                    overlap = self._jaccard_similarity(left_tokens, right_tokens)
+                    if overlap < 0.18:
+                        continue
+                    heuristic_edges.append(
+                        {
+                            "from_node": int(left.id),
+                            "to_node": int(right.id),
+                            "relation_type": "related_to",
+                            "weight": round(max(0.42, min(0.84, 0.42 + overlap)), 4),
+                            "action": "update",
+                            "reason": "heuristic_text_overlap",
+                        }
+                    )
+                    if len(heuristic_edges) >= 4:
+                        break
+                if len(heuristic_edges) >= 4:
+                    break
+            edge_patches_in = heuristic_edges
+
+        node_patches: list[dict[str, Any]] = []
+        for row in node_patches_in[:6]:
+            item = self._as_mapping(row)
+            node_id = self._to_int(item.get("node_id", 0), 0)
+            if node_id not in allowed_focus_ids:
+                continue
+            summary = " ".join(str(item.get("summary", "") or "").split()).strip()
+            if not summary:
+                continue
+            node_patches.append(
+                {
+                    "node_id": node_id,
+                    "summary": summary[:240],
+                    "confidence": self._confidence(item.get("confidence", 0.62), 0.62),
+                    "reason": " ".join(str(item.get("reason", "") or "").split()).strip()[:320],
+                }
+            )
+
+        edge_patches: list[dict[str, Any]] = []
+        for row in edge_patches_in[:6]:
+            item = self._as_mapping(row)
+            from_node = self._to_int(item.get("from_node", 0), 0)
+            to_node = self._to_int(item.get("to_node", 0), 0)
+            if from_node not in allowed_focus_ids or to_node not in allowed_focus_ids:
+                continue
+            if from_node == to_node:
+                continue
+            relation_type = self._safe_slug(item.get("relation_type", "related_to"), default="related_to")
+            action = "update" if str(item.get("action", "update") or "update").strip().lower() == "update" else "create"
+            edge_patches.append(
+                {
+                    "from_node": from_node,
+                    "to_node": to_node,
+                    "relation_type": relation_type,
+                    "weight": round(self._confidence(item.get("weight", 0.58), 0.58), 4),
+                    "action": action,
+                    "reason": " ".join(str(item.get("reason", "") or "").split()).strip()[:320],
+                }
+            )
+
+        if not apply_changes:
+            return {
+                "enabled": True,
+                "attached": False,
+                "session_node_id": 0,
+                "patch_node_ids": [],
+                "node_patches": node_patches,
+                "edge_patches": edge_patches,
+                "node_patch_count": len(node_patches),
+                "edge_patch_count": len(edge_patches),
+                "raw_output": raw_output[:6000],
+                "model": {
+                    "requested_model_path": requested_model_path,
+                    "selected_model_path": str(resolution.get("selected_model_path", "") or requested_model_path),
+                    "requested_role": resolved_role,
+                    "resolution": dict(resolution),
+                    "used_fallback": bool(used_fallback),
+                },
+            }
+
+        session_node = self.api.engine.create_node(
+            "graph_monitor_session",
+            attributes={
+                "user_id": user_id,
+                "session_id": session_id,
+                "source": source,
+                "name": f"Graph Monitor {self._to_title(source, fallback='session', limit=48)}",
+                "hint_text": " ".join(str(hint_text or "").split())[:900],
+                "focus_node_ids": list(focus_ids),
+                "requested_model_path": requested_model_path,
+                "selected_model_path": str(resolution.get("selected_model_path", "") or requested_model_path),
+                "requested_role": resolved_role,
+                "resolution": dict(resolution),
+                "used_fallback": bool(used_fallback),
+                "raw_output": raw_output[:6000],
+                "created_at": float(time.time()),
+            },
+            state={"confidence": 0.66 if not used_fallback else 0.52},
+        )
+        patch_node_ids: list[int] = []
+        for focus_node_id in focus_ids:
+            self._connect_nodes(
+                from_node=int(session_node.id),
+                to_node=int(focus_node_id),
+                relation_type="monitors_graph_node",
+                weight=0.64,
+                logic_rule="graph_monitor",
+            )
+
+        for patch in node_patches:
+            target = self.api.engine.get_node(int(patch["node_id"]))
+            if target is None:
+                continue
+            attrs = self._as_mapping(getattr(target, "attributes", {}))
+            current_summary = " ".join(str(attrs.get("summary", "") or "").split()).strip()
+            target.attributes["monitor_summary"] = patch["summary"]
+            target.attributes["monitor_reason"] = patch["reason"]
+            target.attributes["monitor_updated_at"] = float(time.time())
+            if not current_summary:
+                target.attributes["summary"] = patch["summary"]
+            target.state["monitor_confidence"] = patch["confidence"]
+
+            patch_node = self.api.engine.create_node(
+                "graph_monitor_patch",
+                attributes={
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "source": source,
+                    "patch_type": "node",
+                    "target_node_id": int(target.id),
+                    "summary": patch["summary"],
+                    "reason": patch["reason"],
+                    "created_at": float(time.time()),
+                },
+                state={"confidence": patch["confidence"]},
+            )
+            patch_node_ids.append(int(patch_node.id))
+            self._connect_nodes(
+                from_node=int(session_node.id),
+                to_node=int(patch_node.id),
+                relation_type="records_monitor_patch",
+                weight=patch["confidence"],
+                logic_rule="graph_monitor",
+            )
+            self._connect_nodes(
+                from_node=int(patch_node.id),
+                to_node=int(target.id),
+                relation_type="patches_node",
+                weight=patch["confidence"],
+                logic_rule="graph_monitor",
+            )
+
+        for patch in edge_patches:
+            target_edge = None
+            for edge in self.api.engine.store.edges:
+                if int(getattr(edge, "from_node", 0) or 0) != int(patch["from_node"]):
+                    continue
+                if int(getattr(edge, "to_node", 0) or 0) != int(patch["to_node"]):
+                    continue
+                target_edge = edge
+                if str(getattr(edge, "relation_type", "") or "") == str(patch["relation_type"]):
+                    break
+            if target_edge is None:
+                self._connect_nodes(
+                    from_node=int(patch["from_node"]),
+                    to_node=int(patch["to_node"]),
+                    relation_type=str(patch["relation_type"]),
+                    weight=float(patch["weight"]),
+                    logic_rule="graph_monitor",
+                    metadata={
+                        "source": source,
+                        "reason": patch["reason"],
+                        "action": patch["action"],
+                    },
+                )
+            else:
+                target_edge.relation_type = str(patch["relation_type"])
+                target_edge.weight = float(patch["weight"])
+                target_edge.logic_rule = "graph_monitor"
+                target_edge.metadata = {
+                    **self._as_mapping(getattr(target_edge, "metadata", {})),
+                    "source": source,
+                    "reason": patch["reason"],
+                    "action": patch["action"],
+                }
+
+            patch_node = self.api.engine.create_node(
+                "graph_monitor_patch",
+                attributes={
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "source": source,
+                    "patch_type": "edge",
+                    "from_node": int(patch["from_node"]),
+                    "to_node": int(patch["to_node"]),
+                    "relation_type": str(patch["relation_type"]),
+                    "reason": patch["reason"],
+                    "created_at": float(time.time()),
+                },
+                state={"confidence": float(patch["weight"])},
+            )
+            patch_node_ids.append(int(patch_node.id))
+            self._connect_nodes(
+                from_node=int(session_node.id),
+                to_node=int(patch_node.id),
+                relation_type="records_monitor_patch",
+                weight=float(patch["weight"]),
+                logic_rule="graph_monitor",
+            )
+            self._connect_nodes(
+                from_node=int(patch_node.id),
+                to_node=int(patch["from_node"]),
+                relation_type="patches_relation_source",
+                weight=float(patch["weight"]),
+                logic_rule="graph_monitor",
+            )
+            self._connect_nodes(
+                from_node=int(patch_node.id),
+                to_node=int(patch["to_node"]),
+                relation_type="patches_relation_target",
+                weight=float(patch["weight"]),
+                logic_rule="graph_monitor",
+            )
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "graph_monitor_applied",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "source": source,
+                "focus_nodes": len(focus_ids),
+                "node_patches": len(node_patches),
+                "edge_patches": len(edge_patches),
+                "used_fallback": bool(used_fallback),
+            },
+        )
+
+        return {
+            "enabled": True,
+            "attached": True,
+            "session_node_id": int(session_node.id),
+            "patch_node_ids": patch_node_ids,
+            "node_patches": node_patches,
+            "edge_patches": edge_patches,
+            "node_patch_count": len(node_patches),
+            "edge_patch_count": len(edge_patches),
+            "raw_output": raw_output[:6000],
+            "model": {
+                "requested_model_path": requested_model_path,
+                "selected_model_path": str(resolution.get("selected_model_path", "") or requested_model_path),
+                "requested_role": resolved_role,
+                "resolution": dict(resolution),
+                "used_fallback": bool(used_fallback),
+            },
+        }
+
+    def _capture_input_intelligence(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        source: str,
+        text: str,
+        context: str = "",
+        related_node_ids: list[int] | None = None,
+        apply_to_graph: bool = True,
+        model_path: str = "",
+        model_role: str = "analyst",
+    ) -> dict[str, Any]:
+        clean_text = " ".join(str(text or "").split()).strip()
+        clean_context = " ".join(str(context or "").split()).strip()
+        related_ids = [
+            self._to_int(item, 0)
+            for item in list(related_node_ids or [])
+            if self._to_int(item, 0) > 0
+        ]
+        if not clean_text:
+            return {
+                "enabled": False,
+                "source": source,
+                "summary": "",
+                "updates": [],
+                "updates_count": 0,
+                "verification": {
+                    "verified": False,
+                    "verification_mode": "balanced",
+                    "schema_valid": False,
+                    "issue_count": 0,
+                    "warning_count": 0,
+                    "issues": [],
+                    "warnings": [],
+                    "checked_updates": 0,
+                    "hallucination_guard_hits": 0,
+                    "hallucination_matches": [],
+                    "value_conflicts": [],
+                    "score": 0.0,
+                },
+                "graph_binding": {
+                    "attached": False,
+                    "branch_node_id": 0,
+                    "session_node_id": 0,
+                    "update_node_ids": [],
+                    "subject_binding": {
+                        "attached": False,
+                        "gossip_detected": False,
+                        "mode": "off",
+                        "subject_branch_node_ids": [],
+                        "claim_node_ids": [],
+                    },
+                },
+                "raw_output": "",
+                "model": {
+                    "requested_model_path": str(model_path or ""),
+                    "selected_model_path": "",
+                    "requested_role": str(model_role or "analyst"),
+                    "resolution": {"mode": "skipped"},
+                    "used_fallback": True,
+                },
+                "graph_monitor": {
+                    "enabled": False,
+                    "attached": False,
+                    "session_node_id": 0,
+                    "patch_node_ids": [],
+                    "node_patch_count": 0,
+                    "edge_patch_count": 0,
+                    "raw_output": "",
+                    "model": {
+                        "requested_model_path": _DEFAULT_GRAPH_MONITOR_MODEL_PATH,
+                        "selected_model_path": "",
+                        "requested_role": "planner",
+                        "resolution": {"mode": "skipped"},
+                        "used_fallback": True,
+                    },
+                },
+            }
+
+        requested_model_path = str(model_path or "").strip() or _DEFAULT_STRUCTURED_INPUT_MODEL_PATH
+        resolved_role = self._debate_role(model_role, fallback="analyst")
+        llm_fn, resolution = self._resolve_role_or_model_llm(
+            role=resolved_role,
+            model_path=requested_model_path,
+        )
+        raw_output = ""
+        summary = ""
+        updates: list[dict[str, Any]] = []
+        used_fallback = True
+        if llm_fn is not None:
+            prompt = (
+                "You convert user input into structured archive updates for a graph memory.\n"
+                "Return JSON only.\n"
+                "Schema:\n"
+                '{ "summary":"", "archive_updates":[{ "entity":"", "field":"", "operation":"upsert|append|correct|deprecate", '
+                '"value":"any-json-value", "reason":"", "source":"", "confidence":0.0, "tags":["optional"] }] }\n'
+                "Use concise values, keep confidence realistic, and do not invent unsupported facts.\n"
+                f"Source: {source}\n"
+                f"Input: {clean_text[:2600]}\n"
+                f"Context: {clean_context[:1200]}\n"
+            )
+            try:
+                raw_output = str(llm_fn(prompt) or "").strip()
+                parsed_output = self._extract_json_from_llm_output(raw_output)
+                if isinstance(parsed_output, Mapping):
+                    summary = " ".join(str(parsed_output.get("summary", "") or "").split()).strip()
+                    updates = self._normalize_archive_updates(
+                        parsed_output.get("archive_updates", parsed_output.get("updates", []))
+                    )
+                    used_fallback = not bool(updates)
+                elif isinstance(parsed_output, list):
+                    updates = self._normalize_archive_updates(parsed_output)
+                    used_fallback = not bool(updates)
+            except Exception:
+                summary = ""
+                updates = []
+                used_fallback = True
+
+        if not updates:
+            summary, updates = self._heuristic_input_updates(
+                source=source,
+                text=clean_text,
+                context=clean_context,
+                limit=4,
+            )
+
+        verification = self._verify_archive_updates(
+            user_id=user_id,
+            message=clean_text,
+            updates=updates,
+            verification_mode="balanced",
+            top_k=3,
+        )
+        selected_model_path = str(resolution.get("selected_model_path", "") or requested_model_path)
+        graph_binding = self._attach_archive_updates_to_graph(
+            user_id=user_id,
+            session_id=session_id,
+            message=clean_text,
+            context=clean_context,
+            summary=summary,
+            updates=updates,
+            verification=verification,
+            model_role=resolved_role,
+            model_path=selected_model_path,
+            resolution_mode=str(resolution.get("mode", "unavailable") or "unavailable"),
+            raw_output=raw_output,
+            verification_mode="balanced",
+            apply_to_graph=apply_to_graph,
+            subject_name="",
+            gossip_mode="off",
+            allow_subject_branch_write=False,
+        )
+        if apply_to_graph and graph_binding.get("attached", False):
+            self._link_input_capture_to_related_nodes(
+                graph_binding=graph_binding,
+                related_node_ids=related_ids,
+                source=source,
+            )
+
+        monitor_focus_ids = [
+            *related_ids,
+            self._to_int(self._as_mapping(graph_binding).get("session_node_id", 0), 0),
+            *[
+                self._to_int(item, 0)
+                for item in self._as_list(self._as_mapping(graph_binding).get("update_node_ids"))
+                if self._to_int(item, 0) > 0
+            ],
+        ]
+        graph_monitor = self._run_graph_monitor(
+            user_id=user_id,
+            session_id=session_id,
+            source=f"{source}_monitor",
+            focus_node_ids=monitor_focus_ids,
+            hint_text=f"{summary}\n{clean_text[:1200]}",
+            model_path=_DEFAULT_GRAPH_MONITOR_MODEL_PATH,
+            model_role="planner",
+            apply_changes=apply_to_graph,
+        )
+
+        return {
+            "enabled": True,
+            "source": source,
+            "summary": summary,
+            "updates": updates,
+            "updates_count": len(updates),
+            "verification": verification,
+            "graph_binding": graph_binding,
+            "raw_output": raw_output[:6000],
+            "model": {
+                "requested_model_path": requested_model_path,
+                "selected_model_path": selected_model_path,
+                "requested_role": resolved_role,
+                "resolution": dict(resolution),
+                "used_fallback": bool(used_fallback),
+            },
+            "graph_monitor": graph_monitor,
+        }
 
     def _normalize_triage_items(
         self,
@@ -4417,218 +5169,6 @@ class GraphWorkspaceService:
             "history_fragments": history_fragments,
         }
 
-    @staticmethod
-    def _autoruns_auto_rows_from_profile(profile: Mapping[str, Any], *, query: str = "") -> list[dict[str, Any]]:
-        os_name = str(((profile.get("device") or {}).get("os", "") if isinstance(profile, Mapping) else "") or "")
-        browser = str(((profile.get("device") or {}).get("browser", "") if isinstance(profile, Mapping) else "") or "")
-        platform_name = os_name.casefold()
-        query_text = " ".join(str(query or "").split()).strip()
-
-        def row(
-            name: str,
-            location: str,
-            *,
-            category: str,
-            description: str,
-            publisher: str,
-            image_path: str,
-            launch: str,
-            verified: str,
-            signer: str,
-            virus_total: str,
-            enabled: bool = True,
-        ) -> dict[str, Any]:
-            return {
-                "entry_name": name,
-                "entry_location": location,
-                "enabled": enabled,
-                "category": category,
-                "profile": "current_user",
-                "description": description,
-                "publisher": publisher,
-                "image_path": image_path,
-                "launch_string": launch,
-                "timestamp_utc": "",
-                "signer": signer,
-                "verified": verified,
-                "virus_total": virus_total,
-                "sha1": "",
-                "md5": "",
-                "source_query": query_text,
-                "source_mode": "client_process_inference",
-            }
-
-        if "windows" in platform_name:
-            return [
-                row(
-                    "OneDrive",
-                    r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
-                    category="Logon",
-                    description="Cloud sync startup entry detected by platform profile.",
-                    publisher="Microsoft Corporation",
-                    image_path=r"C:\Program Files\Microsoft OneDrive\OneDrive.exe",
-                    launch=r"\"C:\Program Files\Microsoft OneDrive\OneDrive.exe\"",
-                    verified="Signed",
-                    signer="Microsoft Corporation",
-                    virus_total="0/74",
-                ),
-                row(
-                    "SecurityHealthSystray",
-                    r"HKLM\Software\Microsoft\Windows\CurrentVersion\Run",
-                    category="Logon",
-                    description="Windows security tray service.",
-                    publisher="Microsoft Corporation",
-                    image_path=r"C:\Windows\System32\SecurityHealthSystray.exe",
-                    launch=r"C:\Windows\System32\SecurityHealthSystray.exe",
-                    verified="Signed",
-                    signer="Microsoft Corporation",
-                    virus_total="0/74",
-                ),
-                row(
-                    "BrowserUpdateAgent",
-                    "Scheduled Tasks",
-                    category="Scheduled Tasks",
-                    description=f"Updater task inferred from browser profile: {browser or 'Unknown Browser'}.",
-                    publisher=browser or "Unknown",
-                    image_path=r"C:\Program Files\Browser\updater.exe",
-                    launch=r"C:\Program Files\Browser\updater.exe --startup-task",
-                    verified="Unknown",
-                    signer="",
-                    virus_total="0/74",
-                ),
-            ]
-        if "linux" in platform_name:
-            return [
-                row(
-                    "systemd --user session",
-                    "~/.config/systemd/user",
-                    category="User Services",
-                    description="User-level systemd services inferred from Linux session.",
-                    publisher="systemd",
-                    image_path="/usr/lib/systemd/systemd",
-                    launch="/usr/lib/systemd/systemd --user",
-                    verified="Signed",
-                    signer="Linux Distribution",
-                    virus_total="0/74",
-                ),
-                row(
-                    "desktop autostart",
-                    "~/.config/autostart",
-                    category="Desktop Autostart",
-                    description="Desktop autostart entries potentially active for current user profile.",
-                    publisher="Desktop Environment",
-                    image_path="~/.config/autostart/*.desktop",
-                    launch="xdg-autostart",
-                    verified="Unknown",
-                    signer="",
-                    virus_total="0/74",
-                ),
-                row(
-                    "browser background service",
-                    "~/.config",
-                    category="Background Service",
-                    description=f"Background browser task inferred from detected browser: {browser or 'Unknown Browser'}.",
-                    publisher=browser or "Unknown",
-                    image_path="~/.config/browser/background",
-                    launch="browser --background",
-                    verified="Unknown",
-                    signer="",
-                    virus_total="0/74",
-                ),
-            ]
-        if "android" in platform_name:
-            return [
-                row(
-                    "BOOT_COMPLETED receiver",
-                    "Android Manifest",
-                    category="Boot Receiver",
-                    description="App component that can react on device boot.",
-                    publisher="Android Application",
-                    image_path="apk://manifest/BOOT_COMPLETED",
-                    launch="android.intent.action.BOOT_COMPLETED",
-                    verified="Unknown",
-                    signer="",
-                    virus_total="0/74",
-                ),
-                row(
-                    "Foreground service restart",
-                    "WorkManager / Service",
-                    category="Service",
-                    description="Persistent foreground/background restart behavior inferred for Android app context.",
-                    publisher="Android Application",
-                    image_path="apk://service/foreground",
-                    launch="startForegroundService",
-                    verified="Unknown",
-                    signer="",
-                    virus_total="0/74",
-                ),
-            ]
-        return [
-            row(
-                "session startup task",
-                "session profile",
-                category="Startup",
-                description="Generic startup behavior inferred from client telemetry.",
-                publisher="Unknown",
-                image_path="unknown",
-                launch="startup",
-                verified="Unknown",
-                signer="",
-                virus_total="0/74",
-            )
-        ]
-
-    @staticmethod
-    def _autoruns_row_label(row: Mapping[str, Any]) -> str:
-        entry_name = str(row.get("entry_name", "") or "").strip()
-        if entry_name:
-            return entry_name
-        image_path = str(row.get("image_path", "") or "").strip().replace("\\", "/")
-        if image_path:
-            name = image_path.rsplit("/", 1)[-1].strip()
-            if name:
-                return name
-        launch = str(row.get("launch_string", "") or "").strip().replace("\\", "/")
-        if launch:
-            token = launch.split()[0].strip("\"' ")
-            if token:
-                return token.rsplit("/", 1)[-1]
-        return "autorun_entry"
-
-    @staticmethod
-    def _autoruns_risk_score(row: Mapping[str, Any]) -> float:
-        score = 0.08
-        positives = int(row.get("vt_positives", 0) or 0)
-        total = int(row.get("vt_total", 0) or 0)
-        if positives > 0:
-            score += 0.28
-            score += min(0.34, float(positives) / float(max(1, total)))
-
-        verified = str(row.get("verified", "") or "").strip().casefold()
-        signer = str(row.get("signer", "") or "").strip()
-        if not verified or "not verified" in verified or "unsigned" in verified:
-            score += 0.16
-        if not signer:
-            score += 0.12
-
-        location = str(row.get("entry_location", "") or "").casefold()
-        if any(hint in location for hint in _AUTORUNS_RISK_LOCATION_HINTS):
-            score += 0.14
-
-        enabled = row.get("enabled", None)
-        if enabled is False:
-            score -= 0.05
-        return max(0.0, min(1.0, score))
-
-    @staticmethod
-    def _autoruns_risk_level(score: float) -> str:
-        value = max(0.0, min(1.0, float(score)))
-        if value >= 0.75:
-            return "high"
-        if value >= 0.45:
-            return "medium"
-        return "low"
-
     def _build_profile_graph(self, profile: Mapping[str, Any]) -> dict[str, Any]:
         entity = self._as_mapping(profile.get("entity"))
         personality = self._as_mapping(profile.get("personality"))
@@ -5200,6 +5740,7 @@ class GraphWorkspaceService:
                 attributes=attributes,
                 state=state,
             )
+        persisted = self._auto_persist_after_write()
 
         return {
             "node": {
@@ -5208,6 +5749,7 @@ class GraphWorkspaceService:
                 "attributes": dict(node.attributes),
                 "state": dict(node.state),
             },
+            "persisted": bool(persisted),
             **self.snapshot_payload(),
         }
 
@@ -5224,8 +5766,10 @@ class GraphWorkspaceService:
             direction=edge_payload["direction"],
             logic_rule=edge_payload["logic_rule"],
         )
+        persisted = self._auto_persist_after_write() if created else False
         return {
             "created": bool(created),
+            "persisted": bool(persisted),
             "edge": edge_payload,
             **self.snapshot_payload(),
         }
@@ -5266,8 +5810,10 @@ class GraphWorkspaceService:
                 },
             },
         )
+        persisted = self._auto_persist_after_write()
         return {
             "updated": True,
+            "persisted": bool(persisted),
             "node": {
                 "id": node.id,
                 "type": node.type,
@@ -5312,8 +5858,10 @@ class GraphWorkspaceService:
                 "removed_edge_refs": removed_edge_rows,
             },
         )
+        persisted = self._auto_persist_after_write()
         return {
             "deleted": True,
+            "persisted": bool(persisted),
             "node_id": node_id,
             "removed_edges": removed_edges,
             **self.snapshot_payload(),
@@ -5365,8 +5913,10 @@ class GraphWorkspaceService:
                 "logic_rule": edge.logic_rule,
             },
         )
+        persisted = self._auto_persist_after_write()
         return {
             "updated": True,
+            "persisted": bool(persisted),
             "edge": {
                 "from": edge.from_node,
                 "to": edge.to_node,
@@ -5403,9 +5953,11 @@ class GraphWorkspaceService:
                 "removed": removed,
             },
         )
+        persisted = self._auto_persist_after_write() if removed > 0 else False
         return {
             "deleted": removed > 0,
             "removed": removed,
+            "persisted": bool(persisted),
             **self.snapshot_payload(),
         }
 
@@ -5433,8 +5985,10 @@ class GraphWorkspaceService:
             activation=str(payload.get("activation", "tanh") or "tanh"),
             infer_rounds=max(1, self._to_int(payload.get("infer_rounds", 1), 1)),
         )
+        persisted = self._auto_persist_after_write()
         return {
             "result": out,
+            "persisted": bool(persisted),
             **self.snapshot_payload(),
         }
 
@@ -5455,11 +6009,13 @@ class GraphWorkspaceService:
         reward = self._to_float(payload.get("reward", 0.0), 0.0)
         learning_rate = self._to_float(payload.get("learning_rate", 0.15), 0.15)
         changed = self.api.reward_event(event_id, reward=reward, learning_rate=learning_rate)
+        persisted = self._auto_persist_after_write() if changed else False
         return {
             "changed": bool(changed),
             "event_id": event_id,
             "reward": reward,
             "learning_rate": learning_rate,
+            "persisted": bool(persisted),
             **self.snapshot_payload(),
         }
 
@@ -5472,11 +6028,13 @@ class GraphWorkspaceService:
             reward=reward,
             learning_rate=learning_rate,
         )
+        persisted = self._auto_persist_after_write() if updated > 0 else False
         return {
             "updated": int(updated),
             "relation_type": relation_type,
             "reward": reward,
             "learning_rate": learning_rate,
+            "persisted": bool(persisted),
             **self.snapshot_payload(),
         }
 
@@ -5499,7 +6057,9 @@ class GraphWorkspaceService:
         self.api.engine.store.edges.clear()
         self.api.engine.clear_event_log()
         self.api.engine._next_node_id = 1  # noqa: SLF001
-        return self.snapshot_payload()
+        payload = self.snapshot_payload()
+        payload["persisted"] = bool(self._auto_persist_after_write())
+        return payload
 
     def seed_foundational_graph(self) -> dict[str, Any]:
         created_nodes = 0
@@ -5602,9 +6162,11 @@ class GraphWorkspaceService:
             )
             created_edges += 1
 
+        persisted = self._auto_persist_after_write()
         return {
             "created_nodes_estimate": created_nodes,
             "created_edges_estimate": created_edges,
+            "persisted": bool(persisted),
             **self.snapshot_payload(),
         }
 
@@ -6052,6 +6614,58 @@ class GraphWorkspaceService:
                 "knowledge_evaluation": {"enabled": False},
             }
 
+        input_extraction = self._as_mapping(profile_update.get("input_extraction"))
+        graph_monitor = self._as_mapping(profile_update.get("graph_monitor"))
+        if not input_extraction:
+            related_node_ids = [
+                self._to_int(graph_binding.get("person_node_id", 0), 0),
+                self._to_int(graph_binding.get("entry_node_id", 0), 0),
+            ]
+            related_node_ids.extend(
+                self._to_int(item, 0)
+                for item in self._as_list(graph_binding.get("recommendation_node_ids"))
+                if self._to_int(item, 0) > 0
+            )
+            input_extraction = self._capture_input_intelligence(
+                user_id=user_id,
+                session_id=session_id,
+                source="daily_mode",
+                text=text,
+                context=f"display_name={display_name}; language={language}",
+                related_node_ids=related_node_ids[:6],
+                apply_to_graph=True,
+            )
+            graph_monitor = self._as_mapping(input_extraction.get("graph_monitor"))
+        if isinstance(project_status, dict):
+            project_status["graph"] = self.snapshot_payload()
+
+        persisted = self._auto_persist_after_write()
+        daily_summary = {
+            "overall_score": round(self._to_float(scores.get("overall", 0.0), 0.0), 4),
+            "recommendation_count": len(recommendations),
+            "recommendation_titles": [
+                self._to_title(str(item.get("title", "") or ""), fallback=f"Recommendation {idx + 1}", limit=64)
+                for idx, item in enumerate(recommendations[:6])
+                if isinstance(item, Mapping)
+            ],
+            "signal_counts": {
+                "goals": len(goals),
+                "problems": len(problems),
+                "wins": len(wins),
+            },
+            "profile_updated": bool(profile_update),
+            "profile_update_error": profile_update_error,
+        }
+        execution = self._execution_status(
+            action="daily_mode",
+            persisted=persisted,
+            input_extraction=input_extraction,
+            graph_monitor=graph_monitor,
+            extra={
+                "recommendation_count": len(recommendations),
+                "overall_score": daily_summary["overall_score"],
+            },
+        )
         return {
             "journal_entry": {
                 "user_id": user_id,
@@ -6075,11 +6689,16 @@ class GraphWorkspaceService:
             "living": living_result,
             "knowledge": knowledge_result,
             "project_status": project_status,
+            "input_extraction": input_extraction,
+            "graph_monitor": graph_monitor,
+            "summary": daily_summary,
+            "execution": execution,
+            "persisted": bool(persisted),
         }
 
     @staticmethod
     def _default_demo_narrative(persona_name: str, language: str = "ru") -> str:
-        name = str(persona_name or "Alexa").strip() or "Alexa"
+        name = str(persona_name or "You").strip() or "You"
         lang = str(language or "en").strip().lower()
         if lang.startswith("ru"):
             return (
@@ -6127,7 +6746,7 @@ class GraphWorkspaceService:
 
     def watch_demo(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
         data = dict(payload or {})
-        persona_name = str(data.get("persona_name", "Alexa") or "Alexa").strip() or "Alexa"
+        persona_name = str(data.get("persona_name", "You") or "You").strip() or "You"
         language = str(data.get("language", "ru") or "ru").strip() or "ru"
         reset_graph = self._to_bool(data.get("reset_graph", True))
         use_llm = self._to_bool(data.get("use_llm", True))
@@ -6274,6 +6893,34 @@ class GraphWorkspaceService:
                 "infer_rounds": 2,
             }
         )
+        input_extraction = self._capture_input_intelligence(
+            user_id=f"demo_{self._safe_slug(persona_name, default='persona')}",
+            session_id=f"demo_{self._safe_slug(persona_name, default='persona')}",
+            source="demo_narrative",
+            text=narrative,
+            context=f"persona={persona_name}; language={language}",
+            related_node_ids=[root_node_id] if root_node_id > 0 else [],
+            apply_to_graph=True,
+        )
+        graph_monitor = self._as_mapping(input_extraction.get("graph_monitor"))
+        persisted = self._auto_persist_after_write()
+        summary = {
+            "persona_name": persona_name,
+            "mode": llm_mode,
+            "root_node_id": int(root_node_id),
+            "llm_error": llm_error,
+            "narrative_length": len(narrative),
+        }
+        execution = self._execution_status(
+            action="demo_watch",
+            persisted=persisted,
+            input_extraction=input_extraction,
+            graph_monitor=graph_monitor,
+            extra={
+                "root_node_id": int(root_node_id),
+                "narrative_length": len(narrative),
+            },
+        )
         return {
             "demo": {
                 "persona_name": persona_name,
@@ -6282,12 +6929,17 @@ class GraphWorkspaceService:
                 "llm_error": llm_error,
                 "root_node_id": root_node_id,
             },
+            "input_extraction": input_extraction,
+            "graph_monitor": graph_monitor,
+            "summary": summary,
+            "execution": execution,
+            "persisted": bool(persisted),
             **self.snapshot_payload(),
         }
 
     def seed_demo(self) -> dict[str, Any]:
         # Backward-compatible endpoint used by UI buttons and tests.
-        return self.watch_demo({"persona_name": "Alexa", "reset_graph": True, "use_llm": True})
+        return self.watch_demo({"persona_name": "You", "reset_graph": True, "use_llm": True})
 
     def capture_client_profile(
         self,
@@ -6616,6 +7268,42 @@ class GraphWorkspaceService:
             except Exception as exc:
                 client_profile_error = str(exc)
 
+        related_node_ids = [int(profile_node.id)]
+        session_node_id = self._to_int(client_binding.get("session_node_id", 0), 0)
+        if session_node_id > 0:
+            related_node_ids.append(session_node_id)
+        input_extraction = self._capture_input_intelligence(
+            user_id=user_id,
+            session_id=session_id or f"profile_{user_id}",
+            source="user_graph_update",
+            text=profile_text or text,
+            context=f"display_name={display_name}; language={language}",
+            related_node_ids=related_node_ids,
+            apply_to_graph=True,
+        )
+
+        graph_monitor = self._as_mapping(input_extraction.get("graph_monitor"))
+        persisted = self._auto_persist_after_write()
+        user_graph_summary = {
+            "user_id": user_id,
+            "display_name": display_name,
+            "profile_node_id": int(profile_node.id),
+            "dimension_count": len(non_empty),
+            "dimension_names": list(non_empty.keys()),
+            "client_profile_captured": bool(client_profile),
+            "personalization_applied": bool(personalization),
+            "feedback_items": int(feedback_summary.get("total", 0) or 0),
+        }
+        execution = self._execution_status(
+            action="user_graph_update",
+            persisted=persisted,
+            input_extraction=input_extraction,
+            graph_monitor=graph_monitor,
+            extra={
+                "profile_node_id": int(profile_node.id),
+                "dimension_count": len(non_empty),
+            },
+        )
         return {
             "user_profile": {
                 "user_id": user_id,
@@ -6630,287 +7318,11 @@ class GraphWorkspaceService:
             "client_profile_error": client_profile_error,
             "personalization_applied": bool(personalization),
             "feedback_summary": feedback_summary,
-            **self.snapshot_payload(),
-        }
-
-    def project_autoruns_import(
-        self,
-        payload: Mapping[str, Any],
-        *,
-        request_headers: Mapping[str, Any] | None = None,
-        request_ip: str = "",
-    ) -> dict[str, Any]:
-        raw_text = str(payload.get("text", "") or "").strip()
-        auto_detect = self._to_bool(payload.get("auto_detect", True))
-        delimiter = str(payload.get("delimiter", "") or "").strip()
-        query = str(payload.get("query", "") or "").strip()
-        language = str(payload.get("language", "en") or "en").strip() or "en"
-        user_id = str(payload.get("user_id", "default_user") or "default_user").strip() or "default_user"
-        session_id = str(payload.get("session_id", "autoruns_session") or "autoruns_session").strip() or "autoruns_session"
-        host_label = str(payload.get("host_label", "") or "").strip() or user_id
-        max_rows = max(1, min(5000, self._to_int(payload.get("max_rows", 1000), 1000)))
-        client_payload = self._as_mapping(payload.get("client"))
-
-        parsed_rows = parse_autoruns_text(raw_text, delimiter=delimiter) if raw_text else []
-        mode = "parsed_text"
-        source_label = "sysinternals_autoruns"
-        client_profile: dict[str, Any] = {}
-        client_semantic_binding: dict[str, Any] = {}
-        client_profile_error = ""
-
-        if parsed_rows:
-            rows = parsed_rows[:max_rows]
-        else:
-            if raw_text and not auto_detect:
-                raise ValueError("autoruns payload could not be parsed")
-            if not raw_text and not auto_detect:
-                raise ValueError("text is required when auto_detect is false")
-
-            mode = "auto_detected"
-            source_label = "semantic_client_autoruns_inference"
-            try:
-                client_capture = self.capture_client_profile(
-                    {
-                        "session_id": session_id,
-                        "user_id": user_id,
-                        "client": client_payload,
-                    },
-                    request_headers=request_headers or {},
-                    request_ip=str(request_ip or ""),
-                )
-                client_profile = self._as_mapping(client_capture.get("profile"))
-                client_semantic_binding = self._as_mapping(client_capture.get("semantic_binding"))
-            except Exception as exc:
-                client_profile_error = str(exc)
-                client_profile = build_client_profile(
-                    request_headers=request_headers or {},
-                    request_client_ip=str(request_ip or ""),
-                    payload={
-                        "session_id": session_id,
-                        "user_id": user_id,
-                        "client": client_payload,
-                    },
-                )
-            rows = self._autoruns_auto_rows_from_profile(
-                client_profile,
-                query=(query or raw_text),
-            )[:max_rows]
-            if not rows:
-                raise ValueError("autoruns auto-detect produced no entries")
-
-        now = float(time.time())
-        checksum_basis = raw_text or json.dumps(rows, ensure_ascii=False, sort_keys=True)
-        checksum = int(zlib.crc32(checksum_basis.encode("utf-8")) & 0xFFFFFFFF)
-        scan_id = f"{user_id}:{session_id}:{checksum:08x}"
-
-        profile_node = self._ensure_user_profile_node(user_id=user_id, display_name=host_label)
-        scan_node, _ = self._ensure_shared_node(
-            node_type="autoruns_scan",
-            identity_key="scan_id",
-            identity_value=scan_id,
-            attributes={
-                "scan_id": scan_id,
-                "user_id": user_id,
-                "session_id": session_id,
-                "host_label": host_label,
-                "name": f"Autoruns Scan {session_id}",
-                "created_at": now,
-                "rows_total": len(rows),
-                "query": query,
-                "language": language,
-                "mode": mode,
-            },
-        )
-        scan_node.attributes["rows_total"] = len(rows)
-        scan_node.attributes["source"] = source_label
-        scan_node.attributes["updated_at"] = now
-
-        self._connect_nodes(
-            from_node=profile_node.id,
-            to_node=scan_node.id,
-            relation_type="has_startup_scan",
-            weight=0.91,
-            logic_rule="autoruns_import",
-        )
-        session_node_id = self._to_int(client_semantic_binding.get("session_node_id"), 0)
-        if session_node_id > 0:
-            self._connect_nodes(
-                from_node=int(profile_node.id),
-                to_node=session_node_id,
-                relation_type="observed_in_session",
-                weight=0.82,
-                logic_rule="autoruns_import",
-            )
-
-        created_nodes = 0
-        created_edges = 1 + (1 if session_node_id > 0 else 0)
-        risk_counts = {"low": 0, "medium": 0, "high": 0}
-        vt_positive_count = 0
-        top_risky: list[dict[str, Any]] = []
-        entry_node_ids: list[int] = []
-        risk_node_ids: list[int] = []
-
-        for idx, row in enumerate(rows):
-            entry_name = self._autoruns_row_label(row)
-            entry_location = str(row.get("entry_location", "") or "").strip()
-            image_path = str(row.get("image_path", "") or "").strip()
-            launch_string = str(row.get("launch_string", "") or "").strip()
-            enabled = row.get("enabled", None)
-            risk_score = self._autoruns_risk_score(row)
-            risk_level = self._autoruns_risk_level(risk_score)
-            risk_counts[risk_level] += 1
-
-            if int(row.get("vt_positives", 0) or 0) > 0:
-                vt_positive_count += 1
-
-            identity_basis = "|".join([entry_name, entry_location, image_path, launch_string]).strip("|")
-            if not identity_basis:
-                identity_basis = f"entry:{idx + 1}"
-            entry_identifier = f"autoruns:{zlib.crc32(identity_basis.encode('utf-8')) & 0xFFFFFFFF:08x}"
-
-            entry_node, created = self._ensure_shared_node(
-                node_type="autorun_entry",
-                identity_key="identifier",
-                identity_value=entry_identifier,
-                attributes={
-                    "identifier": entry_identifier,
-                    "name": entry_name,
-                    "entry_location": entry_location,
-                    "category": str(row.get("category", "") or "").strip(),
-                    "profile": str(row.get("profile", "") or "").strip(),
-                    "description": str(row.get("description", "") or "").strip(),
-                    "publisher": str(row.get("publisher", "") or "").strip(),
-                    "image_path": image_path,
-                    "launch_string": launch_string,
-                    "timestamp_utc": str(row.get("timestamp_utc", "") or "").strip(),
-                    "signer": str(row.get("signer", "") or "").strip(),
-                    "verified": str(row.get("verified", "") or "").strip(),
-                    "virus_total": str(row.get("virus_total", "") or "").strip(),
-                    "vt_positives": int(row.get("vt_positives", 0) or 0),
-                    "vt_total": int(row.get("vt_total", 0) or 0),
-                    "sha1": str(row.get("sha1", "") or "").strip(),
-                    "md5": str(row.get("md5", "") or "").strip(),
-                    "enabled": enabled,
-                },
-            )
-            if created:
-                created_nodes += 1
-            entry_node.attributes["risk_score"] = round(risk_score, 4)
-            entry_node.attributes["risk_level"] = risk_level
-            entry_node.attributes["last_scan_id"] = scan_id
-            entry_node.attributes["last_seen_at"] = now
-
-            self._connect_nodes(
-                from_node=scan_node.id,
-                to_node=entry_node.id,
-                relation_type="observed_autorun",
-                weight=max(0.45, min(0.98, 0.58 + risk_score * 0.4)),
-                logic_rule="autoruns_import",
-                metadata={
-                    "risk_score": risk_score,
-                    "risk_level": risk_level,
-                    "enabled": enabled,
-                    "entry_location": entry_location,
-                    "source": "autoruns",
-                },
-            )
-            created_edges += 1
-            entry_node_ids.append(int(entry_node.id))
-
-            publisher = str(row.get("publisher", "") or "").strip()
-            if publisher:
-                publisher_identifier = re.sub(r"[^a-z0-9]+", "_", self._normalize_token(publisher)).strip("_") or publisher
-                publisher_node, created_pub = self._ensure_shared_node(
-                    node_type="publisher",
-                    identity_key="identifier",
-                    identity_value=f"publisher:{publisher_identifier}",
-                    attributes={
-                        "identifier": f"publisher:{publisher_identifier}",
-                        "name": publisher,
-                    },
-                )
-                if created_pub:
-                    created_nodes += 1
-                self._connect_nodes(
-                    from_node=entry_node.id,
-                    to_node=publisher_node.id,
-                    relation_type="published_by",
-                    weight=0.66,
-                    logic_rule="autoruns_import",
-                )
-                created_edges += 1
-
-            if risk_level in {"high", "medium"}:
-                risk_identifier = f"autoruns_risk:{entry_identifier}"
-                risk_node, created_risk = self._ensure_shared_node(
-                    node_type="security_risk",
-                    identity_key="identifier",
-                    identity_value=risk_identifier,
-                    attributes={
-                        "identifier": risk_identifier,
-                        "name": f"Startup Risk: {entry_name}",
-                        "category": "startup_persistence",
-                        "description": "Potential startup persistence or integrity risk from Autoruns scan.",
-                    },
-                )
-                if created_risk:
-                    created_nodes += 1
-                risk_node.attributes["risk_score"] = round(risk_score, 4)
-                risk_node.attributes["risk_level"] = risk_level
-                risk_node.attributes["last_scan_id"] = scan_id
-                self._connect_nodes(
-                    from_node=entry_node.id,
-                    to_node=risk_node.id,
-                    relation_type="has_risk",
-                    weight=max(0.45, min(1.0, risk_score)),
-                    logic_rule="autoruns_import",
-                )
-                created_edges += 1
-                risk_node_ids.append(int(risk_node.id))
-
-            top_risky.append(
-                {
-                    "name": entry_name,
-                    "identifier": entry_identifier,
-                    "risk_score": round(risk_score, 4),
-                    "risk_level": risk_level,
-                    "entry_location": entry_location,
-                    "enabled": enabled,
-                    "virus_total": str(row.get("virus_total", "") or "").strip(),
-                }
-            )
-
-        top_risky.sort(key=lambda item: float(item.get("risk_score", 0.0)), reverse=True)
-        top_risky = top_risky[:20]
-
-        return {
-            "scan": {
-                "scan_id": scan_id,
-                "session_id": session_id,
-                "user_id": user_id,
-                "host_label": host_label,
-                "mode": mode,
-                "source": source_label,
-                "rows_parsed": len(parsed_rows),
-                "rows_processed": len(rows),
-            },
-            "summary": {
-                "risk_counts": risk_counts,
-                "virus_total_positive_entries": vt_positive_count,
-                "high_risk_entries": int(risk_counts.get("high", 0)),
-                "top_risky": top_risky,
-            },
-            "semantic_binding": {
-                "profile_node_id": int(profile_node.id),
-                "scan_node_id": int(scan_node.id),
-                "entry_node_ids": entry_node_ids,
-                "risk_node_ids": risk_node_ids,
-            },
-            "client_profile": client_profile,
-            "client_semantic_binding": client_semantic_binding,
-            "client_profile_error": client_profile_error,
-            "created_nodes_estimate": created_nodes,
-            "created_edges_estimate": created_edges,
+            "input_extraction": input_extraction,
+            "graph_monitor": graph_monitor,
+            "summary": user_graph_summary,
+            "execution": execution,
+            "persisted": bool(persisted),
             **self.snapshot_payload(),
         }
 
@@ -6919,6 +7331,13 @@ class GraphWorkspaceService:
             return bool(self.api.persist())
         except Exception:
             return False
+
+    def _auto_persist_after_write(self) -> bool:
+        if self.api.engine.graph_adapter is None:
+            return False
+        if not self._env_flag("AUTOGRAPH_AUTO_PERSIST_ON_WRITE", True):
+            return False
+        return self._persist_graph_safe()
 
     def _ensure_personal_tree_root(self, *, user_id: str):
         tree_key = f"{user_id}:{_PERSONAL_TREE_BRANCH_NAME}"
@@ -7424,6 +7843,31 @@ class GraphWorkspaceService:
             },
         )
 
+        related_node_ids = [int(summary_node.id), int(session_node.id)]
+        if source_node_id > 0:
+            related_node_ids.append(int(source_node_id))
+        related_node_ids.extend(point_node_ids[:4])
+        input_extraction = self._capture_input_intelligence(
+            user_id=user_id,
+            session_id=session_id or f"tree_{user_id}",
+            source="personal_tree_ingest",
+            text=text,
+            context=f"title={title}; topic={topic}; source_type={source_type}",
+            related_node_ids=related_node_ids,
+            apply_to_graph=True,
+        )
+        graph_monitor = self._as_mapping(input_extraction.get("graph_monitor"))
+        execution = self._execution_status(
+            action="personal_tree_ingest",
+            persisted=persisted,
+            input_extraction=input_extraction,
+            graph_monitor=graph_monitor,
+            extra={
+                "summary_node_id": int(summary_node.id),
+                "point_count": len(point_node_ids),
+            },
+        )
+
         return {
             "user_id": user_id,
             "session_id": session_id,
@@ -7435,6 +7879,14 @@ class GraphWorkspaceService:
                 "source_url": source_url,
                 "source_title": source_title,
                 "max_points": max_points,
+            },
+            "summary": {
+                "summary_node_id": int(summary_node.id),
+                "point_count": len(point_node_ids),
+                "citation_count": len(citations),
+                "source_type": source_type,
+                "title": title,
+                "topic": topic,
             },
             "extraction": {
                 "summary": summary_text,
@@ -7449,6 +7901,9 @@ class GraphWorkspaceService:
                 "source_node_id": int(source_node_id),
             },
             "tree": tree,
+            "input_extraction": input_extraction,
+            "graph_monitor": graph_monitor,
+            "execution": execution,
             **self.snapshot_payload(),
         }
 
@@ -8942,6 +9397,15 @@ class GraphWorkspaceService:
             llm_fn=llm_fn,
             llm_resolution=resolution,
         )
+        input_extraction = self._capture_input_intelligence(
+            user_id=user_id,
+            session_id=session_id or f"wrapper_{user_id}",
+            source="wrapper_input",
+            text=message,
+            context=f"role={role}; used_fallback={used_fallback}; reply={reply[:600]}",
+            related_node_ids=[int(profile_node.id), int(session_node_id)] if int(session_node_id) > 0 else [int(profile_node.id)],
+            apply_to_graph=True,
+        )
 
         should_persist = bool(
             apply_profile_update
@@ -8950,6 +9414,8 @@ class GraphWorkspaceService:
             or bool(subject_binding.get("attached", False))
             or int(dialect_summary.get("captured_terms", 0) or 0) > 0
             or bool(self._as_mapping(triage.get("graph")).get("attached", False))
+            or bool(self._as_mapping(input_extraction.get("graph_binding")).get("attached", False))
+            or bool(self._as_mapping(input_extraction.get("graph_monitor")).get("attached", False))
         )
         persisted = self._persist_graph_safe() if should_persist else False
 
@@ -8969,6 +9435,24 @@ class GraphWorkspaceService:
                 "dialect_terms_captured": int(dialect_summary.get("captured_terms", 0) or 0),
                 "triage_items": len(self._as_list(triage.get("items"))),
                 "triage_noise_ratio": self._to_float(triage.get("noise_ratio", 0.0), 0.0),
+            },
+        )
+        graph_monitor = self._as_mapping(input_extraction.get("graph_monitor"))
+        summary = {
+            "reply_length": len(reply),
+            "memory_context_count": len(memory_context),
+            "feedback_items": int(feedback_summary.get("total", 0) or 0),
+            "triage_items": len(self._as_list(triage.get("items"))),
+            "gossip_detected": bool(subject_binding.get("gossip_detected", False)),
+        }
+        execution = self._execution_status(
+            action="wrapper_respond",
+            persisted=persisted,
+            input_extraction=input_extraction,
+            graph_monitor=graph_monitor,
+            extra={
+                "session_node_id": int(session_node_id),
+                "triage_items": summary["triage_items"],
             },
         )
         return {
@@ -8995,6 +9479,10 @@ class GraphWorkspaceService:
             "gossip_detected": bool(subject_binding.get("gossip_detected", False)),
             "dialect": dialect_summary,
             "triage": triage,
+            "input_extraction": input_extraction,
+            "graph_monitor": graph_monitor,
+            "summary": summary,
+            "execution": execution,
             "persisted": bool(persisted),
             "session_node_id": int(session_node_id),
             "raw_output": raw_output[:6000],
@@ -9048,10 +9536,29 @@ class GraphWorkspaceService:
                 "supports_structured_result": True,
             },
         ]
+        actions = [
+            {
+                "key": str(item.get("action", "") or "").strip(),
+                "description": str(item.get("description", "") or "").strip(),
+                "writes_graph": bool(item.get("writes_graph", False)),
+                "supports_chat_response": bool(item.get("supports_chat_response", False)),
+                "supports_structured_result": bool(item.get("supports_structured_result", False)),
+            }
+            for item in capabilities
+            if str(item.get("action", "") or "").strip()
+        ]
+        manifest_summary = {
+            "host": host,
+            "app_id": app_id,
+            "action_count": len(actions),
+            "writes_graph_actions": sum(1 for item in actions if item.get("writes_graph")),
+            "chat_actions": sum(1 for item in actions if item.get("supports_chat_response")),
+            "detected_model_count": len(self._to_list_of_strings(model_advisors.get("detected_models"))),
+        }
 
         return {
             "layer": "autograph_integration_layer",
-            "version": "1.0.0",
+            "version": "1.1.0",
             "generated_at": float(time.time()),
             "host": host,
             "app_id": app_id,
@@ -9061,13 +9568,16 @@ class GraphWorkspaceService:
             },
             "hosts_allowed": list(_INTEGRATION_LAYER_HOSTS_ALLOWED),
             "actions_allowed": list(_INTEGRATION_LAYER_ACTIONS_ALLOWED),
+            "actions": actions,
             "capabilities": capabilities,
+            "summary": manifest_summary,
             "ui_contract": {
                 "chat_response_field": "chat_response",
                 "structured_result_field": "structured_result",
                 "raw_result_field": "result",
                 "editable_output_paths": [
                     "result.archive_updates",
+                    "result.input_extraction.updates",
                     "result.triage.items",
                     "result.review.archive_updates",
                 ],
@@ -9172,6 +9682,8 @@ class GraphWorkspaceService:
                 "memory": self._as_mapping(result.get("memory")),
                 "subject_binding": self._as_mapping(result.get("subject_binding")),
                 "dialect": self._as_mapping(result.get("dialect")),
+                "input_extraction": self._as_mapping(result.get("input_extraction")),
+                "graph_monitor": self._as_mapping(result.get("graph_monitor")),
             }
 
         elif action == "archive.chat":
@@ -9202,6 +9714,7 @@ class GraphWorkspaceService:
                 "archive_updates": self._as_list(result.get("archive_updates")),
                 "triage": self._as_mapping(result.get("triage")),
                 "graph_binding": self._as_mapping(result.get("graph_binding")),
+                "graph_monitor": self._as_mapping(result.get("graph_monitor")),
             }
 
         elif action == "user_graph.update":
@@ -9251,6 +9764,8 @@ class GraphWorkspaceService:
             structured_result = {
                 "profile_update_json": profile_json,
                 "semantic_binding": self._as_mapping(result.get("semantic_binding")),
+                "input_extraction": self._as_mapping(result.get("input_extraction")),
+                "graph_monitor": self._as_mapping(result.get("graph_monitor")),
             }
 
         elif action == "personal_tree.ingest":
@@ -9285,6 +9800,8 @@ class GraphWorkspaceService:
                 "extraction": extraction,
                 "semantic_binding": self._as_mapping(result.get("semantic_binding")),
                 "tree": self._as_mapping(result.get("tree")),
+                "input_extraction": self._as_mapping(result.get("input_extraction")),
+                "graph_monitor": self._as_mapping(result.get("graph_monitor")),
             }
 
         self.api.engine._record_event(  # noqa: SLF001
@@ -9298,6 +9815,30 @@ class GraphWorkspaceService:
                 "auto_triage": bool(auto_triage),
             },
         )
+        input_extraction = self._as_mapping(
+            structured_result.get("input_extraction", result.get("input_extraction"))
+        )
+        graph_monitor = self._as_mapping(
+            structured_result.get("graph_monitor", result.get("graph_monitor"))
+        )
+        persisted = bool(result.get("persisted", False))
+        execution = self._execution_status(
+            action=action,
+            persisted=persisted,
+            input_extraction=input_extraction,
+            graph_monitor=graph_monitor,
+        )
+        invoke_summary = {
+            "action": action,
+            "chat_response_present": bool(chat_response),
+            "chat_response_length": len(chat_response),
+            "structured_keys": sorted(str(key) for key in structured_result.keys()),
+            "persisted": persisted,
+            "writes_graph": bool(action in {"wrapper.respond", "archive.chat", "user_graph.update", "personal_tree.ingest"}),
+        }
+        action_summary = self._as_mapping(result.get("summary"))
+        if action_summary:
+            invoke_summary["action_summary"] = action_summary
 
         return {
             "ok": True,
@@ -9308,6 +9849,8 @@ class GraphWorkspaceService:
             "user_id": user_id,
             "session_id": session_id,
             "chat_response": chat_response,
+            "summary": invoke_summary,
+            "execution": execution,
             "structured_result": structured_result,
             "result": result,
         }
@@ -9565,7 +10108,9 @@ class GraphWorkspaceService:
                 "db_schema_json": living_enabled,
                 "daily_mode": True,
                 "user_dimension_graph": True,
-                "autoruns_import": True,
+                "graph_foundation_builder": True,
+                "graph_node_assist": True,
+                "graph_edge_assist": True,
                 "model_advisors": True,
                 "llm_role_debate": True,
                 "hallucination_hunter": True,
@@ -9905,6 +10450,24 @@ class GraphWorkspaceService:
                 "requested_role": model_role,
             },
         )
+        graph_monitor = self._run_graph_monitor(
+            user_id=user_id,
+            session_id=session_id or f"archive_{user_id}",
+            source="archive_chat",
+            focus_node_ids=[
+                self._to_int(graph_binding.get("session_node_id", 0), 0),
+                *[
+                    self._to_int(item, 0)
+                    for item in self._as_list(graph_binding.get("update_node_ids"))
+                    if self._to_int(item, 0) > 0
+                ],
+            ],
+            hint_text=f"{summary}\n{message[:1200]}",
+            model_path=_DEFAULT_GRAPH_MONITOR_MODEL_PATH,
+            model_role="planner",
+            apply_changes=bool(apply_to_graph),
+        )
+        persisted = self._auto_persist_after_write() if apply_to_graph else False
 
         self.api.engine._record_event(  # noqa: SLF001
             "archive_update_chat_completed",
@@ -9925,6 +10488,30 @@ class GraphWorkspaceService:
                 "dialect_terms_captured": int(dialect_summary.get("captured_terms", 0) or 0),
                 "triage_items": len(self._as_list(triage.get("items"))),
                 "triage_noise_ratio": self._to_float(triage.get("noise_ratio", 0.0), 0.0),
+            },
+        )
+        execution = self._execution_status(
+            action="archive_chat",
+            persisted=persisted,
+            input_extraction={
+                "enabled": True,
+                "source": "archive_chat",
+                "summary": summary,
+                "updates": updates,
+                "verification": verification,
+                "graph_binding": graph_binding,
+                "graph_monitor": graph_monitor,
+                "model": {
+                    "requested_model_path": model_path,
+                    "selected_model_path": selected_path,
+                    "requested_role": model_role,
+                    "used_fallback": bool(resolution_mode != "model"),
+                },
+            },
+            graph_monitor=graph_monitor,
+            extra={
+                "updates_count": len(updates),
+                "verified": bool(verification.get("verified", False)),
             },
         )
 
@@ -9952,12 +10539,839 @@ class GraphWorkspaceService:
             ),
             "dialect": dialect_summary,
             "triage": triage,
+            "graph_monitor": graph_monitor,
             "profile": self._wrapper_profile_payload(profile_node),
+            "execution": execution,
+            "persisted": bool(persisted),
             "review": {
                 "summary": summary,
                 "archive_updates": updates,
                 "verification": verification,
             },
+            "raw_output": raw_output[:6000],
+            **self.snapshot_payload(),
+        }
+
+    def project_graph_node_assist(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        node_id = self._to_int(root.get("node_id", 0), 0)
+        if node_id <= 0:
+            raise ValueError("node_id is required")
+
+        action = self._pick_allowed_token(
+            root.get("action", "improve"),
+            allowed={"explain", "improve", "risks", "tasks", "memory"},
+            default="improve",
+        )
+
+        graph_snapshot = self.snapshot_payload()
+        snapshot = self._as_mapping(graph_snapshot.get("snapshot"))
+        nodes = [self._as_mapping(row) for row in self._as_list(snapshot.get("nodes"))]
+        edges = [self._as_mapping(row) for row in self._as_list(snapshot.get("edges"))]
+        target = next((row for row in nodes if self._to_int(row.get("id", 0), 0) == node_id), None)
+        if target is None:
+            raise ValueError("target node was not found")
+
+        attrs = self._as_mapping(target.get("attributes"))
+        state = self._as_mapping(target.get("state"))
+        node_type = str(target.get("type", "generic") or "generic").strip() or "generic"
+        label = " ".join(
+            str(
+                attrs.get("title")
+                or attrs.get("name")
+                or attrs.get("profile_name")
+                or attrs.get("summary")
+                or attrs.get("description")
+                or f"Node {node_id}"
+            ).split()
+        ).strip() or f"Node {node_id}"
+
+        incoming = sum(1 for edge in edges if self._to_int(edge.get("to", 0), 0) == node_id)
+        outgoing = sum(1 for edge in edges if self._to_int(edge.get("from", 0), 0) == node_id)
+        related_ids = [
+            self._to_int(edge.get("from", 0), 0)
+            for edge in edges
+            if self._to_int(edge.get("to", 0), 0) == node_id and self._to_int(edge.get("from", 0), 0) > 0
+        ]
+        related_ids.extend(
+            self._to_int(edge.get("to", 0), 0)
+            for edge in edges
+            if self._to_int(edge.get("from", 0), 0) == node_id and self._to_int(edge.get("to", 0), 0) > 0
+        )
+        related_names: list[str] = []
+        seen_related: set[int] = set()
+        for related_id in related_ids:
+            if related_id <= 0 or related_id in seen_related:
+                continue
+            seen_related.add(related_id)
+            related_node = next(
+                (row for row in nodes if self._to_int(row.get("id", 0), 0) == related_id),
+                None,
+            )
+            if related_node is None:
+                continue
+            related_attrs = self._as_mapping(related_node.get("attributes"))
+            related_label = " ".join(
+                str(
+                    related_attrs.get("title")
+                    or related_attrs.get("name")
+                    or related_attrs.get("profile_name")
+                    or related_attrs.get("summary")
+                    or f"Node {related_id}"
+                ).split()
+            ).strip()
+            if related_label:
+                related_names.append(related_label)
+            if len(related_names) >= 6:
+                break
+
+        text_fragments: list[str] = []
+        for key in (
+            "summary",
+            "details",
+            "description",
+            "notes",
+            "desired_output",
+            "prompt",
+            "correct_answer",
+            "hallucinated_answer",
+            "message",
+        ):
+            value = " ".join(str(attrs.get(key, "") or "").split()).strip()
+            if value and value not in text_fragments:
+                text_fragments.append(value)
+        for key in ("likes", "dislikes", "style_examples", "tool_examples", "mitigation_steps", "tags"):
+            rows = self._to_list_of_strings(attrs.get(key))
+            if rows:
+                text_fragments.append(", ".join(rows[:8]))
+        if not text_fragments:
+            text_fragments.append(label)
+
+        action_prompt_map = {
+            "explain": f"Explain the selected graph node '{label}' in plain language and highlight what matters most.",
+            "improve": f"Suggest concrete improvements for the selected graph node '{label}'. Focus on useful next steps.",
+            "risks": f"Analyze risks, contradictions, and verification gaps around the selected graph node '{label}'.",
+            "tasks": f"Turn the selected graph node '{label}' into an execution-oriented task plan with checkpoints.",
+            "memory": f"Extract only durable, high-value memory from the selected graph node '{label}' and drop noise.",
+        }
+        user_message = " ".join(
+            str(root.get("message", root.get("prompt", "")) or "").split()
+        ).strip()
+        if not user_message:
+            user_message = action_prompt_map.get(action, action_prompt_map["improve"])
+
+        extra_context = " ".join(str(root.get("context", "") or "").split()).strip()
+        context_lines = [
+            f"Target graph node #{node_id}",
+            f"Type: {node_type}",
+            f"Label: {label}",
+            f"Incoming edges: {incoming}",
+            f"Outgoing edges: {outgoing}",
+        ]
+        if related_names:
+            context_lines.append(f"Related nodes: {', '.join(related_names)}")
+        context_lines.append(f"Node content: {' | '.join(text_fragments[:6])}")
+        if state:
+            state_tokens = [f"{key}={value}" for key, value in list(state.items())[:6]]
+            if state_tokens:
+                context_lines.append(f"Node state: {', '.join(state_tokens)}")
+        if extra_context:
+            context_lines.append(f"User context: {extra_context}")
+
+        default_role = "planner" if action == "tasks" else "analyst" if action in {"risks", "memory"} else "general"
+        result = self.project_archive_verified_chat(
+            {
+                "user_id": str(root.get("user_id", "default_user") or "default_user").strip() or "default_user",
+                "session_id": str(root.get("session_id", "") or "").strip() or f"graph_node_{node_id}",
+                "message": user_message,
+                "context": "\n".join(context_lines),
+                "model_path": str(root.get("model_path", "") or "").strip(),
+                "model_role": str(root.get("model_role", default_role) or default_role).strip() or default_role,
+                "apply_to_graph": self._to_bool(root.get("apply_to_graph", True)),
+                "verification_mode": self._pick_allowed_token(
+                    root.get("verification_mode", "balanced"),
+                    allowed=_ARCHIVE_VERIFICATION_MODES_ALLOWED,
+                    default="balanced",
+                ),
+                "top_k": max(1, min(8, self._to_int(root.get("top_k", 5), 5))),
+                "capture_dialect": self._to_bool(root.get("capture_dialect", True)),
+                "auto_triage": self._to_bool(root.get("auto_triage", True)),
+                "triage_with_llm": self._to_bool(root.get("triage_with_llm", True)),
+            }
+        )
+
+        graph_binding = self._as_mapping(result.get("graph_binding"))
+        session_node_id = self._to_int(graph_binding.get("session_node_id", 0), 0)
+        update_node_ids = [
+            self._to_int(item, 0)
+            for item in self._as_list(graph_binding.get("update_node_ids"))
+            if self._to_int(item, 0) > 0
+        ]
+        apply_to_graph = self._to_bool(root.get("apply_to_graph", True))
+        graph_changed = False
+        extra_persisted = False
+        if apply_to_graph and session_node_id > 0:
+            self._connect_nodes(
+                from_node=node_id,
+                to_node=session_node_id,
+                relation_type="requested_node_assist",
+                weight=0.88,
+                logic_rule="graph_node_assist",
+                metadata={"action": action, "node_type": node_type},
+            )
+            graph_changed = True
+            self._connect_nodes(
+                from_node=session_node_id,
+                to_node=node_id,
+                relation_type="targets_graph_node",
+                weight=0.84,
+                logic_rule="graph_node_assist",
+                metadata={"action": action},
+            )
+            graph_changed = True
+            for update_node_id in update_node_ids:
+                self._connect_nodes(
+                    from_node=update_node_id,
+                    to_node=node_id,
+                    relation_type="suggests_change_for",
+                    weight=0.82,
+                    logic_rule="graph_node_assist",
+                    metadata={"action": action},
+                )
+                graph_changed = True
+            extra_persisted = bool(self._persist_graph_safe())
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "graph_node_assist_completed",
+            {
+                "node_id": node_id,
+                "action": action,
+                "session_node_id": session_node_id,
+                "update_nodes": len(update_node_ids),
+                "persisted": bool(result.get("persisted", False) or extra_persisted),
+            },
+        )
+
+        out = dict(result)
+        out["node_assist"] = {
+            "node_id": node_id,
+            "action": action,
+            "node_label": label,
+            "node_type": node_type,
+            "incoming_edges": incoming,
+            "outgoing_edges": outgoing,
+            "related_nodes": related_names,
+            "session_node_id": session_node_id,
+            "update_node_ids": update_node_ids,
+        }
+        out["persisted"] = bool(result.get("persisted", False) or extra_persisted)
+        if graph_changed:
+            out.update(self.snapshot_payload())
+        execution = self._as_mapping(out.get("execution"))
+        if execution:
+            execution["persisted"] = bool(out["persisted"])
+            execution["status"] = "persisted" if bool(out["persisted"]) else str(
+                execution.get("status", "in_memory") or "in_memory"
+            )
+            out["execution"] = execution
+        return out
+
+    def project_graph_edge_assist(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        edge_payload = self._normalize_edge_payload(root)
+        if not edge_payload["relation_type"]:
+            raise ValueError("relation_type is required")
+
+        edge = self._find_edge_record(
+            from_node=edge_payload["from_node"],
+            to_node=edge_payload["to_node"],
+            relation_type=edge_payload["relation_type"],
+            direction=edge_payload["direction"],
+        )
+        if edge is None:
+            raise ValueError("edge not found")
+
+        action = self._pick_allowed_token(
+            root.get("action", "improve"),
+            allowed={"explain", "improve", "risks", "merge", "split"},
+            default="improve",
+        )
+
+        graph_snapshot = self.snapshot_payload()
+        snapshot = self._as_mapping(graph_snapshot.get("snapshot"))
+        nodes = [self._as_mapping(row) for row in self._as_list(snapshot.get("nodes"))]
+        from_node = next(
+            (row for row in nodes if self._to_int(row.get("id", 0), 0) == edge_payload["from_node"]),
+            None,
+        )
+        to_node = next(
+            (row for row in nodes if self._to_int(row.get("id", 0), 0) == edge_payload["to_node"]),
+            None,
+        )
+        if from_node is None or to_node is None:
+            raise ValueError("edge endpoint nodes were not found")
+
+        from_attrs = self._as_mapping(from_node.get("attributes"))
+        to_attrs = self._as_mapping(to_node.get("attributes"))
+
+        def _node_label(node_attrs: Mapping[str, Any], node_id: int) -> str:
+            return " ".join(
+                str(
+                    node_attrs.get("title")
+                    or node_attrs.get("name")
+                    or node_attrs.get("profile_name")
+                    or node_attrs.get("summary")
+                    or node_attrs.get("description")
+                    or f"Node {node_id}"
+                ).split()
+            ).strip() or f"Node {node_id}"
+
+        from_label = _node_label(from_attrs, edge_payload["from_node"])
+        to_label = _node_label(to_attrs, edge_payload["to_node"])
+        relation_label = " ".join(str(edge_payload["relation_type"]).replace("_", " ").split()).strip()
+        metadata = self._as_mapping(edge.metadata)
+        metadata_keys = list(metadata.keys())[:8]
+
+        action_prompt_map = {
+            "explain": (
+                f"Explain what the relation '{relation_label}' means between '{from_label}' and '{to_label}'. "
+                "Clarify why it exists and how it should be interpreted."
+            ),
+            "improve": (
+                f"Suggest a clearer, stronger version of the relation '{relation_label}' between '{from_label}' and '{to_label}'. "
+                "Focus on semantics, evidence, and confidence."
+            ),
+            "risks": (
+                f"Analyze risks, contradictions, ambiguity, and weak evidence in the relation '{relation_label}' "
+                f"between '{from_label}' and '{to_label}'."
+            ),
+            "merge": (
+                f"Assess whether '{from_label}' and '{to_label}' should be merged into one node or kept separate, "
+                f"using the relation '{relation_label}' as evidence."
+            ),
+            "split": (
+                f"Assess whether the relation '{relation_label}' between '{from_label}' and '{to_label}' should be "
+                "split into multiple more precise edges."
+            ),
+        }
+        user_message = " ".join(str(root.get("message", root.get("prompt", "")) or "").split()).strip()
+        if not user_message:
+            user_message = action_prompt_map.get(action, action_prompt_map["improve"])
+
+        extra_context = " ".join(str(root.get("context", "") or "").split()).strip()
+        context_lines = [
+            f"Target graph edge {edge_payload['from_node']} -> {edge_payload['to_node']}",
+            f"From node: {from_label} ({str(from_node.get('type', 'generic') or 'generic').strip() or 'generic'})",
+            f"To node: {to_label} ({str(to_node.get('type', 'generic') or 'generic').strip() or 'generic'})",
+            f"Relation type: {edge_payload['relation_type']}",
+            f"Direction: {edge_payload['direction']}",
+            f"Weight: {self._to_float(edge.weight, 0.0):.2f}",
+            f"Logic rule: {str(edge.logic_rule or 'explicit')}",
+        ]
+        if metadata_keys:
+            context_lines.append(f"Metadata keys: {', '.join(metadata_keys)}")
+        if from_attrs:
+            from_hint = " ".join(
+                str(
+                    from_attrs.get("summary")
+                    or from_attrs.get("description")
+                    or from_attrs.get("details")
+                    or from_attrs.get("title")
+                    or from_attrs.get("name")
+                    or ""
+                ).split()
+            ).strip()
+            if from_hint:
+                context_lines.append(f"From node content: {from_hint[:500]}")
+        if to_attrs:
+            to_hint = " ".join(
+                str(
+                    to_attrs.get("summary")
+                    or to_attrs.get("description")
+                    or to_attrs.get("details")
+                    or to_attrs.get("title")
+                    or to_attrs.get("name")
+                    or ""
+                ).split()
+            ).strip()
+            if to_hint:
+                context_lines.append(f"To node content: {to_hint[:500]}")
+        if extra_context:
+            context_lines.append(f"User context: {extra_context}")
+
+        default_role = "planner" if action in {"merge", "split"} else "analyst" if action == "risks" else "general"
+        result = self.project_archive_verified_chat(
+            {
+                "user_id": str(root.get("user_id", "default_user") or "default_user").strip() or "default_user",
+                "session_id": str(root.get("session_id", "") or "").strip()
+                or f"graph_edge_{edge_payload['from_node']}_{edge_payload['to_node']}",
+                "message": user_message,
+                "context": "\n".join(context_lines),
+                "model_path": str(root.get("model_path", "") or "").strip(),
+                "model_role": str(root.get("model_role", default_role) or default_role).strip() or default_role,
+                "apply_to_graph": self._to_bool(root.get("apply_to_graph", True)),
+                "verification_mode": self._pick_allowed_token(
+                    root.get("verification_mode", "balanced"),
+                    allowed=_ARCHIVE_VERIFICATION_MODES_ALLOWED,
+                    default="balanced",
+                ),
+                "top_k": max(1, min(8, self._to_int(root.get("top_k", 5), 5))),
+                "capture_dialect": self._to_bool(root.get("capture_dialect", True)),
+                "auto_triage": self._to_bool(root.get("auto_triage", True)),
+                "triage_with_llm": self._to_bool(root.get("triage_with_llm", True)),
+            }
+        )
+
+        graph_binding = self._as_mapping(result.get("graph_binding"))
+        session_node_id = self._to_int(graph_binding.get("session_node_id", 0), 0)
+        update_node_ids = [
+            self._to_int(item, 0)
+            for item in self._as_list(graph_binding.get("update_node_ids"))
+            if self._to_int(item, 0) > 0
+        ]
+        apply_to_graph = self._to_bool(root.get("apply_to_graph", True))
+        graph_changed = False
+        extra_persisted = False
+        if apply_to_graph:
+            updated_metadata = dict(metadata)
+            updated_metadata["last_edge_assist_action"] = action
+            updated_metadata["last_edge_assist_at"] = float(time.time())
+            updated_metadata["last_edge_assist_summary"] = str(result.get("summary", "") or "")[:600]
+            if session_node_id > 0:
+                updated_metadata["last_edge_assist_session_node_id"] = session_node_id
+            edge.metadata = updated_metadata
+            if action == "merge":
+                edge.logic_rule = "edge_merge_candidate"
+            elif action == "split":
+                edge.logic_rule = "edge_split_candidate"
+            graph_changed = True
+
+        if apply_to_graph and session_node_id > 0:
+            relation_metadata = {
+                "action": action,
+                "relation_type": edge_payload["relation_type"],
+                "direction": edge_payload["direction"],
+            }
+            self._connect_nodes(
+                from_node=edge_payload["from_node"],
+                to_node=session_node_id,
+                relation_type="requested_edge_assist",
+                weight=0.86,
+                logic_rule="graph_edge_assist",
+                metadata=relation_metadata,
+            )
+            graph_changed = True
+            self._connect_nodes(
+                from_node=session_node_id,
+                to_node=edge_payload["to_node"],
+                relation_type="targets_graph_edge",
+                weight=0.82,
+                logic_rule="graph_edge_assist",
+                metadata=relation_metadata,
+            )
+            graph_changed = True
+            for update_node_id in update_node_ids:
+                self._connect_nodes(
+                    from_node=update_node_id,
+                    to_node=edge_payload["from_node"],
+                    relation_type="suggests_edge_change_from",
+                    weight=0.8,
+                    logic_rule="graph_edge_assist",
+                    metadata={"action": action, "relation_type": edge_payload["relation_type"]},
+                )
+                self._connect_nodes(
+                    from_node=update_node_id,
+                    to_node=edge_payload["to_node"],
+                    relation_type="suggests_edge_change_to",
+                    weight=0.8,
+                    logic_rule="graph_edge_assist",
+                    metadata={"action": action, "relation_type": edge_payload["relation_type"]},
+                )
+                graph_changed = True
+            extra_persisted = bool(self._persist_graph_safe())
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "graph_edge_assist_completed",
+            {
+                "from_node": edge_payload["from_node"],
+                "to_node": edge_payload["to_node"],
+                "relation_type": edge_payload["relation_type"],
+                "direction": edge_payload["direction"],
+                "action": action,
+                "session_node_id": session_node_id,
+                "update_nodes": len(update_node_ids),
+                "persisted": bool(result.get("persisted", False) or extra_persisted),
+            },
+        )
+
+        out = dict(result)
+        out["edge_assist"] = {
+            "from_node": edge_payload["from_node"],
+            "to_node": edge_payload["to_node"],
+            "relation_type": edge_payload["relation_type"],
+            "direction": edge_payload["direction"],
+            "action": action,
+            "from_label": from_label,
+            "to_label": to_label,
+            "session_node_id": session_node_id,
+            "update_node_ids": update_node_ids,
+        }
+        out["persisted"] = bool(result.get("persisted", False) or extra_persisted)
+        if graph_changed:
+            out.update(self.snapshot_payload())
+        execution = self._as_mapping(out.get("execution"))
+        if execution:
+            execution["persisted"] = bool(out["persisted"])
+            execution["status"] = "persisted" if bool(out["persisted"]) else str(
+                execution.get("status", "in_memory") or "in_memory"
+            )
+            out["execution"] = execution
+        return out
+
+    def project_graph_foundation_create(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        target_node_id = self._to_int(root.get("target_node_id", 0), 0)
+        depth = max(1, min(3, self._to_int(root.get("depth", 2), 2)))
+        concept_limit = max(2, min(6, self._to_int(root.get("concept_limit", 4), 4)))
+        clean_topic = " ".join(str(root.get("topic", root.get("message", "")) or "").split()).strip()
+        clean_context = " ".join(str(root.get("context", "") or "").split()).strip()
+        requested_model_path = str(root.get("model_path", "") or "").strip() or _DEFAULT_GRAPH_MONITOR_MODEL_PATH
+        resolved_role = self._debate_role(root.get("model_role", "planner"), fallback="planner")
+
+        snapshot = self._as_mapping(self.snapshot_payload().get("snapshot"))
+        nodes = [self._as_mapping(row) for row in self._as_list(snapshot.get("nodes"))]
+        target_row = next(
+            (row for row in nodes if self._to_int(row.get("id", 0), 0) == target_node_id),
+            None,
+        )
+        target_attrs = self._as_mapping(target_row.get("attributes")) if target_row else {}
+        target_label = ""
+        target_summary = ""
+        if target_row:
+            target_label = " ".join(
+                str(
+                    target_attrs.get("title")
+                    or target_attrs.get("name")
+                    or target_attrs.get("profile_name")
+                    or target_attrs.get("summary")
+                    or f"Node {target_node_id}"
+                ).split()
+            ).strip() or f"Node {target_node_id}"
+            target_summary = " ".join(
+                str(
+                    target_attrs.get("summary")
+                    or target_attrs.get("description")
+                    or target_attrs.get("details")
+                    or target_attrs.get("notes")
+                    or ""
+                ).split()
+            ).strip()
+
+        foundation_topic = clean_topic or target_label
+        if not foundation_topic:
+            raise ValueError("topic is required or select a node to deepen")
+
+        llm_fn, resolution = self._resolve_role_or_model_llm(
+            role=resolved_role,
+            model_path=requested_model_path,
+        )
+        raw_output = ""
+        parsed_output: dict[str, Any] = {}
+        used_fallback = True
+        if llm_fn is not None:
+            prompt_parts = [
+                "You design a compact knowledge-graph foundation for a user workspace.",
+                "Return JSON only.",
+                'Schema: { "title":"", "summary":"", "concepts":[{ "name":"", "summary":"", "reason":"", "confidence":0.0, "children":[{ "name":"", "summary":"", "reason":"", "confidence":0.0 }] }] }',
+                f"Generate up to {concept_limit} top-level concepts and at most {concept_limit} child concepts per node.",
+                f"Depth limit: {depth}",
+                "Keep names concrete, concise, and useful for graph editing.",
+                f"Topic: {foundation_topic[:800]}",
+            ]
+            if target_label:
+                prompt_parts.append(f"Selected node: {target_label}")
+            if target_summary:
+                prompt_parts.append(f"Selected node summary: {target_summary[:800]}")
+            if clean_context:
+                prompt_parts.append(f"Context: {clean_context[:1200]}")
+            try:
+                raw_output = str(llm_fn("\n".join(prompt_parts)) or "").strip()
+                parsed_candidate = self._extract_json_from_llm_output(raw_output)
+                if isinstance(parsed_candidate, Mapping):
+                    parsed_output = dict(parsed_candidate)
+                    used_fallback = False
+            except Exception:
+                parsed_output = {}
+                used_fallback = True
+
+        def _normalize_foundation_concepts(value: Any, *, level: int) -> list[dict[str, Any]]:
+            rows = value if isinstance(value, list) else []
+            out: list[dict[str, Any]] = []
+            seen: set[str] = set()
+            for row in rows:
+                item = self._as_mapping(row)
+                if not item and isinstance(row, str):
+                    item = {"name": row}
+                name = " ".join(
+                    str(item.get("name", item.get("title", item.get("label", ""))) or "").split()
+                ).strip()
+                if not name:
+                    continue
+                token = name.casefold()
+                if token in seen:
+                    continue
+                seen.add(token)
+                summary = " ".join(
+                    str(item.get("summary", item.get("description", "")) or "").split()
+                ).strip()
+                reason = " ".join(str(item.get("reason", "") or "").split()).strip()
+                children: list[dict[str, Any]] = []
+                if level < depth:
+                    child_value = item.get("children", item.get("subconcepts", item.get("details", [])))
+                    children = _normalize_foundation_concepts(child_value, level=level + 1)
+                out.append(
+                    {
+                        "name": name[:120],
+                        "summary": summary[:360],
+                        "reason": reason[:320],
+                        "confidence": self._confidence(item.get("confidence", 0.66), 0.66),
+                        "children": children[:concept_limit],
+                    }
+                )
+                if len(out) >= concept_limit:
+                    break
+            return out
+
+        blueprint_title = " ".join(str(parsed_output.get("title", "") or "").split()).strip()
+        if not blueprint_title:
+            if target_label:
+                blueprint_title = self._to_title(
+                    f"{target_label} foundation",
+                    fallback="Concept foundation",
+                    limit=72,
+                )
+            else:
+                blueprint_title = self._to_title(foundation_topic, fallback="Concept foundation", limit=72)
+        blueprint_summary = " ".join(str(parsed_output.get("summary", "") or "").split()).strip()
+        if not blueprint_summary:
+            if clean_context:
+                blueprint_summary = self._to_title(clean_context, fallback="Structured concept foundation", limit=180)
+            elif target_summary:
+                blueprint_summary = self._to_title(target_summary, fallback="Structured concept foundation", limit=180)
+            else:
+                blueprint_summary = self._to_title(
+                    f"Structured concept foundation for {foundation_topic}",
+                    fallback="Structured concept foundation",
+                    limit=180,
+                )
+
+        concepts = _normalize_foundation_concepts(parsed_output.get("concepts", []), level=1)
+        if not concepts:
+            source_text = "\n".join(part for part in (foundation_topic, clean_context, target_summary) if part).strip()
+            raw_chunks = [
+                " ".join(chunk.split()).strip()
+                for chunk in re.split(r"[\n;,|]+", source_text)
+                if " ".join(str(chunk or "").split()).strip()
+            ]
+            name_candidates = [
+                chunk
+                for chunk in raw_chunks
+                if 3 <= len(chunk) <= 80
+            ]
+            if len(name_candidates) < concept_limit:
+                fallback_words = [
+                    token
+                    for token in re.findall(r"[\w-]{4,}", source_text, flags=re.UNICODE)
+                    if len(token) >= 4
+                ]
+                for token in fallback_words:
+                    if len(name_candidates) >= concept_limit:
+                        break
+                    if any(token.casefold() == item.casefold() for item in name_candidates):
+                        continue
+                    name_candidates.append(token)
+            if not name_candidates:
+                name_candidates = ["core concept", "key detail", "next step"][:concept_limit]
+            concepts = []
+            for index, name in enumerate(name_candidates[:concept_limit], start=1):
+                child_rows: list[dict[str, Any]] = []
+                if depth > 1:
+                    child_rows.append(
+                        {
+                            "name": f"{name} detail",
+                            "summary": "Fallback deeper layer added because LLM structure was unavailable.",
+                            "reason": "fallback_depth_expansion",
+                            "confidence": 0.52,
+                            "children": [],
+                        }
+                    )
+                concepts.append(
+                    {
+                        "name": self._to_title(name, fallback=f"Concept {index}", limit=120),
+                        "summary": f"Fallback concept extracted from the foundation request #{index}.",
+                        "reason": "fallback_concept_extraction",
+                        "confidence": 0.56,
+                        "children": child_rows,
+                    }
+                )
+            used_fallback = True
+
+        selected_model_path = str(resolution.get("selected_model_path", "") or requested_model_path)
+        root_node = self.api.engine.create_node(
+            "foundation_branch",
+            attributes={
+                "title": blueprint_title,
+                "summary": blueprint_summary,
+                "topic": foundation_topic,
+                "context": clean_context,
+                "source": "graph_foundation_builder",
+                "depth": depth,
+                "concept_limit": concept_limit,
+                "target_node_id": target_node_id if target_node_id > 0 else 0,
+                "target_label": target_label,
+                "requested_model_path": requested_model_path,
+                "selected_model_path": selected_model_path,
+                "requested_role": resolved_role,
+                "resolution": dict(resolution),
+                "used_fallback": bool(used_fallback),
+            },
+            state={
+                "depth": float(depth),
+                "concept_limit": float(concept_limit),
+                "confidence": 0.74 if not used_fallback else 0.56,
+            },
+        )
+        root_node_id = int(root_node.id)
+        created_node_ids: list[int] = [root_node_id]
+        created_edge_count = 0
+
+        if target_node_id > 0 and target_row is not None:
+            self._connect_nodes(
+                from_node=target_node_id,
+                to_node=root_node_id,
+                relation_type="expands_concept",
+                weight=0.86,
+                logic_rule="graph_foundation_builder",
+                metadata={"topic": foundation_topic, "depth": depth},
+            )
+            created_edge_count += 1
+
+        def _create_concept_branch(parent_node_id: int, concept_rows: list[dict[str, Any]], *, level: int) -> None:
+            nonlocal created_edge_count
+            for item in concept_rows[:concept_limit]:
+                concept_node = self.api.engine.create_node(
+                    "concept",
+                    attributes={
+                        "name": str(item.get("name", "") or "").strip(),
+                        "summary": str(item.get("summary", "") or "").strip(),
+                        "reason": str(item.get("reason", "") or "").strip(),
+                        "foundation_root_id": root_node_id,
+                        "foundation_topic": foundation_topic,
+                        "concept_level": level,
+                    },
+                    state={
+                        "confidence": self._confidence(item.get("confidence", 0.62), 0.62),
+                        "concept_level": float(level),
+                    },
+                )
+                concept_node_id = int(concept_node.id)
+                created_node_ids.append(concept_node_id)
+                self._connect_nodes(
+                    from_node=parent_node_id,
+                    to_node=concept_node_id,
+                    relation_type="contains_concept" if level == 1 else "deepens_concept",
+                    weight=max(0.5, 0.9 - (0.08 * max(0, level - 1))),
+                    logic_rule="graph_foundation_builder",
+                    metadata={"level": level, "root_node_id": root_node_id},
+                )
+                created_edge_count += 1
+                children = [
+                    self._as_mapping(child)
+                    for child in self._as_list(self._as_mapping(item).get("children"))
+                ]
+                if children and level < depth:
+                    _create_concept_branch(concept_node_id, children, level=level + 1)
+
+        _create_concept_branch(root_node_id, concepts, level=1)
+
+        monitor_focus_ids = [root_node_id, *created_node_ids[1:]]
+        if target_node_id > 0:
+            monitor_focus_ids.append(target_node_id)
+        graph_monitor = self._run_graph_monitor(
+            user_id=str(root.get("user_id", "default_user") or "default_user").strip() or "default_user",
+            session_id=str(root.get("session_id", "") or "").strip() or f"graph_foundation_{root_node_id}",
+            source="graph_foundation_builder",
+            focus_node_ids=monitor_focus_ids,
+            hint_text=f"{blueprint_summary}\n{foundation_topic}",
+            model_path=selected_model_path,
+            model_role="planner",
+            apply_changes=True,
+        )
+        persisted = self._persist_graph_safe()
+        execution = self._execution_status(
+            action="graph_foundation_create",
+            persisted=persisted,
+            graph_monitor=graph_monitor,
+            extra={
+                "created_nodes": len(created_node_ids),
+                "created_edges": created_edge_count,
+                "focus_node_id": root_node_id,
+            },
+        )
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "graph_foundation_created",
+            {
+                "root_node_id": root_node_id,
+                "target_node_id": target_node_id,
+                "created_nodes": len(created_node_ids),
+                "created_edges": created_edge_count,
+                "top_level_concepts": len(concepts),
+                "depth": depth,
+                "persisted": bool(persisted),
+            },
+        )
+
+        return {
+            "ok": True,
+            "foundation": {
+                "title": blueprint_title,
+                "summary": blueprint_summary,
+                "topic": foundation_topic,
+                "root_node_id": root_node_id,
+                "focus_node_id": root_node_id,
+                "target_node_id": target_node_id,
+                "target_label": target_label,
+                "created_node_ids": created_node_ids,
+                "created_nodes": len(created_node_ids),
+                "created_edges": created_edge_count,
+                "top_level_concepts": len(concepts),
+                "depth": depth,
+                "concept_limit": concept_limit,
+            },
+            "summary": {
+                "title": blueprint_title,
+                "summary": blueprint_summary,
+                "created_nodes": len(created_node_ids),
+                "created_edges": created_edge_count,
+                "focus_node_id": root_node_id,
+                "model_path": selected_model_path,
+            },
+            "blueprint": {
+                "title": blueprint_title,
+                "summary": blueprint_summary,
+                "concepts": concepts,
+            },
+            "graph_monitor": graph_monitor,
+            "model": {
+                "requested_model_path": requested_model_path,
+                "selected_model_path": selected_model_path,
+                "requested_role": resolved_role,
+                "resolution": dict(resolution),
+                "used_fallback": bool(used_fallback),
+            },
+            "execution": execution,
+            "persisted": bool(persisted),
             "raw_output": raw_output[:6000],
             **self.snapshot_payload(),
         }

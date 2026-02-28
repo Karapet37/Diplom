@@ -28,7 +28,8 @@ def _json_load(value: Any, *, default: Any) -> Any:
 class KnowledgeSQLStore:
     """Durable SQL backbone for graph memory, diagnostics and evolution."""
 
-    SCHEMA_VERSION = "2026.02.17"
+    BASELINE_SCHEMA_VERSION = "2026.02.17"
+    SCHEMA_VERSION = "2026.02.28"
 
     def __init__(self, db_path: str | Path = "data/living_system.db"):
         self.db_path = Path(db_path)
@@ -41,6 +42,143 @@ class KnowledgeSQLStore:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA synchronous = NORMAL")
         return conn
+
+    @staticmethod
+    def _build_profile_summary(
+        *,
+        display_name: str,
+        primary_language: str,
+        secondary_languages: list[str],
+        preferences: dict[str, Any],
+        behavior_model: dict[str, Any],
+    ) -> str:
+        parts = [display_name.strip() or "user", f"primary={primary_language.strip() or 'hy'}"]
+        if secondary_languages:
+            parts.append(f"secondary={','.join(secondary_languages[:4])}")
+        if preferences:
+            parts.append(f"preferences={len(preferences)}")
+        if behavior_model:
+            parts.append(f"behavior={len(behavior_model)}")
+        return " | ".join(parts)[:280]
+
+    @staticmethod
+    def _build_trace_summary(input_text: str, output_text: str) -> str:
+        input_head = " ".join(str(input_text or "").split())[:120].strip()
+        output_head = " ".join(str(output_text or "").split())[:120].strip()
+        parts = []
+        if input_head:
+            parts.append(f"in={input_head}")
+        if output_head:
+            parts.append(f"out={output_head}")
+        return " | ".join(parts)[:280]
+
+    @staticmethod
+    def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+        rows = conn.execute(f"PRAGMA table_info('{table}')").fetchall()
+        return {str(row["name"]) for row in rows}
+
+    @classmethod
+    def _has_column(cls, conn: sqlite3.Connection, table: str, column: str) -> bool:
+        return column in cls._table_columns(conn, table)
+
+    @staticmethod
+    def _applied_schema_versions(conn: sqlite3.Connection) -> set[str]:
+        rows = conn.execute("SELECT version FROM schema_versions ORDER BY id ASC").fetchall()
+        return {str(row["version"]) for row in rows}
+
+    @staticmethod
+    def _record_schema_version(conn: sqlite3.Connection, version: str) -> None:
+        token = str(version or "").strip()
+        if not token:
+            return
+        exists = conn.execute(
+            "SELECT 1 FROM schema_versions WHERE version = ? LIMIT 1",
+            (token,),
+        ).fetchone()
+        if exists:
+            return
+        conn.execute(
+            "INSERT INTO schema_versions(version, applied_at) VALUES(?, ?)",
+            (token, time.time()),
+        )
+
+    def _apply_pending_migrations(self, conn: sqlite3.Connection) -> None:
+        applied = self._applied_schema_versions(conn)
+        if not applied:
+            self._record_schema_version(conn, self.BASELINE_SCHEMA_VERSION)
+            applied = self._applied_schema_versions(conn)
+
+        migrations: tuple[tuple[str, Any], ...] = (
+            (self.SCHEMA_VERSION, self._migration_2026_02_28),
+        )
+        for version, migration_fn in migrations:
+            if version in applied:
+                continue
+            migration_fn(conn)
+            self._record_schema_version(conn, version)
+            applied.add(version)
+
+    def _migration_2026_02_28(self, conn: sqlite3.Connection) -> None:
+        if not self._has_column(conn, "users", "last_active_at"):
+            conn.execute("ALTER TABLE users ADD COLUMN last_active_at REAL NOT NULL DEFAULT 0")
+        conn.execute(
+            "UPDATE users SET last_active_at = updated_at WHERE COALESCE(last_active_at, 0) <= 0"
+        )
+
+        if not self._has_column(conn, "user_profiles", "profile_summary"):
+            conn.execute("ALTER TABLE user_profiles ADD COLUMN profile_summary TEXT NOT NULL DEFAULT ''")
+        conn.execute(
+            """
+            UPDATE user_profiles
+            SET profile_summary = printf(
+                '%s | primary=%s',
+                CASE WHEN trim(user_id) = '' THEN 'user' ELSE user_id END,
+                CASE WHEN trim(primary_language) = '' THEN 'hy' ELSE primary_language END
+            )
+            WHERE trim(COALESCE(profile_summary, '')) = ''
+            """
+        )
+
+        if not self._has_column(conn, "nodes", "source_tag"):
+            conn.execute("ALTER TABLE nodes ADD COLUMN source_tag TEXT NOT NULL DEFAULT ''")
+        conn.execute(
+            """
+            UPDATE nodes
+            SET source_tag = CASE
+                WHEN trim(COALESCE(node_type, '')) = '' THEN 'generic'
+                ELSE node_type
+            END
+            WHERE trim(COALESCE(source_tag, '')) = ''
+            """
+        )
+
+        if not self._has_column(conn, "edges", "status"):
+            conn.execute("ALTER TABLE edges ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+        conn.execute(
+            """
+            UPDATE edges
+            SET status = 'active'
+            WHERE trim(COALESCE(status, '')) = ''
+            """
+        )
+
+        if not self._has_column(conn, "reasoning_traces", "trace_summary"):
+            conn.execute("ALTER TABLE reasoning_traces ADD COLUMN trace_summary TEXT NOT NULL DEFAULT ''")
+        trace_rows = conn.execute(
+            "SELECT trace_id, input_text, output_text, trace_summary FROM reasoning_traces"
+        ).fetchall()
+        for row in trace_rows:
+            existing_summary = str(row["trace_summary"] or "").strip()
+            if existing_summary:
+                continue
+            summary = self._build_trace_summary(
+                str(row["input_text"] or ""),
+                str(row["output_text"] or ""),
+            )
+            conn.execute(
+                "UPDATE reasoning_traces SET trace_summary = ? WHERE trace_id = ?",
+                (summary, int(row["trace_id"])),
+            )
 
     def initialize(self) -> None:
         schema_statements = [
@@ -55,6 +193,7 @@ class KnowledgeSQLStore:
             CREATE TABLE IF NOT EXISTS users (
                 user_id TEXT PRIMARY KEY,
                 display_name TEXT NOT NULL DEFAULT '',
+                last_active_at REAL NOT NULL DEFAULT 0,
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL
             )
@@ -67,6 +206,7 @@ class KnowledgeSQLStore:
                 preferences_json TEXT NOT NULL DEFAULT '{}',
                 behavior_model_json TEXT NOT NULL DEFAULT '{}',
                 timeline_json TEXT NOT NULL DEFAULT '[]',
+                profile_summary TEXT NOT NULL DEFAULT '',
                 updated_at REAL NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
             )
@@ -79,6 +219,7 @@ class KnowledgeSQLStore:
                 display_name TEXT NOT NULL DEFAULT '',
                 confidence REAL NOT NULL DEFAULT 0.0,
                 version INTEGER NOT NULL DEFAULT 1,
+                source_tag TEXT NOT NULL DEFAULT '',
                 metadata_json TEXT NOT NULL DEFAULT '{}',
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL
@@ -110,6 +251,7 @@ class KnowledgeSQLStore:
                 confidence REAL NOT NULL DEFAULT 0.0,
                 weight REAL NOT NULL DEFAULT 0.0,
                 version INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'active',
                 metadata_json TEXT NOT NULL DEFAULT '{}',
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
@@ -194,6 +336,7 @@ class KnowledgeSQLStore:
                 input_text TEXT NOT NULL,
                 output_text TEXT NOT NULL,
                 confidence REAL NOT NULL,
+                trace_summary TEXT NOT NULL DEFAULT '',
                 trace_json TEXT NOT NULL DEFAULT '{}',
                 created_at REAL NOT NULL
             )
@@ -266,14 +409,10 @@ class KnowledgeSQLStore:
             """,
         ]
 
-        now = time.time()
         with self._connect() as conn:
             for statement in schema_statements:
                 conn.execute(statement)
-            conn.execute(
-                "INSERT INTO schema_versions(version, applied_at) VALUES(?, ?)",
-                (self.SCHEMA_VERSION, now),
-            )
+            self._apply_pending_migrations(conn)
             conn.commit()
 
     def ensure_localized_text(self, language_code: str, text_key: str, text_value: str) -> None:
@@ -314,17 +453,28 @@ class KnowledgeSQLStore:
         secondary = payload.get("secondary_languages", ["ru", "en", "pt", "ar", "zh"])
         if not isinstance(secondary, (list, tuple, set)):
             secondary = []
+        secondary_values = [str(item) for item in secondary]
+        preferences = dict(payload.get("preferences", {}) or {})
+        behavior_model = dict(payload.get("behavior_model", {}) or {})
+        profile_summary = str(payload.get("profile_summary", "") or "").strip() or self._build_profile_summary(
+            display_name=display_name,
+            primary_language=primary_language,
+            secondary_languages=secondary_values,
+            preferences=preferences,
+            behavior_model=behavior_model,
+        )
         now = time.time()
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO users(user_id, display_name, created_at, updated_at)
-                VALUES(?, ?, ?, ?)
+                INSERT INTO users(user_id, display_name, last_active_at, created_at, updated_at)
+                VALUES(?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     display_name=excluded.display_name,
+                    last_active_at=excluded.last_active_at,
                     updated_at=excluded.updated_at
                 """,
-                (user_id, display_name, now, now),
+                (user_id, display_name, now, now, now),
             )
             conn.execute(
                 """
@@ -335,24 +485,27 @@ class KnowledgeSQLStore:
                     preferences_json,
                     behavior_model_json,
                     timeline_json,
+                    profile_summary,
                     updated_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     primary_language=excluded.primary_language,
                     secondary_languages_json=excluded.secondary_languages_json,
                     preferences_json=excluded.preferences_json,
                     behavior_model_json=excluded.behavior_model_json,
                     timeline_json=excluded.timeline_json,
+                    profile_summary=excluded.profile_summary,
                     updated_at=excluded.updated_at
                 """,
                 (
                     user_id,
                     primary_language,
-                    _json_dump([str(item) for item in secondary]),
-                    _json_dump(dict(payload.get("preferences", {}) or {})),
-                    _json_dump(dict(payload.get("behavior_model", {}) or {})),
+                    _json_dump(secondary_values),
+                    _json_dump(preferences),
+                    _json_dump(behavior_model),
                     _json_dump(list(payload.get("timeline", []) or [])),
+                    profile_summary,
                     now,
                 ),
             )
@@ -373,6 +526,7 @@ class KnowledgeSQLStore:
         metadata = dict(payload.get("metadata", {}) or {})
         properties = dict(payload.get("properties", {}) or {})
         language_code = str(payload.get("language_code", "") or "").strip()
+        source_tag = str(payload.get("source_tag", metadata.get("source", node_type)) or "").strip() or node_type
         now = time.time()
 
         with self._connect() as conn:
@@ -384,19 +538,20 @@ class KnowledgeSQLStore:
             conn.execute(
                 """
                 INSERT INTO nodes(
-                    node_id, user_id, node_type, display_name, confidence, version, metadata_json, created_at, updated_at
+                    node_id, user_id, node_type, display_name, confidence, version, source_tag, metadata_json, created_at, updated_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(node_id) DO UPDATE SET
                     user_id=excluded.user_id,
                     node_type=excluded.node_type,
                     display_name=excluded.display_name,
                     confidence=excluded.confidence,
                     version=excluded.version,
+                    source_tag=excluded.source_tag,
                     metadata_json=excluded.metadata_json,
                     updated_at=excluded.updated_at
                 """,
-                (node_id, user_id, node_type, display_name, confidence, version, _json_dump(metadata), now, now),
+                (node_id, user_id, node_type, display_name, confidence, version, source_tag, _json_dump(metadata), now, now),
             )
 
             for key, value in properties.items():
@@ -424,6 +579,7 @@ class KnowledgeSQLStore:
             row = conn.execute(
                 """
                 SELECT node_id, node_type, display_name, confidence, metadata_json
+                , source_tag
                 FROM nodes
                 WHERE user_id = ? AND node_type = ? AND lower(display_name) = lower(?)
                 ORDER BY version DESC
@@ -438,6 +594,7 @@ class KnowledgeSQLStore:
                 "node_type": str(row["node_type"]),
                 "display_name": str(row["display_name"]),
                 "confidence": float(row["confidence"]),
+                "source_tag": str(row["source_tag"] or ""),
                 "metadata": _json_load(row["metadata_json"], default={}),
             }
 
@@ -451,6 +608,7 @@ class KnowledgeSQLStore:
         confidence = max(0.0, min(1.0, float(payload.get("confidence", 0.5) or 0.5)))
         weight = max(0.0, min(1.0, float(payload.get("weight", confidence) or confidence)))
         metadata = dict(payload.get("metadata", {}) or {})
+        status = str(payload.get("status", metadata.get("status", "active")) or "").strip() or "active"
         now = time.time()
         with self._connect() as conn:
             row = conn.execute(
@@ -469,11 +627,11 @@ class KnowledgeSQLStore:
             cursor = conn.execute(
                 """
                 INSERT INTO edges(
-                    user_id, from_node, to_node, relation_type, confidence, weight, version, metadata_json, created_at, updated_at
+                    user_id, from_node, to_node, relation_type, confidence, weight, version, status, metadata_json, created_at, updated_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (user_id, from_node, to_node, relation_type, confidence, weight, version, _json_dump(metadata), now, now),
+                (user_id, from_node, to_node, relation_type, confidence, weight, version, status, _json_dump(metadata), now, now),
             )
             conn.commit()
             return int(cursor.lastrowid)
@@ -615,11 +773,14 @@ class KnowledgeSQLStore:
             return int(row["snapshot_id"])
 
     def store_reasoning_trace(self, trace: ReasoningTrace) -> int:
+        trace_summary = self._build_trace_summary(trace.input_text, trace.output_text)
         with self._connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO reasoning_traces(user_id, session_id, input_text, output_text, confidence, trace_json, created_at)
-                VALUES(?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO reasoning_traces(
+                    user_id, session_id, input_text, output_text, confidence, trace_summary, trace_json, created_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     trace.user_id,
@@ -627,6 +788,7 @@ class KnowledgeSQLStore:
                     trace.input_text,
                     trace.output_text,
                     max(0.0, min(1.0, float(trace.confidence))),
+                    trace_summary,
                     _json_dump(trace.trace),
                     time.time(),
                 ),
@@ -887,6 +1049,9 @@ class KnowledgeSQLStore:
     def describe_schema(self) -> dict[str, Any]:
         """Return SQL schema in structured JSON format."""
         with self._connect() as conn:
+            version_rows = conn.execute(
+                "SELECT version, applied_at FROM schema_versions ORDER BY id ASC"
+            ).fetchall()
             table_rows = conn.execute(
                 """
                 SELECT name, sql
@@ -941,6 +1106,15 @@ class KnowledgeSQLStore:
         return {
             "database_path": str(self.db_path),
             "generated_at": time.time(),
+            "schema_version": str(version_rows[-1]["version"]) if version_rows else self.BASELINE_SCHEMA_VERSION,
+            "target_schema_version": self.SCHEMA_VERSION,
+            "applied_versions": [
+                {
+                    "version": str(row["version"]),
+                    "applied_at": float(row["applied_at"]),
+                }
+                for row in version_rows
+            ],
             "tables": tables,
         }
 
@@ -1018,9 +1192,9 @@ class KnowledgeSQLStore:
                     """
                     INSERT INTO nodes(
                         node_id, user_id, node_type, display_name, confidence, version,
-                        metadata_json, created_at, updated_at
+                        source_tag, metadata_json, created_at, updated_at
                     )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         node_id,
@@ -1029,6 +1203,7 @@ class KnowledgeSQLStore:
                         str(row.get("display_name", "")),
                         max(0.0, min(1.0, float(row.get("confidence", 0.5) or 0.5))),
                         int(row.get("version", 1) or 1),
+                        str(row.get("source_tag", row.get("node_type", "generic")) or "generic"),
                         _json_dump(dict(row.get("metadata", {}) or {})),
                         now,
                         now,
@@ -1051,9 +1226,9 @@ class KnowledgeSQLStore:
                     """
                     INSERT INTO edges(
                         user_id, from_node, to_node, relation_type, confidence, weight, version,
-                        metadata_json, created_at, updated_at
+                        status, metadata_json, created_at, updated_at
                     )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         str(row.get("user_id", "")),
@@ -1063,6 +1238,7 @@ class KnowledgeSQLStore:
                         max(0.0, min(1.0, float(row.get("confidence", 0.5) or 0.5))),
                         max(0.0, min(1.0, float(row.get("weight", 0.5) or 0.5))),
                         int(row.get("version", 1) or 1),
+                        str(row.get("status", "active") or "active"),
                         _json_dump(dict(row.get("metadata", {}) or {})),
                         now,
                         now,
@@ -1081,7 +1257,7 @@ class KnowledgeSQLStore:
         with self._connect() as conn:
             node_rows = conn.execute(
                 f"""
-                SELECT node_id, user_id, node_type, display_name, confidence, version, metadata_json
+                SELECT node_id, user_id, node_type, display_name, confidence, version, source_tag, metadata_json
                 FROM nodes
                 {query_user}
                 """,
@@ -1112,6 +1288,7 @@ class KnowledgeSQLStore:
                         "display_name": str(row["display_name"]),
                         "confidence": float(row["confidence"]),
                         "version": int(row["version"]),
+                        "source_tag": str(row["source_tag"] or ""),
                         "metadata": _json_load(row["metadata_json"], default={}),
                         "properties": latest_props,
                     }
@@ -1119,7 +1296,7 @@ class KnowledgeSQLStore:
 
             edge_rows = conn.execute(
                 f"""
-                SELECT user_id, from_node, to_node, relation_type, confidence, weight, version, metadata_json
+                SELECT user_id, from_node, to_node, relation_type, confidence, weight, version, status, metadata_json
                 FROM edges
                 {query_user}
                 ORDER BY edge_id ASC
@@ -1135,6 +1312,7 @@ class KnowledgeSQLStore:
                     "confidence": float(row["confidence"]),
                     "weight": float(row["weight"]),
                     "version": int(row["version"]),
+                    "status": str(row["status"] or "active"),
                     "metadata": _json_load(row["metadata_json"], default={}),
                 }
                 for row in edge_rows

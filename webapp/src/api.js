@@ -127,6 +127,27 @@ export function updateNode(payload) {
   });
 }
 
+export function createGraphFoundation(payload = {}) {
+  return request("/api/graph/foundation/create", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runGraphNodeAssist(payload = {}) {
+  return request("/api/graph/node/assist", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runGraphEdgeAssist(payload = {}) {
+  return request("/api/graph/edge/assist", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function deleteNode(payload) {
   return request("/api/graph/node/delete", {
     method: "POST",
@@ -392,13 +413,6 @@ export function getProjectIntegrationLayerManifest(params = {}) {
 
 export function invokeProjectIntegrationLayer(payload = {}) {
   return request("/api/integration/layer/invoke", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export function importProjectAutoruns(payload = {}) {
-  return request("/api/project/autoruns/import", {
     method: "POST",
     body: JSON.stringify(payload),
   });

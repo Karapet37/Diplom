@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
+import re
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from src.web.graph_workspace import GraphWorkspaceService
 
@@ -191,6 +194,43 @@ class GraphWorkspaceServiceTests(unittest.TestCase):
 
         deleted_node = self.svc.delete_node({"node_id": left["node"]["id"]})
         self.assertTrue(deleted_node["deleted"])
+
+    def test_graph_workspace_autoloads_and_autopersists_with_json_adapter(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_path = str(Path(tmpdir) / "workspace_graph.json")
+            with patch.dict(
+                "os.environ",
+                {
+                    "AUTOGRAPH_STORAGE_ADAPTER": "json",
+                    "AUTOGRAPH_JSON_ENABLE": "1",
+                    "AUTOGRAPH_JSON_PATH": snapshot_path,
+                    "AUTOGRAPH_NEO4J_ENABLE": "0",
+                    "AUTOGRAPH_AUTO_PERSIST_ON_WRITE": "1",
+                    "AUTOGRAPH_AUTO_LOAD_ON_START": "1",
+                },
+                clear=False,
+            ):
+                writer = GraphWorkspaceService(use_env_adapter=True, enable_living_system=False)
+                created = writer.create_node(
+                    {
+                        "node_type": "generic",
+                        "attributes": {
+                            "user_id": "persist_user",
+                            "name": "Persisted node",
+                            "summary": "This node must survive a fresh service instance.",
+                        },
+                    }
+                )
+                self.assertTrue(created["persisted"])
+
+                reader = GraphWorkspaceService(use_env_adapter=True, enable_living_system=False)
+                snapshot = reader.snapshot_payload()["snapshot"]
+
+        node_names = {
+            str((row.get("attributes") or {}).get("name", "") or "")
+            for row in snapshot.get("nodes", [])
+        }
+        self.assertIn("Persisted node", node_names)
 
     def test_watch_demo_and_client_introspection(self):
         demo = self.svc.watch_demo({"persona_name": "Alexa", "use_llm": False, "reset_graph": True})
@@ -494,6 +534,11 @@ class GraphWorkspaceServiceTests(unittest.TestCase):
         self.assertTrue(out.get("personalization_applied"))
         self.assertEqual(int(out.get("feedback_summary", {}).get("new_items", 0)), 2)
         self.assertIn("personalization", out["profile_update_json"])
+        self.assertIn("summary", out)
+        self.assertGreaterEqual(int(out["summary"].get("dimension_count", 0)), 2)
+        self.assertIn("execution", out)
+        self.assertEqual(str(out["execution"].get("action", "")), "user_graph_update")
+        self.assertIn("input_extraction", out["execution"])
 
     def test_project_user_graph_update_from_text_and_client_profile(self):
         out = self.svc.project_user_graph_update(
@@ -526,58 +571,81 @@ class GraphWorkspaceServiceTests(unittest.TestCase):
         self.assertIn("client_semantic_binding", out)
         self.assertGreater(int(out["client_semantic_binding"].get("session_node_id", 0)), 0)
 
-    def test_project_autoruns_import(self):
-        sample = (
-            "Entry,Entry Location,Enabled,Category,Profile,Description,Publisher,Image Path,Launch String,Signer,Verified,VirusTotal\n"
-            "OneDrive,HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run,Enabled,Logon,user,OneDrive startup,Microsoft Corporation,C:\\\\Program Files\\\\Microsoft OneDrive\\\\OneDrive.exe,\\\"C:\\\\Program Files\\\\Microsoft OneDrive\\\\OneDrive.exe\\\",Microsoft Corporation,Signed,0/74\n"
-            "UnknownTask,Task Scheduler,Enabled,Scheduled Tasks,user,Unknown task,Unknown,C:\\\\Temp\\\\unknown.exe,C:\\\\Temp\\\\unknown.exe,,Not verified,5/74\n"
+    def test_project_user_graph_update_records_qwen_input_capture_and_mistral_monitor(self):
+        def fake_model_resolver(model_path: str):
+            token = str(model_path or "").strip()
+            if "qwen2.5-7b-instruct" in token:
+                def _run(_: str) -> str:
+                    return json.dumps(
+                        {
+                            "summary": "Captured structured profile facts.",
+                            "archive_updates": [
+                                {
+                                    "entity": "user_graph_update",
+                                    "field": "goal",
+                                    "operation": "append",
+                                    "value": "Build a cleaner graph UX.",
+                                    "reason": "Explicit intent from user text.",
+                                    "source": "input_capture_test",
+                                    "confidence": 0.83,
+                                    "tags": ["profile", "goal"],
+                                }
+                            ],
+                        },
+                        ensure_ascii=False,
+                    )
+
+                return _run
+            if "mistral-7b-instruct-v0.3" in token:
+                def _run(prompt: str) -> str:
+                    match = re.search(r'"node_id":\s*(\d+)', prompt)
+                    node_id = int(match.group(1)) if match else 0
+                    return json.dumps(
+                        {
+                            "node_patches": (
+                                [
+                                    {
+                                        "node_id": node_id,
+                                        "summary": "Monitor refreshed profile summary.",
+                                        "confidence": 0.74,
+                                        "reason": "Keep root profile node normalized.",
+                                    }
+                                ]
+                                if node_id > 0
+                                else []
+                            ),
+                            "edge_patches": [],
+                        },
+                        ensure_ascii=False,
+                    )
+
+                return _run
+            return None
+
+        svc = GraphWorkspaceService(
+            use_env_adapter=False,
+            enable_living_system=False,
+            model_llm_resolver=fake_model_resolver,
         )
-        out = self.svc.project_autoruns_import(
+        out = svc.project_user_graph_update(
             {
-                "text": sample,
-                "user_id": "u_autoruns",
-                "session_id": "sess_autoruns",
-                "host_label": "Test Host",
+                "user_id": "u_input_chain",
+                "display_name": "Input Chain",
+                "text": "I need a cleaner graph UI and a more reliable workflow.",
+                "session_id": "sess_input_chain",
+                "use_llm_profile": False,
+                "include_client_profile": False,
             }
         )
-        self.assertIn("scan", out)
-        self.assertIn("summary", out)
-        self.assertEqual(out["scan"]["rows_processed"], 2)
-        self.assertGreaterEqual(out["summary"]["virus_total_positive_entries"], 1)
-        high_or_medium = (
-            int(out["summary"]["risk_counts"].get("high", 0))
-            + int(out["summary"]["risk_counts"].get("medium", 0))
-        )
-        self.assertGreaterEqual(high_or_medium, 1)
+        self.assertTrue(out["input_extraction"]["enabled"])
+        self.assertGreaterEqual(int(out["input_extraction"]["updates_count"]), 1)
+        self.assertTrue(out["input_extraction"]["graph_binding"]["attached"])
+        self.assertTrue(out["graph_monitor"]["attached"])
+        self.assertGreaterEqual(len(out["graph_monitor"].get("node_patches", [])), 1)
+        self.assertIn("edge_patches", out["graph_monitor"])
         node_types = {row.get("type") for row in out["snapshot"]["nodes"]}
-        self.assertIn("autoruns_scan", node_types)
-        self.assertIn("autorun_entry", node_types)
-
-    def test_project_autoruns_import_auto_detect(self):
-        out = self.svc.project_autoruns_import(
-            {
-                "text": "",
-                "auto_detect": True,
-                "query": "show startup risks for browser updates",
-                "user_id": "u_auto",
-                "session_id": "sess_auto",
-                "host_label": "Auto Host",
-                "client": {
-                    "user_agent": "Mozilla/5.0 (X11; Linux x86_64) Chrome/120.0",
-                    "platform": "Linux x86_64",
-                    "language": "en-US",
-                },
-            },
-            request_headers={
-                "user-agent": "Mozilla/5.0 (X11; Linux x86_64) Chrome/120.0",
-                "x-forwarded-for": "198.51.100.30, 10.0.0.2",
-            },
-            request_ip="198.51.100.30",
-        )
-        self.assertIn("scan", out)
-        self.assertEqual(out["scan"]["mode"], "auto_detected")
-        self.assertGreaterEqual(int(out["scan"]["rows_processed"]), 1)
-        self.assertIn("client_profile", out)
+        self.assertIn("llm_archive_update_session", node_types)
+        self.assertIn("graph_monitor_session", node_types)
 
     def test_project_llm_debate_with_role_outputs(self):
         def fake_role_resolver(role: str):
@@ -777,6 +845,270 @@ class GraphWorkspaceServiceTests(unittest.TestCase):
         self.assertIn("llm_archive_update_branch", node_types)
         self.assertIn("llm_archive_update_session", node_types)
         self.assertIn("llm_archive_update_record", node_types)
+
+    def test_project_graph_node_assist_links_to_selected_node(self):
+        def fake_model_resolver(model_path: str):
+            token = str(model_path or "").strip()
+            if "qwen2.5-7b-instruct" not in token:
+                return None
+
+            def _run(_: str) -> str:
+                return json.dumps(
+                    {
+                        "summary": "Clarify the node and attach one concrete next step.",
+                        "archive_updates": [
+                            {
+                                "entity": "graph_node",
+                                "field": "summary",
+                                "operation": "upsert",
+                                "value": "Clarified summary with an actionable next step.",
+                                "reason": "Keeps the node useful to the user.",
+                                "source": "node_assist_test",
+                                "confidence": 0.84,
+                                "tags": ["clarity", "planning"],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+
+            return _run
+
+        svc = GraphWorkspaceService(
+            use_env_adapter=False,
+            enable_living_system=False,
+            model_llm_resolver=fake_model_resolver,
+        )
+        created = svc.create_node(
+            {
+                "node_type": "concept",
+                "name": "Mission Plan",
+                "description": "Needs a tighter plan and clearer next action.",
+            }
+        )
+        node_id = int(created["node"]["id"])
+
+        out = svc.project_graph_node_assist(
+            {
+                "node_id": node_id,
+                "action": "improve",
+                "message": "Tighten this node and suggest the next action.",
+                "model_path": "models/gguf/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf",
+                "apply_to_graph": True,
+                "verification_mode": "balanced",
+                "top_k": 3,
+            }
+        )
+
+        self.assertEqual(out["node_assist"]["node_id"], node_id)
+        self.assertEqual(out["node_assist"]["action"], "improve")
+        self.assertGreater(int(out["node_assist"]["session_node_id"] or 0), 0)
+        self.assertGreaterEqual(len(out["archive_updates"]), 1)
+        self.assertTrue(str(out.get("assistant_reply", "")).strip())
+        edges = out["snapshot"]["edges"]
+        session_node_id = int(out["node_assist"]["session_node_id"])
+        self.assertTrue(
+            any(
+                int(edge.get("from", 0)) == node_id
+                and int(edge.get("to", 0)) == session_node_id
+                and str(edge.get("relation_type", "")) == "requested_node_assist"
+                for edge in edges
+            )
+        )
+        relation_types = {str(edge.get("relation_type", "")) for edge in edges}
+        self.assertIn("targets_graph_node", relation_types)
+        self.assertIn("suggests_change_for", relation_types)
+
+    def test_project_graph_edge_assist_updates_edge_and_links_session(self):
+        def fake_model_resolver(model_path: str):
+            token = str(model_path or "").strip()
+            if "qwen2.5-7b-instruct" not in token:
+                return None
+
+            def _run(_: str) -> str:
+                return json.dumps(
+                    {
+                        "summary": "The relation needs tighter semantics and a clearer justification.",
+                        "archive_updates": [
+                            {
+                                "entity": "graph_edge",
+                                "field": "relation_type",
+                                "operation": "review",
+                                "value": "supports_with_evidence",
+                                "reason": "The current link is too generic.",
+                                "source": "edge_assist_test",
+                                "confidence": 0.82,
+                                "tags": ["edge", "semantics"],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+
+            return _run
+
+        svc = GraphWorkspaceService(
+            use_env_adapter=False,
+            enable_living_system=False,
+            model_llm_resolver=fake_model_resolver,
+        )
+        from_node = svc.create_node({"node_type": "concept", "name": "Source Concept"})
+        to_node = svc.create_node({"node_type": "concept", "name": "Target Concept"})
+        svc.create_edge(
+            {
+                "from_node": int(from_node["node"]["id"]),
+                "to_node": int(to_node["node"]["id"]),
+                "relation_type": "related_to",
+                "direction": "directed",
+                "weight": 0.42,
+            }
+        )
+
+        out = svc.project_graph_edge_assist(
+            {
+                "from_node": int(from_node["node"]["id"]),
+                "to_node": int(to_node["node"]["id"]),
+                "relation_type": "related_to",
+                "direction": "directed",
+                "action": "improve",
+                "message": "Tighten this relation and explain the better semantic.",
+                "model_path": "models/gguf/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf",
+                "apply_to_graph": True,
+                "verification_mode": "balanced",
+                "top_k": 3,
+            }
+        )
+
+        self.assertEqual(out["edge_assist"]["relation_type"], "related_to")
+        self.assertEqual(out["edge_assist"]["action"], "improve")
+        self.assertGreater(int(out["edge_assist"]["session_node_id"] or 0), 0)
+        self.assertGreaterEqual(len(out["archive_updates"]), 1)
+        self.assertTrue(str(out.get("assistant_reply", "")).strip())
+        refreshed_edge = next(
+            (
+                edge
+                for edge in out["snapshot"]["edges"]
+                if int(edge.get("from", 0)) == int(from_node["node"]["id"])
+                and int(edge.get("to", 0)) == int(to_node["node"]["id"])
+                and str(edge.get("relation_type", "")) == "related_to"
+            ),
+            None,
+        )
+        self.assertIsNotNone(refreshed_edge)
+        metadata = refreshed_edge.get("metadata", {}) if isinstance(refreshed_edge, dict) else {}
+        self.assertEqual(str(metadata.get("last_edge_assist_action", "")), "improve")
+        relation_types = {str(edge.get("relation_type", "")) for edge in out["snapshot"]["edges"]}
+        self.assertIn("requested_edge_assist", relation_types)
+        self.assertIn("targets_graph_edge", relation_types)
+        self.assertIn("suggests_edge_change_from", relation_types)
+        self.assertIn("suggests_edge_change_to", relation_types)
+
+    def test_project_graph_foundation_create_builds_visible_branch_with_mistral(self):
+        def fake_model_resolver(model_path: str):
+            token = str(model_path or "").strip()
+            if "mistral-7b-instruct-v0.3" not in token:
+                return None
+
+            def _run(prompt: str) -> str:
+                text = str(prompt or "")
+                if "You are a graph monitor." in text:
+                    return json.dumps(
+                        {
+                            "node_patches": [
+                                {
+                                    "node_id": 0,
+                                    "summary": "ignored invalid patch",
+                                    "confidence": 0.4,
+                                    "reason": "invalid test row",
+                                }
+                            ],
+                            "edge_patches": [],
+                        },
+                        ensure_ascii=False,
+                    )
+                return json.dumps(
+                    {
+                        "title": "Career Pivot Foundation",
+                        "summary": "A compact branch that breaks the career pivot into practical concepts.",
+                        "concepts": [
+                            {
+                                "name": "Skills Audit",
+                                "summary": "Map current capabilities and missing gaps.",
+                                "reason": "Clarifies the starting point.",
+                                "confidence": 0.88,
+                                "children": [
+                                    {
+                                        "name": "Transferable Skills",
+                                        "summary": "List durable strengths that move across roles.",
+                                        "reason": "These carry over immediately.",
+                                        "confidence": 0.81,
+                                    }
+                                ],
+                            },
+                            {
+                                "name": "Target Roles",
+                                "summary": "Define role families worth testing first.",
+                                "reason": "Keeps the search focused.",
+                                "confidence": 0.84,
+                                "children": [
+                                    {
+                                        "name": "Fast Validation",
+                                        "summary": "Choose low-cost interviews and small experiments.",
+                                        "reason": "Reduces risk before large moves.",
+                                        "confidence": 0.79,
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+
+            return _run
+
+        svc = GraphWorkspaceService(
+            use_env_adapter=False,
+            enable_living_system=False,
+            model_llm_resolver=fake_model_resolver,
+        )
+        anchor = svc.create_node(
+            {
+                "node_type": "concept",
+                "name": "Career Pivot",
+                "description": "Needs a structured branch with deeper concepts.",
+            }
+        )
+
+        out = svc.project_graph_foundation_create(
+            {
+                "topic": "",
+                "context": "Focus on practical planning, role discovery, and proof before large changes.",
+                "target_node_id": int(anchor["node"]["id"]),
+                "depth": 2,
+                "concept_limit": 4,
+            }
+        )
+
+        foundation = out["foundation"]
+        self.assertTrue(out["ok"])
+        self.assertEqual(foundation["target_node_id"], int(anchor["node"]["id"]))
+        self.assertGreater(int(foundation["root_node_id"]), 0)
+        self.assertGreaterEqual(int(foundation["created_nodes"]), 5)
+        self.assertGreaterEqual(int(foundation["created_edges"]), 5)
+        self.assertEqual(out["model"]["selected_model_path"], "models/gguf/textGen/mistral-7b-instruct-v0.3-q4_k_m.gguf")
+        self.assertFalse(out["model"]["used_fallback"])
+        relation_types = {str(edge.get("relation_type", "")) for edge in out["snapshot"]["edges"]}
+        self.assertIn("expands_concept", relation_types)
+        self.assertIn("contains_concept", relation_types)
+        self.assertIn("deepens_concept", relation_types)
+        node_types = {str(node.get("type", "")) for node in out["snapshot"]["nodes"]}
+        self.assertIn("foundation_branch", node_types)
+        created_names = {
+            str(node.get("attributes", {}).get("name", node.get("attributes", {}).get("title", ""))).strip()
+            for node in out["snapshot"]["nodes"]
+        }
+        self.assertIn("Skills Audit", created_names)
+        self.assertIn("Transferable Skills", created_names)
 
     def test_project_archive_review_apply_allows_edit_and_recheck(self):
         edited_updates = [
@@ -1183,6 +1515,76 @@ class GraphWorkspaceServiceTests(unittest.TestCase):
         self.assertIn("triage", out)
         self.assertTrue(out["triage"]["enabled"])
 
+    def test_project_wrapper_respond_includes_input_capture_and_monitor(self):
+        def fake_model_resolver(model_path: str):
+            token = str(model_path or "").strip()
+            if "qwen2.5-7b-instruct" in token:
+                def _run(_: str) -> str:
+                    return json.dumps(
+                        {
+                            "summary": "Structured wrapper input captured.",
+                            "archive_updates": [
+                                {
+                                    "entity": "wrapper_input",
+                                    "field": "intent",
+                                    "operation": "append",
+                                    "value": "Need a concise action plan.",
+                                    "reason": "Primary request extracted from chat input.",
+                                    "source": "wrapper_test",
+                                    "confidence": 0.81,
+                                    "tags": ["wrapper", "intent"],
+                                }
+                            ],
+                        },
+                        ensure_ascii=False,
+                    )
+
+                return _run
+            if "mistral-7b-instruct-v0.3" in token:
+                def _run(prompt: str) -> str:
+                    match = re.search(r'"node_id":\s*(\d+)', prompt)
+                    node_id = int(match.group(1)) if match else 0
+                    return json.dumps(
+                        {
+                            "node_patches": (
+                                [
+                                    {
+                                        "node_id": node_id,
+                                        "summary": "Wrapper monitor note.",
+                                        "confidence": 0.71,
+                                        "reason": "Keep wrapper context concise.",
+                                    }
+                                ]
+                                if node_id > 0
+                                else []
+                            ),
+                            "edge_patches": [],
+                        },
+                        ensure_ascii=False,
+                    )
+
+                return _run
+            return None
+
+        svc = GraphWorkspaceService(
+            use_env_adapter=False,
+            enable_living_system=False,
+            model_llm_resolver=fake_model_resolver,
+        )
+        out = svc.project_wrapper_respond(
+            {
+                "user_id": "u_wrap_chain",
+                "session_id": "s_wrap_chain",
+                "message": "Give me one concise next step.",
+                "use_memory": False,
+                "store_interaction": True,
+            }
+        )
+        self.assertTrue(out["input_extraction"]["enabled"])
+        self.assertTrue(out["input_extraction"]["graph_binding"]["attached"])
+        self.assertTrue(out["graph_monitor"]["attached"])
+        self.assertGreater(int(out["graph_monitor"].get("session_node_id", 0)), 0)
+
     def test_project_wrapper_respond_creates_subject_branch_and_dialect_dictionary(self):
         out = self.svc.project_wrapper_respond(
             {
@@ -1275,6 +1677,10 @@ class GraphWorkspaceServiceTests(unittest.TestCase):
         self.assertIn("capabilities", manifest)
         self.assertGreaterEqual(len(manifest["capabilities"]), 1)
         self.assertIn("actions_allowed", manifest)
+        self.assertIn("actions", manifest)
+        self.assertGreaterEqual(len(manifest["actions"]), 1)
+        self.assertIn("summary", manifest)
+        self.assertGreaterEqual(int(manifest["summary"].get("action_count", 0)), 1)
 
         out = self.svc.project_integration_layer_invoke(
             {
@@ -1299,6 +1705,10 @@ class GraphWorkspaceServiceTests(unittest.TestCase):
         self.assertIn("structured_result", out)
         triage = (out.get("structured_result", {}) or {}).get("triage", {})
         self.assertTrue(triage.get("enabled"))
+        self.assertIn("summary", out)
+        self.assertEqual(str(out["summary"].get("action", "")), "wrapper.respond")
+        self.assertIn("execution", out)
+        self.assertEqual(str(out["execution"].get("action", "")), "wrapper.respond")
 
 
 if __name__ == "__main__":

@@ -227,6 +227,36 @@ class GraphApiTests(unittest.TestCase):
             self.assertIsNotNone(engine.graph_adapter)
             self.assertIsInstance(engine.graph_adapter, JsonGraphDBAdapter)
 
+    def test_build_graph_engine_from_env_autoloads_existing_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_path = Path(tmpdir) / "graph.json"
+            adapter = JsonGraphDBAdapter(snapshot_path)
+            engine_a = GraphEngine(graph_adapter=adapter)
+            api_a = GraphAPI(engine_a)
+            node = api_a.create_company(
+                name="Autoload Labs",
+                industry="Systems",
+                description="Persisted company for startup reload.",
+            )
+            self.assertTrue(api_a.persist())
+
+            with patch.dict(
+                "os.environ",
+                {
+                    "AUTOGRAPH_STORAGE_ADAPTER": "json",
+                    "AUTOGRAPH_JSON_ENABLE": "1",
+                    "AUTOGRAPH_JSON_PATH": str(snapshot_path),
+                    "AUTOGRAPH_NEO4J_ENABLE": "0",
+                    "AUTOGRAPH_AUTO_LOAD_ON_START": "1",
+                },
+                clear=False,
+            ):
+                engine_b = build_graph_engine_from_env()
+
+            loaded_node = engine_b.get_node(node.id)
+            self.assertIsNotNone(loaded_node)
+            self.assertEqual(str(loaded_node.attributes.get("name", "")), "Autoload Labs")
+
 
 if __name__ == "__main__":
     unittest.main()

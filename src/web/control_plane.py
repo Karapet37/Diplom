@@ -20,6 +20,9 @@ _GRAPH_MUTATION_PATHS = {
     "/api/graph/node",
     "/api/graph/node/update",
     "/api/graph/node/delete",
+    "/api/graph/foundation/create",
+    "/api/graph/node/assist",
+    "/api/graph/edge/assist",
     "/api/graph/edge",
     "/api/graph/edge/update",
     "/api/graph/edge/delete",
@@ -77,7 +80,6 @@ class ControlPlaneFlags:
     allow_graph_writes: bool = True
     allow_project_demo: bool = True
     allow_project_daily: bool = True
-    allow_autoruns_import: bool = True
     allow_client_introspection: bool = True
     allow_living_file_ops: bool = True
     allow_knowledge_mutations: bool = True
@@ -90,7 +92,6 @@ class ControlPlaneFlags:
             "allow_graph_writes": bool(self.allow_graph_writes),
             "allow_project_demo": bool(self.allow_project_demo),
             "allow_project_daily": bool(self.allow_project_daily),
-            "allow_autoruns_import": bool(self.allow_autoruns_import),
             "allow_client_introspection": bool(self.allow_client_introspection),
             "allow_living_file_ops": bool(self.allow_living_file_ops),
             "allow_knowledge_mutations": bool(self.allow_knowledge_mutations),
@@ -115,7 +116,6 @@ class RuntimeControlPlane:
             allow_graph_writes=_bool_env("CONTROL_ALLOW_GRAPH_WRITES", True),
             allow_project_demo=_bool_env("CONTROL_ALLOW_PROJECT_DEMO", True),
             allow_project_daily=_bool_env("CONTROL_ALLOW_PROJECT_DAILY", True),
-            allow_autoruns_import=_bool_env("CONTROL_ALLOW_AUTORUNS_IMPORT", True),
             allow_client_introspection=_bool_env("CONTROL_ALLOW_CLIENT_INTROSPECTION", True),
             allow_living_file_ops=_bool_env("CONTROL_ALLOW_LIVING_FILE_OPS", True),
             allow_knowledge_mutations=_bool_env("CONTROL_ALLOW_KNOWLEDGE_MUTATIONS", True),
@@ -197,9 +197,6 @@ class RuntimeControlPlane:
             if not flags.allow_project_daily and req_path == "/api/project/daily-mode":
                 return False, "project_daily_disabled"
 
-            if not flags.allow_autoruns_import and req_path == "/api/project/autoruns/import":
-                return False, "autoruns_import_disabled"
-
             if not flags.allow_client_introspection and req_path == "/api/client/introspect":
                 return False, "client_introspection_disabled"
 
@@ -211,6 +208,9 @@ class RuntimeControlPlane:
 
             if not flags.allow_prompt_execution and req_path in {
                 "/api/living/prompt/run",
+                "/api/graph/foundation/create",
+                "/api/graph/node/assist",
+                "/api/graph/edge/assist",
                 "/api/project/llm/debate",
                 "/api/project/archive/chat",
                 "/api/project/graph-rag/query",

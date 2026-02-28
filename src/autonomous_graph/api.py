@@ -21,6 +21,18 @@ def _bool_env(name: str, default: bool) -> bool:
     return value not in {"0", "false", "no", "off"}
 
 
+def _autoload_engine(engine: GraphEngine) -> GraphEngine:
+    if engine.graph_adapter is None:
+        return engine
+    if not _bool_env("AUTOGRAPH_AUTO_LOAD_ON_START", True):
+        return engine
+    try:
+        engine.load_from_adapter()
+    except Exception:
+        pass
+    return engine
+
+
 def build_graph_engine_from_env() -> GraphEngine:
     """
     Build GraphEngine with storage adapter from environment.
@@ -46,7 +58,7 @@ def build_graph_engine_from_env() -> GraphEngine:
                     password=password,
                     database=database,
                 )
-                return GraphEngine(graph_adapter=adapter)
+                return _autoload_engine(GraphEngine(graph_adapter=adapter))
             except Exception:
                 pass
 
@@ -54,7 +66,7 @@ def build_graph_engine_from_env() -> GraphEngine:
     if json_allowed and _bool_env("AUTOGRAPH_JSON_ENABLE", True):
         path = os.getenv("AUTOGRAPH_JSON_PATH", "data/autonomous_graph_snapshot.json").strip()
         adapter = JsonGraphDBAdapter(path)
-        return GraphEngine(graph_adapter=adapter)
+        return _autoload_engine(GraphEngine(graph_adapter=adapter))
 
     return GraphEngine()
 

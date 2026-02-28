@@ -1,0 +1,4240 @@
+{
+  "meta": {
+    "created_at": 1772275469.3279963,
+    "label": "unit_test",
+    "user_id": "u_backup",
+    "policy": {
+      "mode": "assisted_autonomy",
+      "trusted_sessions": [],
+      "trusted_users": [
+        "u_backup"
+      ],
+      "allow_apply_for_actions": [
+        "backup_restore"
+      ],
+      "updated_at": 1772275469.3262687
+    }
+  },
+  "graph": {
+    "nodes": {
+      "1": {
+        "type": "domain",
+        "attributes": {
+          "name": "Mathematics",
+          "description": "Foundational domain: Mathematics. Studies quantity, structure, change, space, uncertainty and proof; provides formal language for precise reasoning across sciences and engineering.",
+          "history_intro": "From Babylonian and Egyptian arithmetic through Greek axiomatic geometry, mathematics expanded with algebra, calculus, probability, modern logic and abstract structures in the 19th-20th centuries.",
+          "connections": [
+            "Physics",
+            "Computer Science",
+            "Economics",
+            "Philosophy (logic)",
+            "Engineering"
+          ],
+          "usage": [
+            "Modeling and simulation",
+            "Cryptography and security",
+            "Data analysis and statistics",
+            "Optimization and control systems",
+            "Machine learning foundations"
+          ]
+        },
+        "state": {}
+      },
+      "2": {
+        "type": "concept",
+        "attributes": {
+          "name": "Algebra",
+          "domain": "Mathematics",
+          "description": "Core concept in Mathematics",
+          "concept_id": 943206752
+        },
+        "state": {}
+      },
+      "3": {
+        "type": "concept",
+        "attributes": {
+          "name": "Calculus",
+          "domain": "Mathematics",
+          "description": "Core concept in Mathematics",
+          "concept_id": 985577641
+        },
+        "state": {}
+      },
+      "4": {
+        "type": "concept",
+        "attributes": {
+          "name": "Geometry",
+          "domain": "Mathematics",
+          "description": "Core concept in Mathematics",
+          "concept_id": 909549313
+        },
+        "state": {}
+      },
+      "5": {
+        "type": "concept",
+        "attributes": {
+          "name": "Probability",
+          "domain": "Mathematics",
+          "description": "Core concept in Mathematics",
+          "concept_id": 902286592
+        },
+        "state": {}
+      },
+      "6": {
+        "type": "concept",
+        "attributes": {
+          "name": "Logic",
+          "domain": "Mathematics",
+          "description": "Core concept in Mathematics",
+          "concept_id": 962808508
+        },
+        "state": {}
+      },
+      "7": {
+        "type": "domain",
+        "attributes": {
+          "name": "Physics",
+          "description": "Foundational domain: Physics. Explains matter, energy, motion and interactions from subatomic to cosmological scales using theory, experiment and mathematical models.",
+          "history_intro": "Classical mechanics and electromagnetism were unified in early modern science; relativity and quantum theory transformed 20th-century understanding of space, time and microscopic behavior.",
+          "connections": [
+            "Mathematics",
+            "Engineering",
+            "Computer Science (simulation)",
+            "Chemistry",
+            "Philosophy of science"
+          ],
+          "usage": [
+            "Energy systems and electronics",
+            "Materials and semiconductor design",
+            "Medical imaging technologies",
+            "Space and satellite systems",
+            "Climate and environmental modeling"
+          ]
+        },
+        "state": {}
+      },
+      "8": {
+        "type": "concept",
+        "attributes": {
+          "name": "Mechanics",
+          "domain": "Physics",
+          "description": "Core concept in Physics",
+          "concept_id": 906989685
+        },
+        "state": {}
+      },
+      "9": {
+        "type": "concept",
+        "attributes": {
+          "name": "Energy",
+          "domain": "Physics",
+          "description": "Core concept in Physics",
+          "concept_id": 983598496
+        },
+        "state": {}
+      },
+      "10": {
+        "type": "concept",
+        "attributes": {
+          "name": "Thermodynamics",
+          "domain": "Physics",
+          "description": "Core concept in Physics",
+          "concept_id": 979503805
+        },
+        "state": {}
+      },
+      "11": {
+        "type": "concept",
+        "attributes": {
+          "name": "Relativity",
+          "domain": "Physics",
+          "description": "Core concept in Physics",
+          "concept_id": 937765351
+        },
+        "state": {}
+      },
+      "12": {
+        "type": "concept",
+        "attributes": {
+          "name": "Quantum Mechanics",
+          "domain": "Physics",
+          "description": "Core concept in Physics",
+          "concept_id": 913239535
+        },
+        "state": {}
+      },
+      "13": {
+        "type": "domain",
+        "attributes": {
+          "name": "Biology",
+          "description": "Foundational domain: Biology. Studies living systems, from molecular mechanisms and cells to organisms, ecosystems and evolution.",
+          "history_intro": "Natural history evolved into modern biology through cell theory, Darwinian evolution, Mendelian genetics and molecular biology, then expanded with genomics and systems biology.",
+          "connections": [
+            "Chemistry",
+            "Medicine",
+            "Psychology and neuroscience",
+            "Ecology and environmental science",
+            "Computer Science (bioinformatics)"
+          ],
+          "usage": [
+            "Healthcare and diagnostics",
+            "Drug discovery and biotechnology",
+            "Agriculture and food systems",
+            "Conservation and ecosystem management",
+            "Public health planning"
+          ]
+        },
+        "state": {}
+      },
+      "14": {
+        "type": "concept",
+        "attributes": {
+          "name": "Cell",
+          "domain": "Biology",
+          "description": "Core concept in Biology",
+          "concept_id": 961642916
+        },
+        "state": {}
+      },
+      "15": {
+        "type": "concept",
+        "attributes": {
+          "name": "Genetics",
+          "domain": "Biology",
+          "description": "Core concept in Biology",
+          "concept_id": 939276906
+        },
+        "state": {}
+      },
+      "16": {
+        "type": "concept",
+        "attributes": {
+          "name": "Evolution",
+          "domain": "Biology",
+          "description": "Core concept in Biology",
+          "concept_id": 921562753
+        },
+        "state": {}
+      },
+      "17": {
+        "type": "concept",
+        "attributes": {
+          "name": "Ecology",
+          "domain": "Biology",
+          "description": "Core concept in Biology",
+          "concept_id": 946330406
+        },
+        "state": {}
+      },
+      "18": {
+        "type": "concept",
+        "attributes": {
+          "name": "Physiology",
+          "domain": "Biology",
+          "description": "Core concept in Biology",
+          "concept_id": 918225194
+        },
+        "state": {}
+      },
+      "19": {
+        "type": "domain",
+        "attributes": {
+          "name": "Computer Science",
+          "description": "Foundational domain: Computer Science. Studies computation, algorithms, data, software systems and machine intelligence.",
+          "history_intro": "From formal computability theory and early programmable machines, the field expanded into operating systems, networks, databases, software engineering, AI and modern distributed platforms.",
+          "connections": [
+            "Mathematics",
+            "Linguistics (NLP)",
+            "Psychology (cognition models)",
+            "Economics (digital markets)",
+            "Engineering"
+          ],
+          "usage": [
+            "Software and web platforms",
+            "Cybersecurity and infrastructure",
+            "Data platforms and analytics",
+            "Automation and robotics",
+            "AI systems and decision support"
+          ]
+        },
+        "state": {}
+      },
+      "20": {
+        "type": "concept",
+        "attributes": {
+          "name": "Algorithms",
+          "domain": "Computer Science",
+          "description": "Core concept in Computer Science",
+          "concept_id": 986435497
+        },
+        "state": {}
+      },
+      "21": {
+        "type": "concept",
+        "attributes": {
+          "name": "Data Structures",
+          "domain": "Computer Science",
+          "description": "Core concept in Computer Science",
+          "concept_id": 913092638
+        },
+        "state": {}
+      },
+      "22": {
+        "type": "concept",
+        "attributes": {
+          "name": "Databases",
+          "domain": "Computer Science",
+          "description": "Core concept in Computer Science",
+          "concept_id": 915238330
+        },
+        "state": {}
+      },
+      "23": {
+        "type": "concept",
+        "attributes": {
+          "name": "Networks",
+          "domain": "Computer Science",
+          "description": "Core concept in Computer Science",
+          "concept_id": 965914885
+        },
+        "state": {}
+      },
+      "24": {
+        "type": "concept",
+        "attributes": {
+          "name": "Machine Learning",
+          "domain": "Computer Science",
+          "description": "Core concept in Computer Science",
+          "concept_id": 930743925
+        },
+        "state": {}
+      },
+      "25": {
+        "type": "domain",
+        "attributes": {
+          "name": "Philosophy",
+          "description": "Foundational domain: Philosophy. Examines knowledge, reality, reasoning, ethics and meaning; clarifies assumptions and conceptual frameworks behind all disciplines.",
+          "history_intro": "Developed from ancient Greek, Indian and Chinese traditions, then advanced through medieval scholasticism, modern rationalism/empiricism and contemporary analytic and continental schools.",
+          "connections": [
+            "Theology",
+            "Mathematics (logic and foundations)",
+            "Psychology (mind and cognition)",
+            "Sociology (ethics and institutions)",
+            "Computer Science (AI ethics)"
+          ],
+          "usage": [
+            "Ethical decision frameworks",
+            "Argument analysis and critical thinking",
+            "Policy and governance principles",
+            "Scientific methodology critique",
+            "AI alignment and responsible design"
+          ]
+        },
+        "state": {}
+      },
+      "26": {
+        "type": "concept",
+        "attributes": {
+          "name": "Ethics",
+          "domain": "Philosophy",
+          "description": "Core concept in Philosophy",
+          "concept_id": 957547867
+        },
+        "state": {}
+      },
+      "27": {
+        "type": "concept",
+        "attributes": {
+          "name": "Epistemology",
+          "domain": "Philosophy",
+          "description": "Core concept in Philosophy",
+          "concept_id": 963068110
+        },
+        "state": {}
+      },
+      "28": {
+        "type": "concept",
+        "attributes": {
+          "name": "Metaphysics",
+          "domain": "Philosophy",
+          "description": "Core concept in Philosophy",
+          "concept_id": 962312298
+        },
+        "state": {}
+      },
+      "29": {
+        "type": "concept",
+        "attributes": {
+          "name": "Ontology",
+          "domain": "Philosophy",
+          "description": "Core concept in Philosophy",
+          "concept_id": 903479359
+        },
+        "state": {}
+      },
+      "30": {
+        "type": "concept",
+        "attributes": {
+          "name": "Reason",
+          "domain": "Philosophy",
+          "description": "Core concept in Philosophy",
+          "concept_id": 931923379
+        },
+        "state": {}
+      },
+      "31": {
+        "type": "domain",
+        "attributes": {
+          "name": "Psychology",
+          "description": "Foundational domain: Psychology. Studies behavior, cognition, emotion, motivation and mental health at individual and group levels.",
+          "history_intro": "Emerging from philosophy and physiology, psychology became an experimental science in the 19th century and later integrated behaviorist, cognitive, social and clinical approaches.",
+          "connections": [
+            "Biology and neuroscience",
+            "Sociology",
+            "Linguistics",
+            "Economics (behavioral economics)",
+            "Computer Science (human-computer interaction)"
+          ],
+          "usage": [
+            "Mental health interventions",
+            "Education and learning design",
+            "Workplace and team performance",
+            "Product UX and behavior modeling",
+            "Personal development and coaching"
+          ]
+        },
+        "state": {}
+      },
+      "32": {
+        "type": "concept",
+        "attributes": {
+          "name": "Cognition",
+          "domain": "Psychology",
+          "description": "Core concept in Psychology",
+          "concept_id": 906620164
+        },
+        "state": {}
+      },
+      "33": {
+        "type": "concept",
+        "attributes": {
+          "name": "Memory",
+          "domain": "Psychology",
+          "description": "Core concept in Psychology",
+          "concept_id": 953205632
+        },
+        "state": {}
+      },
+      "34": {
+        "type": "concept",
+        "attributes": {
+          "name": "Emotion",
+          "domain": "Psychology",
+          "description": "Core concept in Psychology",
+          "concept_id": 918882455
+        },
+        "state": {}
+      },
+      "35": {
+        "type": "concept",
+        "attributes": {
+          "name": "Behavior",
+          "domain": "Psychology",
+          "description": "Core concept in Psychology",
+          "concept_id": 906682675
+        },
+        "state": {}
+      },
+      "36": {
+        "type": "concept",
+        "attributes": {
+          "name": "Motivation",
+          "domain": "Psychology",
+          "description": "Core concept in Psychology",
+          "concept_id": 962969968
+        },
+        "state": {}
+      },
+      "37": {
+        "type": "domain",
+        "attributes": {
+          "name": "Sociology",
+          "description": "Foundational domain: Sociology. Studies social structures, institutions, norms and collective behavior in communities and societies.",
+          "history_intro": "Formed in the 19th century as industrialization changed social life; major traditions include structural, interpretive and critical approaches to institutions and inequality.",
+          "connections": [
+            "Psychology",
+            "Economics",
+            "Political science",
+            "Anthropology",
+            "Linguistics (discourse and identity)"
+          ],
+          "usage": [
+            "Public policy analysis",
+            "Community and organizational design",
+            "Risk and inequality assessment",
+            "Media and culture research",
+            "Social impact evaluation"
+          ]
+        },
+        "state": {}
+      },
+      "38": {
+        "type": "concept",
+        "attributes": {
+          "name": "Society",
+          "domain": "Sociology",
+          "description": "Core concept in Sociology",
+          "concept_id": 972558374
+        },
+        "state": {}
+      },
+      "39": {
+        "type": "concept",
+        "attributes": {
+          "name": "Culture",
+          "domain": "Sociology",
+          "description": "Core concept in Sociology",
+          "concept_id": 966956223
+        },
+        "state": {}
+      },
+      "40": {
+        "type": "concept",
+        "attributes": {
+          "name": "Institutions",
+          "domain": "Sociology",
+          "description": "Core concept in Sociology",
+          "concept_id": 902257008
+        },
+        "state": {}
+      },
+      "41": {
+        "type": "concept",
+        "attributes": {
+          "name": "Norms",
+          "domain": "Sociology",
+          "description": "Core concept in Sociology",
+          "concept_id": 964092459
+        },
+        "state": {}
+      },
+      "42": {
+        "type": "concept",
+        "attributes": {
+          "name": "Social Structure",
+          "domain": "Sociology",
+          "description": "Core concept in Sociology",
+          "concept_id": 928474730
+        },
+        "state": {}
+      },
+      "43": {
+        "type": "domain",
+        "attributes": {
+          "name": "Theology",
+          "description": "Foundational domain: Theology. Studies religious beliefs, doctrines, interpretation traditions and spiritual worldviews.",
+          "history_intro": "Built through scriptural interpretation and philosophical reflection in Abrahamic and other traditions; modern theology engages comparative religion and contemporary ethical questions.",
+          "connections": [
+            "Philosophy",
+            "History",
+            "Sociology of religion",
+            "Linguistics (text interpretation)",
+            "Ethics"
+          ],
+          "usage": [
+            "Moral and spiritual reflection",
+            "Comparative religion studies",
+            "Cultural and historical interpretation",
+            "Dialogue across worldviews",
+            "Community guidance frameworks"
+          ]
+        },
+        "state": {}
+      },
+      "44": {
+        "type": "concept",
+        "attributes": {
+          "name": "Faith",
+          "domain": "Theology",
+          "description": "Core concept in Theology",
+          "concept_id": 915226218
+        },
+        "state": {}
+      },
+      "45": {
+        "type": "concept",
+        "attributes": {
+          "name": "Doctrine",
+          "domain": "Theology",
+          "description": "Core concept in Theology",
+          "concept_id": 915959671
+        },
+        "state": {}
+      },
+      "46": {
+        "type": "concept",
+        "attributes": {
+          "name": "Hermeneutics",
+          "domain": "Theology",
+          "description": "Core concept in Theology",
+          "concept_id": 937247902
+        },
+        "state": {}
+      },
+      "47": {
+        "type": "concept",
+        "attributes": {
+          "name": "Comparative Religion",
+          "domain": "Theology",
+          "description": "Core concept in Theology",
+          "concept_id": 916183587
+        },
+        "state": {}
+      },
+      "48": {
+        "type": "concept",
+        "attributes": {
+          "name": "Theodicy",
+          "domain": "Theology",
+          "description": "Core concept in Theology",
+          "concept_id": 952432413
+        },
+        "state": {}
+      },
+      "49": {
+        "type": "domain",
+        "attributes": {
+          "name": "Economics",
+          "description": "Foundational domain: Economics. Studies production, exchange, incentives, resource allocation and market dynamics under scarcity.",
+          "history_intro": "From classical political economy through marginal analysis and macroeconomics, the field diversified into game theory, econometrics, behavioral and institutional economics.",
+          "connections": [
+            "Mathematics and statistics",
+            "Sociology",
+            "Political science",
+            "Psychology (decision making)",
+            "Computer Science (platform economics)"
+          ],
+          "usage": [
+            "Business strategy and forecasting",
+            "Policy and regulation analysis",
+            "Market and pricing models",
+            "Development and welfare planning",
+            "Resource optimization decisions"
+          ]
+        },
+        "state": {}
+      },
+      "50": {
+        "type": "concept",
+        "attributes": {
+          "name": "Market",
+          "domain": "Economics",
+          "description": "Core concept in Economics",
+          "concept_id": 964674805
+        },
+        "state": {}
+      },
+      "51": {
+        "type": "concept",
+        "attributes": {
+          "name": "Demand",
+          "domain": "Economics",
+          "description": "Core concept in Economics",
+          "concept_id": 909015501
+        },
+        "state": {}
+      },
+      "52": {
+        "type": "concept",
+        "attributes": {
+          "name": "Supply",
+          "domain": "Economics",
+          "description": "Core concept in Economics",
+          "concept_id": 912325042
+        },
+        "state": {}
+      },
+      "53": {
+        "type": "concept",
+        "attributes": {
+          "name": "Capital",
+          "domain": "Economics",
+          "description": "Core concept in Economics",
+          "concept_id": 907567139
+        },
+        "state": {}
+      },
+      "54": {
+        "type": "concept",
+        "attributes": {
+          "name": "Trade",
+          "domain": "Economics",
+          "description": "Core concept in Economics",
+          "concept_id": 939443615
+        },
+        "state": {}
+      },
+      "55": {
+        "type": "domain",
+        "attributes": {
+          "name": "Linguistics",
+          "description": "Foundational domain: Linguistics. Studies language structure and meaning across sounds, words, grammar and context; history spans ancient grammar traditions to modern structural, cognitive and computational approaches.",
+          "history_intro": "Early foundations appeared in Panini's grammar and Greek philology; modern linguistics expanded in the 19th-20th centuries via comparative, structural and generative schools.",
+          "connections": [
+            "Cognitive science",
+            "Psychology",
+            "Computer Science (NLP)",
+            "Philosophy of language",
+            "Sociology"
+          ],
+          "usage": [
+            "Natural language processing",
+            "Education and language learning",
+            "Speech technologies",
+            "Cross-cultural communication",
+            "Knowledge representation"
+          ]
+        },
+        "state": {}
+      },
+      "56": {
+        "type": "concept",
+        "attributes": {
+          "name": "Phonology",
+          "domain": "Linguistics",
+          "description": "Core concept in Linguistics",
+          "concept_id": 929135815
+        },
+        "state": {}
+      },
+      "57": {
+        "type": "concept",
+        "attributes": {
+          "name": "Morphology",
+          "domain": "Linguistics",
+          "description": "Core concept in Linguistics",
+          "concept_id": 917923091
+        },
+        "state": {}
+      },
+      "58": {
+        "type": "concept",
+        "attributes": {
+          "name": "Syntax",
+          "domain": "Linguistics",
+          "description": "Core concept in Linguistics",
+          "concept_id": 927132875
+        },
+        "state": {}
+      },
+      "59": {
+        "type": "concept",
+        "attributes": {
+          "name": "Semantics",
+          "domain": "Linguistics",
+          "description": "Core concept in Linguistics",
+          "concept_id": 980194631
+        },
+        "state": {}
+      },
+      "60": {
+        "type": "concept",
+        "attributes": {
+          "name": "Pragmatics",
+          "domain": "Linguistics",
+          "description": "Core concept in Linguistics",
+          "concept_id": 919679855
+        },
+        "state": {}
+      },
+      "61": {
+        "type": "domain",
+        "attributes": {
+          "name": "Arts",
+          "description": "Foundational domain: Arts. Studies and practices creative expression through sound, image, movement, text and performance, shaping symbolic meaning and human experience.",
+          "history_intro": "From prehistoric visual symbols and oral performance to classical, modern and digital art forms, artistic practice has co-evolved with technologies, institutions and cultural identities.",
+          "connections": [
+            "Psychology (emotion and perception)",
+            "Sociology (culture and identity)",
+            "Linguistics (poetics and narrative)",
+            "Technology (digital media)",
+            "Philosophy (aesthetics)"
+          ],
+          "usage": [
+            "Education and cultural literacy",
+            "Therapy and wellbeing support",
+            "Creative industries and media",
+            "Communication and storytelling",
+            "Public space and community identity"
+          ]
+        },
+        "state": {}
+      },
+      "62": {
+        "type": "concept",
+        "attributes": {
+          "name": "Music",
+          "domain": "Arts",
+          "description": "Core concept in Arts",
+          "concept_id": 952207659,
+          "aliases": [
+            "музыка",
+            "երաժշտություն",
+            "音樂",
+            "música",
+            "música"
+          ]
+        },
+        "state": {}
+      },
+      "63": {
+        "type": "concept",
+        "attributes": {
+          "name": "Film",
+          "domain": "Arts",
+          "description": "Core concept in Arts",
+          "concept_id": 947377770,
+          "aliases": [
+            "фильм",
+            "կինո",
+            "电影",
+            "película",
+            "filme"
+          ]
+        },
+        "state": {}
+      },
+      "64": {
+        "type": "concept",
+        "attributes": {
+          "name": "Painting",
+          "domain": "Arts",
+          "description": "Core concept in Arts",
+          "concept_id": 954562269
+        },
+        "state": {}
+      },
+      "65": {
+        "type": "concept",
+        "attributes": {
+          "name": "Poetry",
+          "domain": "Arts",
+          "description": "Core concept in Arts",
+          "concept_id": 974046731
+        },
+        "state": {}
+      },
+      "66": {
+        "type": "concept",
+        "attributes": {
+          "name": "Theater",
+          "domain": "Arts",
+          "description": "Core concept in Arts",
+          "concept_id": 919439703
+        },
+        "state": {}
+      },
+      "67": {
+        "type": "concept",
+        "attributes": {
+          "name": "chess",
+          "aliases": [
+            "шахматы",
+            "շախմատ",
+            "国际象棋",
+            "ajedrez",
+            "xadrez"
+          ],
+          "concept_id": 203,
+          "description": "Global concept catalog seed"
+        },
+        "state": {}
+      },
+      "68": {
+        "type": "concept",
+        "attributes": {
+          "name": "programming",
+          "aliases": [
+            "программирование",
+            "ծրագրավորում",
+            "编程",
+            "programación",
+            "programação"
+          ],
+          "concept_id": 204,
+          "description": "Global concept catalog seed"
+        },
+        "state": {}
+      },
+      "69": {
+        "type": "concept",
+        "attributes": {
+          "name": "business",
+          "aliases": [
+            "бизнес",
+            "բիզնես",
+            "商业",
+            "negocio",
+            "negócio"
+          ],
+          "concept_id": 205,
+          "description": "Global concept catalog seed"
+        },
+        "state": {}
+      },
+      "70": {
+        "type": "concept",
+        "attributes": {
+          "name": "freedom",
+          "aliases": [
+            "свобода",
+            "ազատություն",
+            "自由",
+            "libertad",
+            "liberdade"
+          ],
+          "concept_id": 206,
+          "description": "Global concept catalog seed"
+        },
+        "state": {}
+      },
+      "71": {
+        "type": "concept",
+        "attributes": {
+          "name": "jazz",
+          "aliases": [
+            "джаз",
+            "ջազ",
+            "爵士乐"
+          ],
+          "concept_id": 207,
+          "description": "Global concept catalog seed"
+        },
+        "state": {}
+      },
+      "72": {
+        "type": "concept",
+        "attributes": {
+          "name": "history",
+          "aliases": [
+            "история",
+            "պատմություն",
+            "历史",
+            "historia"
+          ],
+          "concept_id": 208,
+          "description": "Global concept catalog seed"
+        },
+        "state": {}
+      },
+      "73": {
+        "type": "generic",
+        "attributes": {
+          "user_id": "u_backup",
+          "name": "Backup anchor node",
+          "summary": "Anchor for backup restore test",
+          "namespace": "personal"
+        },
+        "state": {}
+      }
+    },
+    "edges": [
+      {
+        "from": 1,
+        "to": 2,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 1,
+        "to": 3,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 1,
+        "to": 4,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 1,
+        "to": 5,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 1,
+        "to": 6,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 7,
+        "to": 8,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 7,
+        "to": 9,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 7,
+        "to": 10,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 7,
+        "to": 11,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 7,
+        "to": 12,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 13,
+        "to": 14,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 13,
+        "to": 15,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 13,
+        "to": 16,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 13,
+        "to": 17,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 13,
+        "to": 18,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 19,
+        "to": 20,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 19,
+        "to": 21,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 19,
+        "to": 22,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 19,
+        "to": 23,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 19,
+        "to": 24,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 25,
+        "to": 26,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 25,
+        "to": 27,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 25,
+        "to": 28,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 25,
+        "to": 29,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 25,
+        "to": 30,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 31,
+        "to": 32,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 31,
+        "to": 33,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 31,
+        "to": 34,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 31,
+        "to": 35,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 31,
+        "to": 36,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 37,
+        "to": 38,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 37,
+        "to": 39,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 37,
+        "to": 40,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 37,
+        "to": 41,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 37,
+        "to": 42,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 43,
+        "to": 44,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 43,
+        "to": 45,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 43,
+        "to": 46,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 43,
+        "to": 47,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 43,
+        "to": 48,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 49,
+        "to": 50,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 49,
+        "to": 51,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 49,
+        "to": 52,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 49,
+        "to": 53,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 49,
+        "to": 54,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 55,
+        "to": 56,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 55,
+        "to": 57,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 55,
+        "to": 58,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 55,
+        "to": 59,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 55,
+        "to": 60,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 61,
+        "to": 62,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 61,
+        "to": 63,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 61,
+        "to": 64,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 61,
+        "to": 65,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 61,
+        "to": 66,
+        "relation_type": "contains_concept",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      },
+      {
+        "from": 61,
+        "to": 62,
+        "relation_type": "includes",
+        "weight": 0.78,
+        "direction": "directed",
+        "logic_rule": "catalog_seed",
+        "metadata": {}
+      },
+      {
+        "from": 61,
+        "to": 67,
+        "relation_type": "includes",
+        "weight": 0.78,
+        "direction": "directed",
+        "logic_rule": "catalog_seed",
+        "metadata": {}
+      },
+      {
+        "from": 61,
+        "to": 68,
+        "relation_type": "includes",
+        "weight": 0.78,
+        "direction": "directed",
+        "logic_rule": "catalog_seed",
+        "metadata": {}
+      },
+      {
+        "from": 61,
+        "to": 69,
+        "relation_type": "includes",
+        "weight": 0.78,
+        "direction": "directed",
+        "logic_rule": "catalog_seed",
+        "metadata": {}
+      },
+      {
+        "from": 61,
+        "to": 70,
+        "relation_type": "includes",
+        "weight": 0.78,
+        "direction": "directed",
+        "logic_rule": "catalog_seed",
+        "metadata": {}
+      },
+      {
+        "from": 61,
+        "to": 71,
+        "relation_type": "includes",
+        "weight": 0.78,
+        "direction": "directed",
+        "logic_rule": "catalog_seed",
+        "metadata": {}
+      },
+      {
+        "from": 61,
+        "to": 72,
+        "relation_type": "includes",
+        "weight": 0.78,
+        "direction": "directed",
+        "logic_rule": "catalog_seed",
+        "metadata": {}
+      },
+      {
+        "from": 61,
+        "to": 63,
+        "relation_type": "includes",
+        "weight": 0.78,
+        "direction": "directed",
+        "logic_rule": "catalog_seed",
+        "metadata": {}
+      },
+      {
+        "from": 1,
+        "to": 19,
+        "relation_type": "enables",
+        "weight": 0.95,
+        "direction": "directed",
+        "logic_rule": "foundation_relations",
+        "metadata": {}
+      },
+      {
+        "from": 1,
+        "to": 7,
+        "relation_type": "supports",
+        "weight": 0.9,
+        "direction": "directed",
+        "logic_rule": "foundation_relations",
+        "metadata": {}
+      },
+      {
+        "from": 31,
+        "to": 37,
+        "relation_type": "influences",
+        "weight": 0.82,
+        "direction": "directed",
+        "logic_rule": "foundation_relations",
+        "metadata": {}
+      },
+      {
+        "from": 55,
+        "to": 19,
+        "relation_type": "enables",
+        "weight": 0.76,
+        "direction": "directed",
+        "logic_rule": "foundation_relations",
+        "metadata": {}
+      },
+      {
+        "from": 25,
+        "to": 43,
+        "relation_type": "interacts_with",
+        "weight": 0.67,
+        "direction": "directed",
+        "logic_rule": "foundation_relations",
+        "metadata": {}
+      },
+      {
+        "from": 49,
+        "to": 37,
+        "relation_type": "depends_on",
+        "weight": 0.72,
+        "direction": "directed",
+        "logic_rule": "foundation_relations",
+        "metadata": {}
+      },
+      {
+        "from": 62,
+        "to": 31,
+        "relation_type": "affects",
+        "weight": 0.73,
+        "direction": "directed",
+        "logic_rule": "foundation_relations",
+        "metadata": {}
+      }
+    ]
+  },
+  "events": [
+    {
+      "id": 1,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3248587,
+      "payload": {
+        "node_id": 1,
+        "node_type": "domain",
+        "node": {
+          "id": 1,
+          "type": "domain",
+          "attributes": {
+            "name": "Mathematics",
+            "description": "Foundational domain: Mathematics. Studies quantity, structure, change, space, uncertainty and proof; provides formal language for precise reasoning across sciences and engineering.",
+            "history_intro": "From Babylonian and Egyptian arithmetic through Greek axiomatic geometry, mathematics expanded with algebra, calculus, probability, modern logic and abstract structures in the 19th-20th centuries.",
+            "connections": [
+              "Physics",
+              "Computer Science",
+              "Economics",
+              "Philosophy (logic)",
+              "Engineering"
+            ],
+            "usage": [
+              "Modeling and simulation",
+              "Cryptography and security",
+              "Data analysis and statistics",
+              "Optimization and control systems",
+              "Machine learning foundations"
+            ]
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 2,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3248734,
+      "payload": {
+        "node_id": 2,
+        "node_type": "concept",
+        "node": {
+          "id": 2,
+          "type": "concept",
+          "attributes": {
+            "name": "Algebra",
+            "domain": "Mathematics",
+            "description": "Core concept in Mathematics",
+            "concept_id": 943206752
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 3,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3248813,
+      "payload": {
+        "from": 1,
+        "to": 2,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 4,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3248873,
+      "payload": {
+        "node_id": 3,
+        "node_type": "concept",
+        "node": {
+          "id": 3,
+          "type": "concept",
+          "attributes": {
+            "name": "Calculus",
+            "domain": "Mathematics",
+            "description": "Core concept in Mathematics",
+            "concept_id": 985577641
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 5,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3248913,
+      "payload": {
+        "from": 1,
+        "to": 3,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 6,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3248963,
+      "payload": {
+        "node_id": 4,
+        "node_type": "concept",
+        "node": {
+          "id": 4,
+          "type": "concept",
+          "attributes": {
+            "name": "Geometry",
+            "domain": "Mathematics",
+            "description": "Core concept in Mathematics",
+            "concept_id": 909549313
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 7,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3249,
+      "payload": {
+        "from": 1,
+        "to": 4,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 8,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3249044,
+      "payload": {
+        "node_id": 5,
+        "node_type": "concept",
+        "node": {
+          "id": 5,
+          "type": "concept",
+          "attributes": {
+            "name": "Probability",
+            "domain": "Mathematics",
+            "description": "Core concept in Mathematics",
+            "concept_id": 902286592
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 9,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3249109,
+      "payload": {
+        "from": 1,
+        "to": 5,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 10,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3249156,
+      "payload": {
+        "node_id": 6,
+        "node_type": "concept",
+        "node": {
+          "id": 6,
+          "type": "concept",
+          "attributes": {
+            "name": "Logic",
+            "domain": "Mathematics",
+            "description": "Core concept in Mathematics",
+            "concept_id": 962808508
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 11,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3249187,
+      "payload": {
+        "from": 1,
+        "to": 6,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 12,
+      "event_type": "node_added",
+      "timestamp": 1772275469.324924,
+      "payload": {
+        "node_id": 7,
+        "node_type": "domain",
+        "node": {
+          "id": 7,
+          "type": "domain",
+          "attributes": {
+            "name": "Physics",
+            "description": "Foundational domain: Physics. Explains matter, energy, motion and interactions from subatomic to cosmological scales using theory, experiment and mathematical models.",
+            "history_intro": "Classical mechanics and electromagnetism were unified in early modern science; relativity and quantum theory transformed 20th-century understanding of space, time and microscopic behavior.",
+            "connections": [
+              "Mathematics",
+              "Engineering",
+              "Computer Science (simulation)",
+              "Chemistry",
+              "Philosophy of science"
+            ],
+            "usage": [
+              "Energy systems and electronics",
+              "Materials and semiconductor design",
+              "Medical imaging technologies",
+              "Space and satellite systems",
+              "Climate and environmental modeling"
+            ]
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 13,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3249295,
+      "payload": {
+        "node_id": 8,
+        "node_type": "concept",
+        "node": {
+          "id": 8,
+          "type": "concept",
+          "attributes": {
+            "name": "Mechanics",
+            "domain": "Physics",
+            "description": "Core concept in Physics",
+            "concept_id": 906989685
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 14,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3249383,
+      "payload": {
+        "from": 7,
+        "to": 8,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 15,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3249445,
+      "payload": {
+        "node_id": 9,
+        "node_type": "concept",
+        "node": {
+          "id": 9,
+          "type": "concept",
+          "attributes": {
+            "name": "Energy",
+            "domain": "Physics",
+            "description": "Core concept in Physics",
+            "concept_id": 983598496
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 16,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.324948,
+      "payload": {
+        "from": 7,
+        "to": 9,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 17,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3249528,
+      "payload": {
+        "node_id": 10,
+        "node_type": "concept",
+        "node": {
+          "id": 10,
+          "type": "concept",
+          "attributes": {
+            "name": "Thermodynamics",
+            "domain": "Physics",
+            "description": "Core concept in Physics",
+            "concept_id": 979503805
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 18,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3249562,
+      "payload": {
+        "from": 7,
+        "to": 10,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 19,
+      "event_type": "node_added",
+      "timestamp": 1772275469.324961,
+      "payload": {
+        "node_id": 11,
+        "node_type": "concept",
+        "node": {
+          "id": 11,
+          "type": "concept",
+          "attributes": {
+            "name": "Relativity",
+            "domain": "Physics",
+            "description": "Core concept in Physics",
+            "concept_id": 937765351
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 20,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3249645,
+      "payload": {
+        "from": 7,
+        "to": 11,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 21,
+      "event_type": "node_added",
+      "timestamp": 1772275469.324971,
+      "payload": {
+        "node_id": 12,
+        "node_type": "concept",
+        "node": {
+          "id": 12,
+          "type": "concept",
+          "attributes": {
+            "name": "Quantum Mechanics",
+            "domain": "Physics",
+            "description": "Core concept in Physics",
+            "concept_id": 913239535
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 22,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3249762,
+      "payload": {
+        "from": 7,
+        "to": 12,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 23,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3249817,
+      "payload": {
+        "node_id": 13,
+        "node_type": "domain",
+        "node": {
+          "id": 13,
+          "type": "domain",
+          "attributes": {
+            "name": "Biology",
+            "description": "Foundational domain: Biology. Studies living systems, from molecular mechanisms and cells to organisms, ecosystems and evolution.",
+            "history_intro": "Natural history evolved into modern biology through cell theory, Darwinian evolution, Mendelian genetics and molecular biology, then expanded with genomics and systems biology.",
+            "connections": [
+              "Chemistry",
+              "Medicine",
+              "Psychology and neuroscience",
+              "Ecology and environmental science",
+              "Computer Science (bioinformatics)"
+            ],
+            "usage": [
+              "Healthcare and diagnostics",
+              "Drug discovery and biotechnology",
+              "Agriculture and food systems",
+              "Conservation and ecosystem management",
+              "Public health planning"
+            ]
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 24,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3249888,
+      "payload": {
+        "node_id": 14,
+        "node_type": "concept",
+        "node": {
+          "id": 14,
+          "type": "concept",
+          "attributes": {
+            "name": "Cell",
+            "domain": "Biology",
+            "description": "Core concept in Biology",
+            "concept_id": 961642916
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 25,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3249924,
+      "payload": {
+        "from": 13,
+        "to": 14,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 26,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3249986,
+      "payload": {
+        "node_id": 15,
+        "node_type": "concept",
+        "node": {
+          "id": 15,
+          "type": "concept",
+          "attributes": {
+            "name": "Genetics",
+            "domain": "Biology",
+            "description": "Core concept in Biology",
+            "concept_id": 939276906
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 27,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3250022,
+      "payload": {
+        "from": 13,
+        "to": 15,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 28,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3250077,
+      "payload": {
+        "node_id": 16,
+        "node_type": "concept",
+        "node": {
+          "id": 16,
+          "type": "concept",
+          "attributes": {
+            "name": "Evolution",
+            "domain": "Biology",
+            "description": "Core concept in Biology",
+            "concept_id": 921562753
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 29,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3250115,
+      "payload": {
+        "from": 13,
+        "to": 16,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 30,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325017,
+      "payload": {
+        "node_id": 17,
+        "node_type": "concept",
+        "node": {
+          "id": 17,
+          "type": "concept",
+          "attributes": {
+            "name": "Ecology",
+            "domain": "Biology",
+            "description": "Core concept in Biology",
+            "concept_id": 946330406
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 31,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3250213,
+      "payload": {
+        "from": 13,
+        "to": 17,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 32,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3250272,
+      "payload": {
+        "node_id": 18,
+        "node_type": "concept",
+        "node": {
+          "id": 18,
+          "type": "concept",
+          "attributes": {
+            "name": "Physiology",
+            "domain": "Biology",
+            "description": "Core concept in Biology",
+            "concept_id": 918225194
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 33,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3250318,
+      "payload": {
+        "from": 13,
+        "to": 18,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 34,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3250377,
+      "payload": {
+        "node_id": 19,
+        "node_type": "domain",
+        "node": {
+          "id": 19,
+          "type": "domain",
+          "attributes": {
+            "name": "Computer Science",
+            "description": "Foundational domain: Computer Science. Studies computation, algorithms, data, software systems and machine intelligence.",
+            "history_intro": "From formal computability theory and early programmable machines, the field expanded into operating systems, networks, databases, software engineering, AI and modern distributed platforms.",
+            "connections": [
+              "Mathematics",
+              "Linguistics (NLP)",
+              "Psychology (cognition models)",
+              "Economics (digital markets)",
+              "Engineering"
+            ],
+            "usage": [
+              "Software and web platforms",
+              "Cybersecurity and infrastructure",
+              "Data platforms and analytics",
+              "Automation and robotics",
+              "AI systems and decision support"
+            ]
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 35,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325047,
+      "payload": {
+        "node_id": 20,
+        "node_type": "concept",
+        "node": {
+          "id": 20,
+          "type": "concept",
+          "attributes": {
+            "name": "Algorithms",
+            "domain": "Computer Science",
+            "description": "Core concept in Computer Science",
+            "concept_id": 986435497
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 36,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.325051,
+      "payload": {
+        "from": 19,
+        "to": 20,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 37,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3250604,
+      "payload": {
+        "node_id": 21,
+        "node_type": "concept",
+        "node": {
+          "id": 21,
+          "type": "concept",
+          "attributes": {
+            "name": "Data Structures",
+            "domain": "Computer Science",
+            "description": "Core concept in Computer Science",
+            "concept_id": 913092638
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 38,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3250644,
+      "payload": {
+        "from": 19,
+        "to": 21,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 39,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325072,
+      "payload": {
+        "node_id": 22,
+        "node_type": "concept",
+        "node": {
+          "id": 22,
+          "type": "concept",
+          "attributes": {
+            "name": "Databases",
+            "domain": "Computer Science",
+            "description": "Core concept in Computer Science",
+            "concept_id": 915238330
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 40,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3250759,
+      "payload": {
+        "from": 19,
+        "to": 22,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 41,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325083,
+      "payload": {
+        "node_id": 23,
+        "node_type": "concept",
+        "node": {
+          "id": 23,
+          "type": "concept",
+          "attributes": {
+            "name": "Networks",
+            "domain": "Computer Science",
+            "description": "Core concept in Computer Science",
+            "concept_id": 965914885
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 42,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.325087,
+      "payload": {
+        "from": 19,
+        "to": 23,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 43,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3250945,
+      "payload": {
+        "node_id": 24,
+        "node_type": "concept",
+        "node": {
+          "id": 24,
+          "type": "concept",
+          "attributes": {
+            "name": "Machine Learning",
+            "domain": "Computer Science",
+            "description": "Core concept in Computer Science",
+            "concept_id": 930743925
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 44,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.325099,
+      "payload": {
+        "from": 19,
+        "to": 24,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 45,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3251047,
+      "payload": {
+        "node_id": 25,
+        "node_type": "domain",
+        "node": {
+          "id": 25,
+          "type": "domain",
+          "attributes": {
+            "name": "Philosophy",
+            "description": "Foundational domain: Philosophy. Examines knowledge, reality, reasoning, ethics and meaning; clarifies assumptions and conceptual frameworks behind all disciplines.",
+            "history_intro": "Developed from ancient Greek, Indian and Chinese traditions, then advanced through medieval scholasticism, modern rationalism/empiricism and contemporary analytic and continental schools.",
+            "connections": [
+              "Theology",
+              "Mathematics (logic and foundations)",
+              "Psychology (mind and cognition)",
+              "Sociology (ethics and institutions)",
+              "Computer Science (AI ethics)"
+            ],
+            "usage": [
+              "Ethical decision frameworks",
+              "Argument analysis and critical thinking",
+              "Policy and governance principles",
+              "Scientific methodology critique",
+              "AI alignment and responsible design"
+            ]
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 46,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325113,
+      "payload": {
+        "node_id": 26,
+        "node_type": "concept",
+        "node": {
+          "id": 26,
+          "type": "concept",
+          "attributes": {
+            "name": "Ethics",
+            "domain": "Philosophy",
+            "description": "Core concept in Philosophy",
+            "concept_id": 957547867
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 47,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.325117,
+      "payload": {
+        "from": 25,
+        "to": 26,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 48,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3251302,
+      "payload": {
+        "node_id": 27,
+        "node_type": "concept",
+        "node": {
+          "id": 27,
+          "type": "concept",
+          "attributes": {
+            "name": "Epistemology",
+            "domain": "Philosophy",
+            "description": "Core concept in Philosophy",
+            "concept_id": 963068110
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 49,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3251345,
+      "payload": {
+        "from": 25,
+        "to": 27,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 50,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3251424,
+      "payload": {
+        "node_id": 28,
+        "node_type": "concept",
+        "node": {
+          "id": 28,
+          "type": "concept",
+          "attributes": {
+            "name": "Metaphysics",
+            "domain": "Philosophy",
+            "description": "Core concept in Philosophy",
+            "concept_id": 962312298
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 51,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3251467,
+      "payload": {
+        "from": 25,
+        "to": 28,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 52,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3251543,
+      "payload": {
+        "node_id": 29,
+        "node_type": "concept",
+        "node": {
+          "id": 29,
+          "type": "concept",
+          "attributes": {
+            "name": "Ontology",
+            "domain": "Philosophy",
+            "description": "Core concept in Philosophy",
+            "concept_id": 903479359
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 53,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3251584,
+      "payload": {
+        "from": 25,
+        "to": 29,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 54,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3251667,
+      "payload": {
+        "node_id": 30,
+        "node_type": "concept",
+        "node": {
+          "id": 30,
+          "type": "concept",
+          "attributes": {
+            "name": "Reason",
+            "domain": "Philosophy",
+            "description": "Core concept in Philosophy",
+            "concept_id": 931923379
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 55,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3251755,
+      "payload": {
+        "from": 25,
+        "to": 30,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 56,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3251812,
+      "payload": {
+        "node_id": 31,
+        "node_type": "domain",
+        "node": {
+          "id": 31,
+          "type": "domain",
+          "attributes": {
+            "name": "Psychology",
+            "description": "Foundational domain: Psychology. Studies behavior, cognition, emotion, motivation and mental health at individual and group levels.",
+            "history_intro": "Emerging from philosophy and physiology, psychology became an experimental science in the 19th century and later integrated behaviorist, cognitive, social and clinical approaches.",
+            "connections": [
+              "Biology and neuroscience",
+              "Sociology",
+              "Linguistics",
+              "Economics (behavioral economics)",
+              "Computer Science (human-computer interaction)"
+            ],
+            "usage": [
+              "Mental health interventions",
+              "Education and learning design",
+              "Workplace and team performance",
+              "Product UX and behavior modeling",
+              "Personal development and coaching"
+            ]
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 57,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3251898,
+      "payload": {
+        "node_id": 32,
+        "node_type": "concept",
+        "node": {
+          "id": 32,
+          "type": "concept",
+          "attributes": {
+            "name": "Cognition",
+            "domain": "Psychology",
+            "description": "Core concept in Psychology",
+            "concept_id": 906620164
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 58,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3251944,
+      "payload": {
+        "from": 31,
+        "to": 32,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 59,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3252022,
+      "payload": {
+        "node_id": 33,
+        "node_type": "concept",
+        "node": {
+          "id": 33,
+          "type": "concept",
+          "attributes": {
+            "name": "Memory",
+            "domain": "Psychology",
+            "description": "Core concept in Psychology",
+            "concept_id": 953205632
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 60,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3252063,
+      "payload": {
+        "from": 31,
+        "to": 33,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 61,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3252146,
+      "payload": {
+        "node_id": 34,
+        "node_type": "concept",
+        "node": {
+          "id": 34,
+          "type": "concept",
+          "attributes": {
+            "name": "Emotion",
+            "domain": "Psychology",
+            "description": "Core concept in Psychology",
+            "concept_id": 918882455
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 62,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.325219,
+      "payload": {
+        "from": 31,
+        "to": 34,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 63,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325227,
+      "payload": {
+        "node_id": 35,
+        "node_type": "concept",
+        "node": {
+          "id": 35,
+          "type": "concept",
+          "attributes": {
+            "name": "Behavior",
+            "domain": "Psychology",
+            "description": "Core concept in Psychology",
+            "concept_id": 906682675
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 64,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3252313,
+      "payload": {
+        "from": 31,
+        "to": 35,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 65,
+      "event_type": "node_added",
+      "timestamp": 1772275469.32524,
+      "payload": {
+        "node_id": 36,
+        "node_type": "concept",
+        "node": {
+          "id": 36,
+          "type": "concept",
+          "attributes": {
+            "name": "Motivation",
+            "domain": "Psychology",
+            "description": "Core concept in Psychology",
+            "concept_id": 962969968
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 66,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3252444,
+      "payload": {
+        "from": 31,
+        "to": 36,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 67,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3252504,
+      "payload": {
+        "node_id": 37,
+        "node_type": "domain",
+        "node": {
+          "id": 37,
+          "type": "domain",
+          "attributes": {
+            "name": "Sociology",
+            "description": "Foundational domain: Sociology. Studies social structures, institutions, norms and collective behavior in communities and societies.",
+            "history_intro": "Formed in the 19th century as industrialization changed social life; major traditions include structural, interpretive and critical approaches to institutions and inequality.",
+            "connections": [
+              "Psychology",
+              "Economics",
+              "Political science",
+              "Anthropology",
+              "Linguistics (discourse and identity)"
+            ],
+            "usage": [
+              "Public policy analysis",
+              "Community and organizational design",
+              "Risk and inequality assessment",
+              "Media and culture research",
+              "Social impact evaluation"
+            ]
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 68,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3252592,
+      "payload": {
+        "node_id": 38,
+        "node_type": "concept",
+        "node": {
+          "id": 38,
+          "type": "concept",
+          "attributes": {
+            "name": "Society",
+            "domain": "Sociology",
+            "description": "Core concept in Sociology",
+            "concept_id": 972558374
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 69,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.325264,
+      "payload": {
+        "from": 37,
+        "to": 38,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 70,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3252726,
+      "payload": {
+        "node_id": 39,
+        "node_type": "concept",
+        "node": {
+          "id": 39,
+          "type": "concept",
+          "attributes": {
+            "name": "Culture",
+            "domain": "Sociology",
+            "description": "Core concept in Sociology",
+            "concept_id": 966956223
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 71,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3252769,
+      "payload": {
+        "from": 37,
+        "to": 39,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 72,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325286,
+      "payload": {
+        "node_id": 40,
+        "node_type": "concept",
+        "node": {
+          "id": 40,
+          "type": "concept",
+          "attributes": {
+            "name": "Institutions",
+            "domain": "Sociology",
+            "description": "Core concept in Sociology",
+            "concept_id": 902257008
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 73,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3252904,
+      "payload": {
+        "from": 37,
+        "to": 40,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 74,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3252995,
+      "payload": {
+        "node_id": 41,
+        "node_type": "concept",
+        "node": {
+          "id": 41,
+          "type": "concept",
+          "attributes": {
+            "name": "Norms",
+            "domain": "Sociology",
+            "description": "Core concept in Sociology",
+            "concept_id": 964092459
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 75,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.325304,
+      "payload": {
+        "from": 37,
+        "to": 41,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 76,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325314,
+      "payload": {
+        "node_id": 42,
+        "node_type": "concept",
+        "node": {
+          "id": 42,
+          "type": "concept",
+          "attributes": {
+            "name": "Social Structure",
+            "domain": "Sociology",
+            "description": "Core concept in Sociology",
+            "concept_id": 928474730
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 77,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3253186,
+      "payload": {
+        "from": 37,
+        "to": 42,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 78,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3253248,
+      "payload": {
+        "node_id": 43,
+        "node_type": "domain",
+        "node": {
+          "id": 43,
+          "type": "domain",
+          "attributes": {
+            "name": "Theology",
+            "description": "Foundational domain: Theology. Studies religious beliefs, doctrines, interpretation traditions and spiritual worldviews.",
+            "history_intro": "Built through scriptural interpretation and philosophical reflection in Abrahamic and other traditions; modern theology engages comparative religion and contemporary ethical questions.",
+            "connections": [
+              "Philosophy",
+              "History",
+              "Sociology of religion",
+              "Linguistics (text interpretation)",
+              "Ethics"
+            ],
+            "usage": [
+              "Moral and spiritual reflection",
+              "Comparative religion studies",
+              "Cultural and historical interpretation",
+              "Dialogue across worldviews",
+              "Community guidance frameworks"
+            ]
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 79,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3253348,
+      "payload": {
+        "node_id": 44,
+        "node_type": "concept",
+        "node": {
+          "id": 44,
+          "type": "concept",
+          "attributes": {
+            "name": "Faith",
+            "domain": "Theology",
+            "description": "Core concept in Theology",
+            "concept_id": 915226218
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 80,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3253393,
+      "payload": {
+        "from": 43,
+        "to": 44,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 81,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325386,
+      "payload": {
+        "node_id": 45,
+        "node_type": "concept",
+        "node": {
+          "id": 45,
+          "type": "concept",
+          "attributes": {
+            "name": "Doctrine",
+            "domain": "Theology",
+            "description": "Core concept in Theology",
+            "concept_id": 915959671
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 82,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3253915,
+      "payload": {
+        "from": 43,
+        "to": 45,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 83,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325403,
+      "payload": {
+        "node_id": 46,
+        "node_type": "concept",
+        "node": {
+          "id": 46,
+          "type": "concept",
+          "attributes": {
+            "name": "Hermeneutics",
+            "domain": "Theology",
+            "description": "Core concept in Theology",
+            "concept_id": 937247902
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 84,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3254077,
+      "payload": {
+        "from": 43,
+        "to": 46,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 85,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3254185,
+      "payload": {
+        "node_id": 47,
+        "node_type": "concept",
+        "node": {
+          "id": 47,
+          "type": "concept",
+          "attributes": {
+            "name": "Comparative Religion",
+            "domain": "Theology",
+            "description": "Core concept in Theology",
+            "concept_id": 916183587
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 86,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3254237,
+      "payload": {
+        "from": 43,
+        "to": 47,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 87,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3254342,
+      "payload": {
+        "node_id": 48,
+        "node_type": "concept",
+        "node": {
+          "id": 48,
+          "type": "concept",
+          "attributes": {
+            "name": "Theodicy",
+            "domain": "Theology",
+            "description": "Core concept in Theology",
+            "concept_id": 952432413
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 88,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.325439,
+      "payload": {
+        "from": 43,
+        "to": 48,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 89,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325446,
+      "payload": {
+        "node_id": 49,
+        "node_type": "domain",
+        "node": {
+          "id": 49,
+          "type": "domain",
+          "attributes": {
+            "name": "Economics",
+            "description": "Foundational domain: Economics. Studies production, exchange, incentives, resource allocation and market dynamics under scarcity.",
+            "history_intro": "From classical political economy through marginal analysis and macroeconomics, the field diversified into game theory, econometrics, behavioral and institutional economics.",
+            "connections": [
+              "Mathematics and statistics",
+              "Sociology",
+              "Political science",
+              "Psychology (decision making)",
+              "Computer Science (platform economics)"
+            ],
+            "usage": [
+              "Business strategy and forecasting",
+              "Policy and regulation analysis",
+              "Market and pricing models",
+              "Development and welfare planning",
+              "Resource optimization decisions"
+            ]
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 90,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3254573,
+      "payload": {
+        "node_id": 50,
+        "node_type": "concept",
+        "node": {
+          "id": 50,
+          "type": "concept",
+          "attributes": {
+            "name": "Market",
+            "domain": "Economics",
+            "description": "Core concept in Economics",
+            "concept_id": 964674805
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 91,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3254623,
+      "payload": {
+        "from": 49,
+        "to": 50,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 92,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3254728,
+      "payload": {
+        "node_id": 51,
+        "node_type": "concept",
+        "node": {
+          "id": 51,
+          "type": "concept",
+          "attributes": {
+            "name": "Demand",
+            "domain": "Economics",
+            "description": "Core concept in Economics",
+            "concept_id": 909015501
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 93,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3254776,
+      "payload": {
+        "from": 49,
+        "to": 51,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 94,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3254883,
+      "payload": {
+        "node_id": 52,
+        "node_type": "concept",
+        "node": {
+          "id": 52,
+          "type": "concept",
+          "attributes": {
+            "name": "Supply",
+            "domain": "Economics",
+            "description": "Core concept in Economics",
+            "concept_id": 912325042
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 95,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3254933,
+      "payload": {
+        "from": 49,
+        "to": 52,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 96,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3255043,
+      "payload": {
+        "node_id": 53,
+        "node_type": "concept",
+        "node": {
+          "id": 53,
+          "type": "concept",
+          "attributes": {
+            "name": "Capital",
+            "domain": "Economics",
+            "description": "Core concept in Economics",
+            "concept_id": 907567139
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 97,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3255088,
+      "payload": {
+        "from": 49,
+        "to": 53,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 98,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3255198,
+      "payload": {
+        "node_id": 54,
+        "node_type": "concept",
+        "node": {
+          "id": 54,
+          "type": "concept",
+          "attributes": {
+            "name": "Trade",
+            "domain": "Economics",
+            "description": "Core concept in Economics",
+            "concept_id": 939443615
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 99,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.325525,
+      "payload": {
+        "from": 49,
+        "to": 54,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 100,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3255315,
+      "payload": {
+        "node_id": 55,
+        "node_type": "domain",
+        "node": {
+          "id": 55,
+          "type": "domain",
+          "attributes": {
+            "name": "Linguistics",
+            "description": "Foundational domain: Linguistics. Studies language structure and meaning across sounds, words, grammar and context; history spans ancient grammar traditions to modern structural, cognitive and computational approaches.",
+            "history_intro": "Early foundations appeared in Panini's grammar and Greek philology; modern linguistics expanded in the 19th-20th centuries via comparative, structural and generative schools.",
+            "connections": [
+              "Cognitive science",
+              "Psychology",
+              "Computer Science (NLP)",
+              "Philosophy of language",
+              "Sociology"
+            ],
+            "usage": [
+              "Natural language processing",
+              "Education and language learning",
+              "Speech technologies",
+              "Cross-cultural communication",
+              "Knowledge representation"
+            ]
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 101,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3255436,
+      "payload": {
+        "node_id": 56,
+        "node_type": "concept",
+        "node": {
+          "id": 56,
+          "type": "concept",
+          "attributes": {
+            "name": "Phonology",
+            "domain": "Linguistics",
+            "description": "Core concept in Linguistics",
+            "concept_id": 929135815
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 102,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.325549,
+      "payload": {
+        "from": 55,
+        "to": 56,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 103,
+      "event_type": "node_added",
+      "timestamp": 1772275469.32556,
+      "payload": {
+        "node_id": 57,
+        "node_type": "concept",
+        "node": {
+          "id": 57,
+          "type": "concept",
+          "attributes": {
+            "name": "Morphology",
+            "domain": "Linguistics",
+            "description": "Core concept in Linguistics",
+            "concept_id": 917923091
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 104,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.325565,
+      "payload": {
+        "from": 55,
+        "to": 57,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 105,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325577,
+      "payload": {
+        "node_id": 58,
+        "node_type": "concept",
+        "node": {
+          "id": 58,
+          "type": "concept",
+          "attributes": {
+            "name": "Syntax",
+            "domain": "Linguistics",
+            "description": "Core concept in Linguistics",
+            "concept_id": 927132875
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 106,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.325582,
+      "payload": {
+        "from": 55,
+        "to": 58,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 107,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3255947,
+      "payload": {
+        "node_id": 59,
+        "node_type": "concept",
+        "node": {
+          "id": 59,
+          "type": "concept",
+          "attributes": {
+            "name": "Semantics",
+            "domain": "Linguistics",
+            "description": "Core concept in Linguistics",
+            "concept_id": 980194631
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 108,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3255997,
+      "payload": {
+        "from": 55,
+        "to": 59,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 109,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325612,
+      "payload": {
+        "node_id": 60,
+        "node_type": "concept",
+        "node": {
+          "id": 60,
+          "type": "concept",
+          "attributes": {
+            "name": "Pragmatics",
+            "domain": "Linguistics",
+            "description": "Core concept in Linguistics",
+            "concept_id": 919679855
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 110,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3256173,
+      "payload": {
+        "from": 55,
+        "to": 60,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 111,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325624,
+      "payload": {
+        "node_id": 61,
+        "node_type": "domain",
+        "node": {
+          "id": 61,
+          "type": "domain",
+          "attributes": {
+            "name": "Arts",
+            "description": "Foundational domain: Arts. Studies and practices creative expression through sound, image, movement, text and performance, shaping symbolic meaning and human experience.",
+            "history_intro": "From prehistoric visual symbols and oral performance to classical, modern and digital art forms, artistic practice has co-evolved with technologies, institutions and cultural identities.",
+            "connections": [
+              "Psychology (emotion and perception)",
+              "Sociology (culture and identity)",
+              "Linguistics (poetics and narrative)",
+              "Technology (digital media)",
+              "Philosophy (aesthetics)"
+            ],
+            "usage": [
+              "Education and cultural literacy",
+              "Therapy and wellbeing support",
+              "Creative industries and media",
+              "Communication and storytelling",
+              "Public space and community identity"
+            ]
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 112,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3256373,
+      "payload": {
+        "node_id": 62,
+        "node_type": "concept",
+        "node": {
+          "id": 62,
+          "type": "concept",
+          "attributes": {
+            "name": "Music",
+            "domain": "Arts",
+            "description": "Core concept in Arts",
+            "concept_id": 952207659
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 113,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3256426,
+      "payload": {
+        "from": 61,
+        "to": 62,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 114,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325655,
+      "payload": {
+        "node_id": 63,
+        "node_type": "concept",
+        "node": {
+          "id": 63,
+          "type": "concept",
+          "attributes": {
+            "name": "Film",
+            "domain": "Arts",
+            "description": "Core concept in Arts",
+            "concept_id": 947377770
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 115,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3256607,
+      "payload": {
+        "from": 61,
+        "to": 63,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 116,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325673,
+      "payload": {
+        "node_id": 64,
+        "node_type": "concept",
+        "node": {
+          "id": 64,
+          "type": "concept",
+          "attributes": {
+            "name": "Painting",
+            "domain": "Arts",
+            "description": "Core concept in Arts",
+            "concept_id": 954562269
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 117,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3256793,
+      "payload": {
+        "from": 61,
+        "to": 64,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 118,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3256922,
+      "payload": {
+        "node_id": 65,
+        "node_type": "concept",
+        "node": {
+          "id": 65,
+          "type": "concept",
+          "attributes": {
+            "name": "Poetry",
+            "domain": "Arts",
+            "description": "Core concept in Arts",
+            "concept_id": 974046731
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 119,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3256974,
+      "payload": {
+        "from": 61,
+        "to": 65,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 120,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3257108,
+      "payload": {
+        "node_id": 66,
+        "node_type": "concept",
+        "node": {
+          "id": 66,
+          "type": "concept",
+          "attributes": {
+            "name": "Theater",
+            "domain": "Arts",
+            "description": "Core concept in Arts",
+            "concept_id": 919439703
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 121,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3257165,
+      "payload": {
+        "from": 61,
+        "to": 66,
+        "relation_type": "contains_concept",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 122,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3257353,
+      "payload": {
+        "from": 61,
+        "to": 62,
+        "relation_type": "includes",
+        "direction": "directed",
+        "weight": 0.78,
+        "logic_rule": "catalog_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 123,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3257492,
+      "payload": {
+        "node_id": 67,
+        "node_type": "concept",
+        "node": {
+          "id": 67,
+          "type": "concept",
+          "attributes": {
+            "name": "chess",
+            "aliases": [
+              "шахматы",
+              "շախմատ",
+              "国际象棋",
+              "ajedrez",
+              "xadrez"
+            ],
+            "concept_id": 203,
+            "description": "Global concept catalog seed"
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 124,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3257556,
+      "payload": {
+        "from": 61,
+        "to": 67,
+        "relation_type": "includes",
+        "direction": "directed",
+        "weight": 0.78,
+        "logic_rule": "catalog_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 125,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325769,
+      "payload": {
+        "node_id": 68,
+        "node_type": "concept",
+        "node": {
+          "id": 68,
+          "type": "concept",
+          "attributes": {
+            "name": "programming",
+            "aliases": [
+              "программирование",
+              "ծրագրավորում",
+              "编程",
+              "programación",
+              "programação"
+            ],
+            "concept_id": 204,
+            "description": "Global concept catalog seed"
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 126,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.325775,
+      "payload": {
+        "from": 61,
+        "to": 68,
+        "relation_type": "includes",
+        "direction": "directed",
+        "weight": 0.78,
+        "logic_rule": "catalog_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 127,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325788,
+      "payload": {
+        "node_id": 69,
+        "node_type": "concept",
+        "node": {
+          "id": 69,
+          "type": "concept",
+          "attributes": {
+            "name": "business",
+            "aliases": [
+              "бизнес",
+              "բիզնես",
+              "商业",
+              "negocio",
+              "negócio"
+            ],
+            "concept_id": 205,
+            "description": "Global concept catalog seed"
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 128,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3257935,
+      "payload": {
+        "from": 61,
+        "to": 69,
+        "relation_type": "includes",
+        "direction": "directed",
+        "weight": 0.78,
+        "logic_rule": "catalog_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 129,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3258069,
+      "payload": {
+        "node_id": 70,
+        "node_type": "concept",
+        "node": {
+          "id": 70,
+          "type": "concept",
+          "attributes": {
+            "name": "freedom",
+            "aliases": [
+              "свобода",
+              "ազատություն",
+              "自由",
+              "libertad",
+              "liberdade"
+            ],
+            "concept_id": 206,
+            "description": "Global concept catalog seed"
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 130,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3258135,
+      "payload": {
+        "from": 61,
+        "to": 70,
+        "relation_type": "includes",
+        "direction": "directed",
+        "weight": 0.78,
+        "logic_rule": "catalog_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 131,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325827,
+      "payload": {
+        "node_id": 71,
+        "node_type": "concept",
+        "node": {
+          "id": 71,
+          "type": "concept",
+          "attributes": {
+            "name": "jazz",
+            "aliases": [
+              "джаз",
+              "ջազ",
+              "爵士乐"
+            ],
+            "concept_id": 207,
+            "description": "Global concept catalog seed"
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 132,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3258326,
+      "payload": {
+        "from": 61,
+        "to": 71,
+        "relation_type": "includes",
+        "direction": "directed",
+        "weight": 0.78,
+        "logic_rule": "catalog_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 133,
+      "event_type": "node_added",
+      "timestamp": 1772275469.325846,
+      "payload": {
+        "node_id": 72,
+        "node_type": "concept",
+        "node": {
+          "id": 72,
+          "type": "concept",
+          "attributes": {
+            "name": "history",
+            "aliases": [
+              "история",
+              "պատմություն",
+              "历史",
+              "historia"
+            ],
+            "concept_id": 208,
+            "description": "Global concept catalog seed"
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 134,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3258522,
+      "payload": {
+        "from": 61,
+        "to": 72,
+        "relation_type": "includes",
+        "direction": "directed",
+        "weight": 0.78,
+        "logic_rule": "catalog_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 135,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3258696,
+      "payload": {
+        "from": 61,
+        "to": 63,
+        "relation_type": "includes",
+        "direction": "directed",
+        "weight": 0.78,
+        "logic_rule": "catalog_seed",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 136,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3258793,
+      "payload": {
+        "from": 1,
+        "to": 19,
+        "relation_type": "enables",
+        "direction": "directed",
+        "weight": 0.95,
+        "logic_rule": "foundation_relations",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 137,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3258872,
+      "payload": {
+        "from": 1,
+        "to": 7,
+        "relation_type": "supports",
+        "direction": "directed",
+        "weight": 0.9,
+        "logic_rule": "foundation_relations",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 138,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3258977,
+      "payload": {
+        "from": 31,
+        "to": 37,
+        "relation_type": "influences",
+        "direction": "directed",
+        "weight": 0.82,
+        "logic_rule": "foundation_relations",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 139,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3259084,
+      "payload": {
+        "from": 55,
+        "to": 19,
+        "relation_type": "enables",
+        "direction": "directed",
+        "weight": 0.76,
+        "logic_rule": "foundation_relations",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 140,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3259184,
+      "payload": {
+        "from": 25,
+        "to": 43,
+        "relation_type": "interacts_with",
+        "direction": "directed",
+        "weight": 0.67,
+        "logic_rule": "foundation_relations",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 141,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3259299,
+      "payload": {
+        "from": 49,
+        "to": 37,
+        "relation_type": "depends_on",
+        "direction": "directed",
+        "weight": 0.72,
+        "logic_rule": "foundation_relations",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 142,
+      "event_type": "edge_added",
+      "timestamp": 1772275469.3259556,
+      "payload": {
+        "from": 62,
+        "to": 31,
+        "relation_type": "affects",
+        "direction": "directed",
+        "weight": 0.73,
+        "logic_rule": "foundation_relations",
+        "metadata": {}
+      }
+    },
+    {
+      "id": 143,
+      "event_type": "llm_policy_updated",
+      "timestamp": 1772275469.326271,
+      "payload": {
+        "mode": "assisted_autonomy",
+        "trusted_sessions": 0,
+        "trusted_users": 1,
+        "allow_actions": 1
+      }
+    },
+    {
+      "id": 144,
+      "event_type": "node_added",
+      "timestamp": 1772275469.3262906,
+      "payload": {
+        "node_id": 73,
+        "node_type": "generic",
+        "node": {
+          "id": 73,
+          "type": "generic",
+          "attributes": {
+            "user_id": "u_backup",
+            "name": "Backup anchor node",
+            "summary": "Anchor for backup restore test",
+            "namespace": "personal"
+          },
+          "state": {}
+        }
+      }
+    },
+    {
+      "id": 145,
+      "event_type": "contradiction_scan_completed",
+      "timestamp": 1772275469.3270395,
+      "payload": {
+        "user_id": "u_backup",
+        "scope": "owned",
+        "namespace": "",
+        "issues": 0,
+        "attached": false
+      }
+    },
+    {
+      "id": 146,
+      "event_type": "graph_rag_query",
+      "timestamp": 1772275469.3274229,
+      "payload": {
+        "user_id": "u_backup",
+        "scope": "owned",
+        "namespace": "",
+        "hits": 1,
+        "model_role": "analyst"
+      }
+    },
+    {
+      "id": 147,
+      "event_type": "quality_harness_ran",
+      "timestamp": 1772275469.327717,
+      "payload": {
+        "user_id": "u_backup",
+        "node_count": 73,
+        "edge_count": 70,
+        "score": 100.0,
+        "dangling_edges": 0,
+        "contradictions": 0
+      }
+    }
+  ]
+}

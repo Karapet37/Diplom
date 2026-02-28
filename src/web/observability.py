@@ -179,6 +179,7 @@ class RuntimeMetrics:
 
 
 INFERENCE_PATHS: tuple[str, ...] = (
+    "/api/graph/foundation/create",
     "/api/graph/profile/infer",
     "/api/graph/simulate",
     "/api/living/process",

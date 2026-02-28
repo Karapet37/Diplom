@@ -31,7 +31,7 @@ Repository: `https://github.com/Karapet37/Diplom`
 - `src/living_system`՝ diagnostics, feedback loops, recovery/evolution primitives, `SQL-backed` knowledge representation։
 - `src/utils/local_llm_provider.py`՝ local model role resolution և `GGUF loading policy`։
 - `src/web/integration_sdk.py` և `packages/`՝ standalone/integration SDK-ներ արտաքին գործիքների մեջ շերտով միացնելու համար։
-- `webapp`՝ UI demo execution, daily mode, user graph updates, autoruns analysis և graph editing-ի համար։
+- `webapp`՝ UI demo execution, daily mode, user graph updates, graph node assist և graph editing-ի համար։
 
 ### 2.2 Հիմնական data flow-ներ
 
@@ -49,11 +49,6 @@ Repository: `https://github.com/Karapet37/Diplom`
 - Ընդունում է և structured lists (`fears`, `goals`, `assets` և այլն), և free text։
 - `LLM/heuristics`-ի միջոցով կազմում է profile patch (`name`, `history`, `description`, dimensions)։
 - Ըստ անհրաժեշտության client introspection session nodes-ը կապում է user graph-ի հետ։
-
-4. `autoruns/import`
-- Normal mode-ում parse է անում `CSV/TSV Sysinternals export`։
-- Auto mode-ում, եթե table չկա, client telemetry-ից infer է անում startup/process profile։
-- Հաշվում է risk score և արդյունքները կապում semantic graph-ի մեջ։
 
 ### 2.3 Persistence
 
@@ -111,6 +106,34 @@ Operational deployment՝
   - `packages/integration-layer-sdk` (`@autograph/integration-layer-sdk`)։
 - Նույն integration contract-ը հիմա օգտագործվում է և UI-ում, և արտաքին հավելվածների embedding-ի համար։
 
+### 4.1 Վերջին փոփոխությունների հաշվետվություն
+
+- UI-ից ամբողջությամբ հանվել է `autoruns` բաժինը, քանի որ այն այլևս արժեքավոր user flow չէր տալիս։
+- `graph` էկրանն այժմ կենտրոնացած է իրական edit/assist գործողությունների վրա, ոչ թե raw debug output-ի։
+- `Graph node assist` և `Graph edge assist`-ի համար ավելացվել են առանձին interactive popover-ներ՝
+  - node click -> explanation/improve/risks/tasks/memory,
+  - edge click -> explain/improve/risks/merge/split,
+  - localized labels/hints՝ բոլոր աջակցվող UI լեզուներով։
+- `node/edge popover` UI-ը դուրս է բերվել առանձին component-ների մեջ (`GraphPopovers.jsx`), որպեսզի `App.jsx`-ը այլևս ամբողջությամբ monolith render չլինի։
+- Ավելացվել է առանձին backend endpoint՝ `POST /api/graph/edge/assist`։
+  - Այն իրականում վերլուծում է կապը,
+  - գրում է փոփոխության metadata-ն edge-ի վրա,
+  - ստեղծում է session/update links graph-ում,
+  - վերադարձնում է թարմ snapshot։
+- Ավելացվել է նոր backend/UI հոսք՝ `Create Foundation` (`POST /api/graph/foundation/create`)։
+  - Օգտագործում է `Mistral`-ը որպես default planner model,
+  - topic/selected node-ի հիման վրա կառուցում է տեսանելի foundation branch,
+  - ստեղծում է `foundation_branch` root node,
+  - ավելացնում է nested `concept` nodes,
+  - կապում է դրանք `expands_concept`, `contains_concept`, `deepens_concept` edge-երով,
+  - հետո գործարկում է `graph monitor`՝ փոքր, անվտանգ patch-երի համար։
+- `Create Foundation`-ը control-plane-ում gated է որպես
+  - `graph write`,
+  - `prompt execution`,
+  ուստի այն չի շրջանցում runtime policy-ն։
+- Observability շերտում `Create Foundation`-ը արդեն հաշվառվում է inference endpoint-ների թվում։
+- Վերջին iteration-ից հետո նախագծի հիմնական quality check-երը կրկին անցել են (`web build` + backend unit tests)։
+
 ## 5. Ինչ է պլանավորվում
 
 ### P0 (Immediate)
@@ -126,7 +149,7 @@ Operational deployment՝
 
 - Բաժանել `graph_workspace.py`-ը focused service modules-ի՝
   - profile update service,
-  - autoruns service,
+  - graph node assist service,
   - daily-mode orchestration service։
 - Ավելացնել request/response `JSON schema docs` project endpoints-ի համար։
 - Ավելացնել migration/version նշումներ `DB schema evolution`-ի համար։
@@ -166,31 +189,46 @@ Operational deployment՝
 - Համակարգը `POST /api/project/user-graph/update`-ով կառուցում է personal semantic graph։
 - Արդյունքում տեսանելի են nodes/edges-ը և reasoning path-երը։
 
-2. Սցենարի մուտքագրում և գործողությունների մոդելավորում
+2. Հիմքային ճյուղի կառուցում (`Create Foundation`)
+
+- Եթե օգտատերը ցանկանում է թեման «բացել» և մանրամասնել, graph բաժնում օգտագործում է `Create Foundation` կոճակը։
+- Կարելի է կամ ընտրել արդեն գոյություն ունեցող node, կամ պարզապես գրել նոր topic։
+- Backend-ը `POST /api/graph/foundation/create`-ով կանչում է `Mistral` planner model-ը և ստեղծում է նոր foundation branch։
+- Ստացված concepts-ը անմիջապես երևում են graph-ում որպես նոր nodes/edges, ոչ թե մնում են միայն text output-ի մակարդակում։
+
+3. Սցենարի մուտքագրում և գործողությունների մոդելավորում
 
 - Օգտատերը տալիս է կոնկրետ իրավիճակ (օր.` «ինչպես կատարել անցում նոր կարիերայի ուղղության»)։
 - `POST /api/project/llm/debate`-ը ստեղծում է proposer/critic/judge տարբերակներ։
 - Graph-ում ձևավորվում են վարկածներ, հակափաստարկներ և եզրակացություն՝ առանձին ճյուղերով։
 
-3. Վերլուծություն և պլանի բարելավում
+4. Վերլուծություն և պլանի բարելավում
 
 - `POST /api/project/daily-mode`-ով համակարգը գնահատում է ընթացիկ վիճակը, ռիսկերը և առաջընթացը։
 - Օգտատերը համեմատում է տարբեր պլաններ, տեսնում dependency-ները և ընտրում հաջորդ քայլերը։
 - Feedback-ը պահվում է, որպեսզի հաջորդ խորհուրդները լինեն ավելի անհատական։
 
-4. «Hallucination Hunter» ցիկլ
+5. Graph assist ըստ click-ի
+
+- Օգտատերը սեղմում է node-ի վրա և ստանում է contextual popover։
+- `POST /api/graph/node/assist`-ը տալիս է explanation/improve/risks/tasks/memory արդյունք։
+- Օգտատերը կարող է նույն պատուհանից արդյունքը ուղարկել `multitool`-ի request/task/risk/note հոսքերի մեջ։
+- Օգտատերը կարող է նաև սեղմել edge-ի վրա և գործարկել `POST /api/graph/edge/assist`։
+- Սա օգնում է վերանայել կապի իմաստը, ռիսկը, merge/split հնարավորությունը և փոփոխել graph semantics-ը։
+
+6. «Hallucination Hunter» ցիկլ
 
 - Եթե պատասխանում հայտնվում է սխալ պնդում, այն գրանցվում է `POST /api/project/hallucination/report`-ով։
 - Համակարգը պահում է սխալ տարբերակը, ճշգրիտ տարբերակը և աղբյուրը graph-ի առանձին verification branch-ում։
 - Նույնատիպ հարցի ժամանակ `POST /api/project/hallucination/check`-ը տալիս է guard hints՝ կրկնվող սխալը կանխելու համար։
 
-5. Archive chat + review ցիկլ
+7. Archive chat + review ցիկլ
 
 - `POST /api/project/archive/chat`-ով օգտատերը գրում է բնական լեզվով հարցը և ընտրում model path/role։
 - Համակարգը վերադարձնում է conversational assistant reply, իսկ structural update-ները տալիս է review բլոկով։
 - `POST /api/project/archive/review`-ով օգտատերը խմբագրում/վերավերացնում է update-ները և հետո կիրառում graph branch-ում։
 
-6. Living prompt-ների անվտանգ գործարկում
+8. Living prompt-ների անվտանգ գործարկում
 
 - Եթե օգտագործվում է `POST /api/living/prompt/run`, backend scanner-ը նախ ստուգում է վտանգավոր հրամանները։
 - Եթե ռիսկ է հայտնաբերվում, պատասխանում ստացվում է `blocked_for_confirmation` կարգավիճակ։
@@ -199,7 +237,7 @@ Operational deployment՝
   - `security_decision: "cancel"`՝ «չկատարել»։
 - Պատասխանում միշտ վերադառնում է `security` բլոկ (`risk_level`, `matches`, `explanation`)՝ audit/review-ի համար։
 
-7. Live դիտարկում
+9. Live դիտարկում
 
 - `GET /api/graph/snapshot` և `WS /api/graph/ws`-ով օգտատերը real-time տեսնում է graph-ի փոփոխությունները։
 - Սա թույլ է տալիս անմիջապես հասկանալ, թե որ reasoning chain-ն է աշխատել, որը՝ ոչ։
@@ -345,14 +383,16 @@ const standaloneClient = createStandaloneIntegrationLayerClient({
 Մինչև release՝
 
 - `PYTHONPATH=. pytest -q tests/unit/test_graph_workspace.py`
-- `PYTHONPATH=. pytest -q tests/unit/test_project_unified.py tests/unit/test_control_plane.py tests/unit/test_autoruns_import.py`
+- `PYTHONPATH=. pytest -q tests/unit/test_project_unified.py tests/unit/test_control_plane.py`
 - `PYTHONPATH=. pytest -q tests/unit/test_living_system.py`
 - `npm --prefix webapp run build`
 - manual API checks՝
   - `/api/project/daily-mode`,
   - `/api/project/user-graph/update`,
   - `/api/project/llm/debate`,
-  - `/api/project/autoruns/import`,
+  - `/api/graph/node/assist`,
+  - `/api/graph/edge/assist`,
+  - `/api/graph/foundation/create`,
   - `/api/living/prompt/run` (scanner decision flow)։
 
 ## 9. Գործնական եզրակացություն
