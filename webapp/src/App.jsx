@@ -48,6 +48,7 @@ import {
   viewProjectPersonalTree,
   watchProjectDemo,
 } from "./api";
+import { createIntegrationLayerClient } from "./integrationLayerSdk";
 
 const RELATION_OPTIONS = [
   "works_at",
@@ -100,6 +101,14 @@ const LLM_ROLE_OPTIONS = [
 const MEMORY_NAMESPACE_OPTIONS = ["global", "personal", "session", "experiment", "trash"];
 const MEMORY_SCOPE_OPTIONS = ["all", "owned"];
 const LLM_POLICY_MODE_OPTIONS = ["propose_only", "confirm_required", "assisted_autonomy"];
+const INTERACTION_MODE_OPTIONS = ["questionnaire", "ai"];
+const INTEGRATION_ACTION_OPTIONS = [
+  "wrapper.respond",
+  "archive.chat",
+  "user_graph.update",
+  "personal_tree.ingest",
+];
+const INTEGRATION_HOST_OPTIONS = ["generic", "vscode", "chat_agent", "image_creator", "web"];
 const PAGE_KEYS = ["overview", "builder", "simulation", "data"];
 const OVERVIEW_SECTION_KEYS = [
   "demo",
@@ -128,6 +137,7 @@ const UI_LANG_OPTIONS = [
 
 const PERSONALIZATION_STORAGE_KEY = "workspace_personalization_profile_v1";
 const STYLE_NODE_STORAGE_KEY = "workspace_style_node_index_v1";
+const INTERACTION_MODE_STORAGE_KEY = "workspace_interaction_mode_v1";
 
 const PERSONALIZATION_STYLE_OPTIONS = ["adaptive", "concise", "balanced", "deep"];
 const PERSONALIZATION_DEPTH_OPTIONS = ["quick", "balanced", "deep"];
@@ -383,6 +393,21 @@ const DEFAULT_BACKUP_DRAFT = {
 const DEFAULT_AUDIT_DRAFT = {
   limit: 200,
   include_backups: true,
+};
+
+const DEFAULT_INTEGRATION_DRAFT = {
+  host: "vscode",
+  app_id: "workspace_plugin",
+  action: "wrapper.respond",
+  message: "",
+  context: "",
+  model_path: "",
+  model_role: "general",
+  auto_triage: true,
+  triage_with_llm: true,
+  apply_to_graph: true,
+  use_memory: true,
+  use_llm_profile: true,
 };
 
 const TRANSLATIONS = {
@@ -3557,6 +3582,7 @@ for (const [code, pack] of Object.entries(TRANSLATION_EXTENSIONS)) {
 for (const [code, pack] of Object.entries(EXTRA_TRANSLATION_EXTENSIONS)) {
   EXTRA_TRANSLATIONS[code] = {
     ...(EXTRA_TRANSLATIONS.en || {}),
+    ...(EXTRA_TRANSLATIONS[code] || {}),
     ...(pack || {}),
   };
 }
@@ -3567,6 +3593,338 @@ for (const [code, pack] of Object.entries(MULTITOOL_UI_TRANSLATIONS)) {
     ...(pack || {}),
   };
 }
+
+const LOCALIZED_ADDITIONS = {
+  en: {
+    interaction_mode_title: "Interaction Mode",
+    interaction_mode_subtitle: "Switch between questionnaire-first input and GGUF AI processing.",
+    interaction_mode_slider_label: "Processing Slider",
+    interaction_mode_questionnaire: "Questionnaire",
+    interaction_mode_ai: "AI Processing",
+    interaction_mode_hint_questionnaire: "Manual mode: your form fields are used directly, with minimal auto-inference.",
+    interaction_mode_hint_ai: "AI mode: GGUF models enrich profile, detect patterns, and auto-triage signals.",
+    integration_layer_title: "Integration Layer",
+    integration_layer_subtitle: "Embed this tool as a reusable layer in external apps (VSCode/chat/image tools).",
+    integration_layer_host: "Host",
+    integration_layer_app_id: "App ID",
+    integration_layer_action: "Action",
+    integration_layer_message: "Input Message",
+    integration_layer_message_placeholder: "Describe what the external app should send...",
+    integration_layer_context: "Context",
+    integration_layer_model_path: "Model Path",
+    integration_layer_model_role: "Model Role",
+    integration_layer_auto_triage: "Auto triage",
+    integration_layer_use_llm_triage: "Use LLM triage",
+    integration_layer_apply_graph: "Apply to graph",
+    integration_layer_use_memory: "Use memory",
+    integration_layer_use_llm_profile: "Use LLM profile",
+    integration_layer_load_manifest: "Load Manifest",
+    integration_layer_invoke: "Invoke Layer",
+    integration_layer_manifest: "Manifest",
+    integration_layer_result: "Invoke Result",
+    integration_layer_embed_preview: "Embed Contract Preview",
+    action_integration_manifest_load: "integration manifest load",
+    action_integration_invoke: "integration invoke",
+    error_integration_message_empty: "Integration input message is empty",
+  },
+  ru: {
+    interaction_mode_title: "Режим взаимодействия",
+    interaction_mode_subtitle: "Переключение между анкетным вводом и GGUF AI-обработкой.",
+    interaction_mode_slider_label: "Ползунок обработки",
+    interaction_mode_questionnaire: "Анкета",
+    interaction_mode_ai: "AI-обработка",
+    interaction_mode_hint_questionnaire:
+      "Ручной режим: используются ваши поля анкеты, с минимальными авто-добавлениями.",
+    interaction_mode_hint_ai: "AI-режим: GGUF-модели дополняют профиль, ищут паттерны и делают auto-triage.",
+    integration_layer_title: "Интеграционный слой",
+    integration_layer_subtitle: "Встраивайте инструмент как слой в внешние приложения (VSCode/chat/image).",
+    integration_layer_host: "Хост",
+    integration_layer_app_id: "ID приложения",
+    integration_layer_action: "Действие",
+    integration_layer_message: "Входное сообщение",
+    integration_layer_message_placeholder: "Опиши, что внешнее приложение должно передавать...",
+    integration_layer_context: "Контекст",
+    integration_layer_model_path: "Путь к модели",
+    integration_layer_model_role: "Роль модели",
+    integration_layer_auto_triage: "Авто triage",
+    integration_layer_use_llm_triage: "LLM triage",
+    integration_layer_apply_graph: "Применять в граф",
+    integration_layer_use_memory: "Использовать память",
+    integration_layer_use_llm_profile: "Использовать LLM-профиль",
+    integration_layer_load_manifest: "Загрузить Manifest",
+    integration_layer_invoke: "Вызвать слой",
+    integration_layer_manifest: "Manifest",
+    integration_layer_result: "Результат вызова",
+    integration_layer_embed_preview: "Предпросмотр embed-контракта",
+    action_integration_manifest_load: "загрузка integration manifest",
+    action_integration_invoke: "вызов integration layer",
+    error_integration_message_empty: "Пустое входное сообщение интеграции",
+  },
+  hy: {
+    interaction_mode_title: "Փոխազդեցության ռեժիմ",
+    interaction_mode_subtitle: "Փոխարկիր անքեթային մուտքագրումի և GGUF AI մշակման միջև։",
+    interaction_mode_slider_label: "Մշակման սլայդեր",
+    interaction_mode_questionnaire: "Հարցաթերթիկ",
+    interaction_mode_ai: "AI մշակում",
+    interaction_mode_hint_questionnaire: "Ձեռքով ռեժիմ․ օգտագործվում են քո լրացրած դաշտերը, նվազագույն auto-infer-ով։",
+    interaction_mode_hint_ai: "AI ռեժիմ․ GGUF մոդելները հարստացնում են պրոֆիլը և անում են signal triage։",
+    integration_layer_title: "Ինտեգրացիոն շերտ",
+    integration_layer_subtitle: "Օգտագործիր գործիքը որպես ներկառուցվող շերտ արտաքին հավելվածներում։",
+    integration_layer_host: "Հոսթ",
+    integration_layer_app_id: "Հավելվածի ID",
+    integration_layer_action: "Գործողություն",
+    integration_layer_message: "Մուտքային հաղորդագրություն",
+    integration_layer_message_placeholder: "Նկարագրիր ինչ պետք է ուղարկի արտաքին հավելվածը...",
+    integration_layer_context: "Կոնտեքստ",
+    integration_layer_model_path: "Մոդելի ուղի",
+    integration_layer_model_role: "Մոդելի դեր",
+    integration_layer_auto_triage: "Ավտո triage",
+    integration_layer_use_llm_triage: "LLM triage",
+    integration_layer_apply_graph: "Կիրառել գրաֆում",
+    integration_layer_use_memory: "Օգտագործել հիշողությունը",
+    integration_layer_use_llm_profile: "Օգտագործել LLM պրոֆիլ",
+    integration_layer_load_manifest: "Բեռնել Manifest",
+    integration_layer_invoke: "Կանչել շերտը",
+    integration_layer_manifest: "Manifest",
+    integration_layer_result: "Կանչի արդյունք",
+    integration_layer_embed_preview: "Embed պայմանագրի preview",
+    action_integration_manifest_load: "integration manifest բեռնում",
+    action_integration_invoke: "integration layer կանչ",
+    error_integration_message_empty: "Ինտեգրացիայի մուտքային հաղորդագրությունը դատարկ է",
+  },
+  fr: {
+    interaction_mode_title: "Mode d'interaction",
+    interaction_mode_subtitle: "Bascule entre questionnaire manuel et traitement IA GGUF.",
+    interaction_mode_slider_label: "Curseur de traitement",
+    interaction_mode_questionnaire: "Questionnaire",
+    interaction_mode_ai: "Traitement IA",
+    interaction_mode_hint_questionnaire:
+      "Mode manuel : les champs du formulaire sont utilisés directement, avec un minimum d'inférence automatique.",
+    interaction_mode_hint_ai: "Mode IA : les modèles GGUF enrichissent le profil, détectent des motifs et trient les signaux.",
+    integration_layer_title: "Couche d'intégration",
+    integration_layer_subtitle:
+      "Intégrez cet outil comme couche réutilisable dans des applications externes (VSCode/chat/image).",
+    integration_layer_host: "Hôte",
+    integration_layer_app_id: "ID de l'application",
+    integration_layer_action: "Action",
+    integration_layer_message: "Message d'entrée",
+    integration_layer_message_placeholder: "Décrivez ce que l'application externe doit envoyer...",
+    integration_layer_context: "Contexte",
+    integration_layer_model_path: "Chemin du modèle",
+    integration_layer_model_role: "Rôle du modèle",
+    integration_layer_auto_triage: "Triage auto",
+    integration_layer_use_llm_triage: "Triage via LLM",
+    integration_layer_apply_graph: "Appliquer au graphe",
+    integration_layer_use_memory: "Utiliser la mémoire",
+    integration_layer_use_llm_profile: "Utiliser le profil LLM",
+    integration_layer_load_manifest: "Charger le manifest",
+    integration_layer_invoke: "Exécuter la couche",
+    integration_layer_manifest: "Manifest",
+    integration_layer_result: "Résultat",
+    integration_layer_embed_preview: "Aperçu du contrat d'intégration",
+    action_integration_manifest_load: "chargement du manifest d'intégration",
+    action_integration_invoke: "invocation de la couche d'intégration",
+    error_integration_message_empty: "Le message d'entrée d'intégration est vide",
+  },
+  es: {
+    interaction_mode_title: "Modo de interacción",
+    interaction_mode_subtitle: "Alterna entre cuestionario manual y procesamiento IA GGUF.",
+    interaction_mode_slider_label: "Deslizador de procesamiento",
+    interaction_mode_questionnaire: "Cuestionario",
+    interaction_mode_ai: "Procesamiento IA",
+    interaction_mode_hint_questionnaire:
+      "Modo manual: los campos del formulario se usan directamente, con mínima inferencia automática.",
+    interaction_mode_hint_ai: "Modo IA: los modelos GGUF enriquecen el perfil, detectan patrones y clasifican señales.",
+    integration_layer_title: "Capa de integración",
+    integration_layer_subtitle:
+      "Integra esta herramienta como una capa reutilizable en aplicaciones externas (VSCode/chat/image).",
+    integration_layer_host: "Host",
+    integration_layer_app_id: "ID de aplicación",
+    integration_layer_action: "Acción",
+    integration_layer_message: "Mensaje de entrada",
+    integration_layer_message_placeholder: "Describe qué debe enviar la aplicación externa...",
+    integration_layer_context: "Contexto",
+    integration_layer_model_path: "Ruta del modelo",
+    integration_layer_model_role: "Rol del modelo",
+    integration_layer_auto_triage: "Triage automático",
+    integration_layer_use_llm_triage: "Triage con LLM",
+    integration_layer_apply_graph: "Aplicar al grafo",
+    integration_layer_use_memory: "Usar memoria",
+    integration_layer_use_llm_profile: "Usar perfil LLM",
+    integration_layer_load_manifest: "Cargar manifest",
+    integration_layer_invoke: "Ejecutar capa",
+    integration_layer_manifest: "Manifest",
+    integration_layer_result: "Resultado",
+    integration_layer_embed_preview: "Vista previa del contrato embebido",
+    action_integration_manifest_load: "carga de manifest de integración",
+    action_integration_invoke: "invocación de la capa de integración",
+    error_integration_message_empty: "El mensaje de entrada de integración está vacío",
+  },
+  pt: {
+    interaction_mode_title: "Modo de interação",
+    interaction_mode_subtitle: "Alterne entre questionário manual e processamento IA GGUF.",
+    interaction_mode_slider_label: "Slider de processamento",
+    interaction_mode_questionnaire: "Questionário",
+    interaction_mode_ai: "Processamento IA",
+    interaction_mode_hint_questionnaire:
+      "Modo manual: os campos do formulário são usados diretamente, com inferência automática mínima.",
+    interaction_mode_hint_ai: "Modo IA: modelos GGUF enriquecem o perfil, detectam padrões e fazem triagem de sinais.",
+    integration_layer_title: "Camada de integração",
+    integration_layer_subtitle:
+      "Incorpore esta ferramenta como camada reutilizável em aplicativos externos (VSCode/chat/image).",
+    integration_layer_host: "Host",
+    integration_layer_app_id: "ID do aplicativo",
+    integration_layer_action: "Ação",
+    integration_layer_message: "Mensagem de entrada",
+    integration_layer_message_placeholder: "Descreva o que o aplicativo externo deve enviar...",
+    integration_layer_context: "Contexto",
+    integration_layer_model_path: "Caminho do modelo",
+    integration_layer_model_role: "Papel do modelo",
+    integration_layer_auto_triage: "Triagem automática",
+    integration_layer_use_llm_triage: "Triagem com LLM",
+    integration_layer_apply_graph: "Aplicar ao grafo",
+    integration_layer_use_memory: "Usar memória",
+    integration_layer_use_llm_profile: "Usar perfil LLM",
+    integration_layer_load_manifest: "Carregar manifest",
+    integration_layer_invoke: "Executar camada",
+    integration_layer_manifest: "Manifest",
+    integration_layer_result: "Resultado",
+    integration_layer_embed_preview: "Pré-visualização do contrato de integração",
+    action_integration_manifest_load: "carregamento do manifest de integração",
+    action_integration_invoke: "invocação da camada de integração",
+    error_integration_message_empty: "A mensagem de entrada da integração está vazia",
+  },
+  ar: {
+    interaction_mode_title: "وضع التفاعل",
+    interaction_mode_subtitle: "بدّل بين الاستبيان اليدوي ومعالجة GGUF بالذكاء الاصطناعي.",
+    interaction_mode_slider_label: "شريط المعالجة",
+    interaction_mode_questionnaire: "استبيان",
+    interaction_mode_ai: "معالجة بالذكاء الاصطناعي",
+    interaction_mode_hint_questionnaire: "الوضع اليدوي: يتم استخدام حقول النموذج مباشرة مع حد أدنى من الاستدلال التلقائي.",
+    interaction_mode_hint_ai: "وضع الذكاء الاصطناعي: نماذج GGUF تُثري الملف الشخصي وتكتشف الأنماط وتفرز الإشارات.",
+    integration_layer_title: "طبقة التكامل",
+    integration_layer_subtitle: "ادمج هذه الأداة كطبقة قابلة لإعادة الاستخدام داخل تطبيقات خارجية (VSCode/chat/image).",
+    integration_layer_host: "المضيف",
+    integration_layer_app_id: "معرّف التطبيق",
+    integration_layer_action: "الإجراء",
+    integration_layer_message: "رسالة الإدخال",
+    integration_layer_message_placeholder: "صف ما الذي يجب أن يرسله التطبيق الخارجي...",
+    integration_layer_context: "السياق",
+    integration_layer_model_path: "مسار النموذج",
+    integration_layer_model_role: "دور النموذج",
+    integration_layer_auto_triage: "فرز تلقائي",
+    integration_layer_use_llm_triage: "فرز عبر LLM",
+    integration_layer_apply_graph: "تطبيق على الرسم البياني",
+    integration_layer_use_memory: "استخدام الذاكرة",
+    integration_layer_use_llm_profile: "استخدام ملف LLM",
+    integration_layer_load_manifest: "تحميل Manifest",
+    integration_layer_invoke: "تشغيل الطبقة",
+    integration_layer_manifest: "Manifest",
+    integration_layer_result: "النتيجة",
+    integration_layer_embed_preview: "معاينة عقد الدمج",
+    action_integration_manifest_load: "تحميل manifest للتكامل",
+    action_integration_invoke: "تشغيل طبقة التكامل",
+    error_integration_message_empty: "رسالة إدخال التكامل فارغة",
+  },
+  hi: {
+    interaction_mode_title: "इंटरैक्शन मोड",
+    interaction_mode_subtitle: "मैन्युअल प्रश्नावली और GGUF AI प्रोसेसिंग के बीच स्विच करें।",
+    interaction_mode_slider_label: "प्रोसेसिंग स्लाइडर",
+    interaction_mode_questionnaire: "प्रश्नावली",
+    interaction_mode_ai: "AI प्रोसेसिंग",
+    interaction_mode_hint_questionnaire:
+      "मैन्युअल मोड: आपके फ़ॉर्म फ़ील्ड सीधे उपयोग होते हैं, बहुत कम ऑटो-इन्फरेंस के साथ।",
+    interaction_mode_hint_ai: "AI मोड: GGUF मॉडल प्रोफ़ाइल समृद्ध करते हैं, पैटर्न पहचानते हैं और संकेतों का triage करते हैं।",
+    integration_layer_title: "इंटीग्रेशन लेयर",
+    integration_layer_subtitle:
+      "इस टूल को बाहरी ऐप्स (VSCode/chat/image) में दोबारा उपयोग योग्य लेयर की तरह एम्बेड करें।",
+    integration_layer_host: "होस्ट",
+    integration_layer_app_id: "ऐप ID",
+    integration_layer_action: "एक्शन",
+    integration_layer_message: "इनपुट संदेश",
+    integration_layer_message_placeholder: "बताइए बाहरी ऐप क्या भेजेगा...",
+    integration_layer_context: "कॉन्टेक्स्ट",
+    integration_layer_model_path: "मॉडल पाथ",
+    integration_layer_model_role: "मॉडल भूमिका",
+    integration_layer_auto_triage: "ऑटो triage",
+    integration_layer_use_llm_triage: "LLM triage का उपयोग",
+    integration_layer_apply_graph: "ग्राफ में लागू करें",
+    integration_layer_use_memory: "मेमोरी उपयोग करें",
+    integration_layer_use_llm_profile: "LLM प्रोफ़ाइल उपयोग करें",
+    integration_layer_load_manifest: "Manifest लोड करें",
+    integration_layer_invoke: "लेयर चलाएँ",
+    integration_layer_manifest: "Manifest",
+    integration_layer_result: "परिणाम",
+    integration_layer_embed_preview: "Embed कॉन्ट्रैक्ट प्रीव्यू",
+    action_integration_manifest_load: "integration manifest लोड",
+    action_integration_invoke: "integration layer invoke",
+    error_integration_message_empty: "Integration इनपुट संदेश खाली है",
+  },
+  zh: {
+    interaction_mode_title: "交互模式",
+    interaction_mode_subtitle: "在手动问卷与 GGUF AI 处理之间切换。",
+    interaction_mode_slider_label: "处理滑块",
+    interaction_mode_questionnaire: "问卷模式",
+    interaction_mode_ai: "AI 处理",
+    interaction_mode_hint_questionnaire: "手动模式：直接使用表单字段，仅进行最小自动推断。",
+    interaction_mode_hint_ai: "AI 模式：GGUF 模型会增强画像、识别模式并对信号进行分流。",
+    integration_layer_title: "集成层",
+    integration_layer_subtitle: "将此工具作为可复用层嵌入外部应用（VSCode/chat/image）。",
+    integration_layer_host: "宿主",
+    integration_layer_app_id: "应用 ID",
+    integration_layer_action: "动作",
+    integration_layer_message: "输入消息",
+    integration_layer_message_placeholder: "描述外部应用应发送的内容...",
+    integration_layer_context: "上下文",
+    integration_layer_model_path: "模型路径",
+    integration_layer_model_role: "模型角色",
+    integration_layer_auto_triage: "自动分流",
+    integration_layer_use_llm_triage: "使用 LLM 分流",
+    integration_layer_apply_graph: "应用到图谱",
+    integration_layer_use_memory: "使用记忆",
+    integration_layer_use_llm_profile: "使用 LLM 画像",
+    integration_layer_load_manifest: "加载 Manifest",
+    integration_layer_invoke: "执行层调用",
+    integration_layer_manifest: "Manifest",
+    integration_layer_result: "调用结果",
+    integration_layer_embed_preview: "嵌入契约预览",
+    action_integration_manifest_load: "加载集成 manifest",
+    action_integration_invoke: "执行集成层调用",
+    error_integration_message_empty: "集成输入消息为空",
+  },
+  ja: {
+    interaction_mode_title: "対話モード",
+    interaction_mode_subtitle: "手動アンケートと GGUF AI 処理を切り替えます。",
+    interaction_mode_slider_label: "処理スライダー",
+    interaction_mode_questionnaire: "アンケート",
+    interaction_mode_ai: "AI処理",
+    interaction_mode_hint_questionnaire: "手動モード: フォーム入力をそのまま使い、自動推論は最小限です。",
+    interaction_mode_hint_ai: "AIモード: GGUFモデルがプロファイルを強化し、パターン検出とシグナルのトリアージを行います。",
+    integration_layer_title: "統合レイヤー",
+    integration_layer_subtitle: "このツールを外部アプリ（VSCode/chat/image）へ再利用可能なレイヤーとして埋め込みます。",
+    integration_layer_host: "ホスト",
+    integration_layer_app_id: "アプリID",
+    integration_layer_action: "アクション",
+    integration_layer_message: "入力メッセージ",
+    integration_layer_message_placeholder: "外部アプリが送信する内容を記述してください...",
+    integration_layer_context: "コンテキスト",
+    integration_layer_model_path: "モデルパス",
+    integration_layer_model_role: "モデルロール",
+    integration_layer_auto_triage: "自動トリアージ",
+    integration_layer_use_llm_triage: "LLMトリアージを使用",
+    integration_layer_apply_graph: "グラフへ反映",
+    integration_layer_use_memory: "メモリを使用",
+    integration_layer_use_llm_profile: "LLMプロファイルを使用",
+    integration_layer_load_manifest: "Manifestを読み込む",
+    integration_layer_invoke: "レイヤー実行",
+    integration_layer_manifest: "Manifest",
+    integration_layer_result: "実行結果",
+    integration_layer_embed_preview: "埋め込み契約プレビュー",
+    action_integration_manifest_load: "integration manifest 読み込み",
+    action_integration_invoke: "integration layer 実行",
+    error_integration_message_empty: "Integration の入力メッセージが空です",
+  },
+};
 
 const OVERVIEW_SECTION_TRANSLATION_KEYS = {
   demo: "overview_section_demo",
@@ -3670,6 +4028,14 @@ function normalizeRole(value, fallback = "general") {
   return fallback;
 }
 
+function normalizeInteractionMode(value) {
+  const token = String(value || "").trim().toLowerCase();
+  if (INTERACTION_MODE_OPTIONS.includes(token)) {
+    return token;
+  }
+  return "questionnaire";
+}
+
 function normalizePersonalizationDraft(raw) {
   const source = raw && typeof raw === "object" ? raw : {};
   return {
@@ -3716,11 +4082,25 @@ function normalizeOption(value, options, fallback) {
 }
 
 function normalizeMultitoolDomain(value) {
-  return normalizeOption(value, MULTITOOL_DOMAIN_OPTIONS, "general");
+  const token = String(value || "").trim().toLowerCase();
+  if (!token) return "general";
+  const normalized = token
+    .replace(/\s+/g, "_")
+    .replace(/[^\p{L}\p{N}_-]+/gu, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized || "general";
 }
 
 function normalizeLegislationCountry(value) {
-  return normalizeOption(value, LEGISLATION_COUNTRY_OPTIONS, "global");
+  const token = String(value || "").trim().toLowerCase();
+  if (!token) return "global";
+  const normalized = token
+    .replace(/\s+/g, "_")
+    .replace(/[^\p{L}\p{N}_-]+/gu, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized || "global";
 }
 
 function normalizeMultitoolRequestDraft(raw) {
@@ -3920,6 +4300,27 @@ function normalizeAuditDraft(raw) {
   };
 }
 
+function normalizeIntegrationDraft(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    host: normalizeOption(source.host, INTEGRATION_HOST_OPTIONS, "generic"),
+    app_id: String(source.app_id || "external_app")
+      .trim()
+      .replace(/[^\w.-]+/g, "_")
+      .slice(0, 64) || "external_app",
+    action: normalizeOption(source.action, INTEGRATION_ACTION_OPTIONS, "wrapper.respond"),
+    message: String(source.message || ""),
+    context: String(source.context || ""),
+    model_path: String(source.model_path || "").trim(),
+    model_role: normalizeRole(source.model_role, "general"),
+    auto_triage: Boolean(source.auto_triage),
+    triage_with_llm: Boolean(source.triage_with_llm),
+    apply_to_graph: Boolean(source.apply_to_graph),
+    use_memory: Boolean(source.use_memory),
+    use_llm_profile: Boolean(source.use_llm_profile),
+  };
+}
+
 function countRowsFromTokens(tokens, ordered = []) {
   const counts = new Map();
   for (const raw of tokens || []) {
@@ -3971,6 +4372,15 @@ function loadStyleNodeIndex() {
     return Math.max(0, Math.min(max, Math.trunc(parsed)));
   } catch (_error) {
     return 0;
+  }
+}
+
+function loadInteractionMode() {
+  try {
+    const raw = localStorage.getItem(INTERACTION_MODE_STORAGE_KEY);
+    return normalizeInteractionMode(raw);
+  } catch (_error) {
+    return "questionnaire";
   }
 }
 
@@ -5494,6 +5904,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [fatalError, setFatalError] = useState("");
   const [uiLanguage, setUiLanguage] = useState(() => detectInitialLanguage());
+  const [interactionMode, setInteractionMode] = useState(() => loadInteractionMode());
   const [currentPage, setCurrentPage] = useState(() => getInitialPage());
 
   const [modules, setModules] = useState([]);
@@ -5679,6 +6090,11 @@ export default function App() {
     ...DEFAULT_AUDIT_DRAFT,
   });
   const [auditResult, setAuditResult] = useState(null);
+  const [integrationDraft, setIntegrationDraft] = useState(() =>
+    normalizeIntegrationDraft({ ...DEFAULT_INTEGRATION_DRAFT })
+  );
+  const [integrationManifest, setIntegrationManifest] = useState(null);
+  const [integrationInvokeResult, setIntegrationInvokeResult] = useState(null);
   const [selectedTraceIndex, setSelectedTraceIndex] = useState(0);
   const [edgeEffectsBySig, setEdgeEffectsBySig] = useState({});
   const [overviewSectionIndex, setOverviewSectionIndex] = useState(0);
@@ -5865,6 +6281,58 @@ export default function App() {
     }
     return map;
   }, [multitoolCountryNodes]);
+  const multitoolDomainOptions = useMemo(() => {
+    const out = new Set();
+    for (const item of MULTITOOL_DOMAIN_OPTIONS) {
+      out.add(normalizeMultitoolDomain(item));
+    }
+    for (const key of multitoolDomainByKey.keys()) {
+      const token = normalizeMultitoolDomain(key);
+      if (token) out.add(token);
+    }
+    for (const candidate of [
+      multitoolRequestDraft.domain,
+      multitoolPreferenceDraft.domain,
+      multitoolTaskDraft.domain,
+      multitoolRiskDraft.domain,
+    ]) {
+      const token = normalizeMultitoolDomain(candidate);
+      if (token) out.add(token);
+    }
+    return Array.from(out).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  }, [
+    multitoolDomainByKey,
+    multitoolRequestDraft.domain,
+    multitoolPreferenceDraft.domain,
+    multitoolTaskDraft.domain,
+    multitoolRiskDraft.domain,
+  ]);
+  const multitoolCountryOptions = useMemo(() => {
+    const out = new Set();
+    for (const item of LEGISLATION_COUNTRY_OPTIONS) {
+      out.add(normalizeLegislationCountry(item));
+    }
+    for (const key of multitoolCountryByKey.keys()) {
+      const token = normalizeLegislationCountry(key);
+      if (token) out.add(token);
+    }
+    for (const candidate of [
+      multitoolRequestDraft.country,
+      multitoolPreferenceDraft.country,
+      multitoolTaskDraft.country,
+      multitoolRiskDraft.country,
+    ]) {
+      const token = normalizeLegislationCountry(candidate);
+      if (token) out.add(token);
+    }
+    return Array.from(out).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  }, [
+    multitoolCountryByKey,
+    multitoolRequestDraft.country,
+    multitoolPreferenceDraft.country,
+    multitoolTaskDraft.country,
+    multitoolRiskDraft.country,
+  ]);
   const multitoolTaskStatusRows = useMemo(
     () =>
       countRowsFromTokens(
@@ -6097,15 +6565,82 @@ export default function App() {
     }
     return out;
   }, [advisorDetectedModels, archiveChatModelPath]);
+  const integrationLayerClient = useMemo(
+    () =>
+      createIntegrationLayerClient({
+        mode: "integration",
+        host: integrationDraft.host,
+        appId: integrationDraft.app_id,
+      }),
+    [integrationDraft.host, integrationDraft.app_id]
+  );
+  const integrationHostOptions = useMemo(() => {
+    const out = [...INTEGRATION_HOST_OPTIONS];
+    const current = String(integrationDraft?.host || "").trim();
+    if (current && !out.includes(current)) {
+      out.push(current);
+    }
+    return out;
+  }, [integrationDraft?.host]);
+  const integrationActionOptions = useMemo(() => {
+    const out = new Set(INTEGRATION_ACTION_OPTIONS);
+    const manifestActions = Array.isArray(integrationManifest?.actions) ? integrationManifest.actions : [];
+    for (const item of manifestActions) {
+      const key = String(item?.key || item || "").trim();
+      if (key) out.add(key);
+    }
+    const current = String(integrationDraft?.action || "").trim();
+    if (current) out.add(current);
+    return Array.from(out);
+  }, [integrationDraft?.action, integrationManifest]);
+  const integrationModelOptions = useMemo(() => {
+    const out = [...advisorDetectedModels];
+    const current = String(integrationDraft?.model_path || "").trim();
+    if (current && !out.includes(current)) {
+      out.unshift(current);
+    }
+    return out;
+  }, [advisorDetectedModels, integrationDraft?.model_path]);
+  const integrationEmbedPreviewPayload = useMemo(() => {
+    const actions = Array.isArray(integrationManifest?.actions) ? integrationManifest.actions : [];
+    const selectedAction = actions.find(
+      (item) => String(item?.key || "").trim() === String(integrationDraft?.action || "").trim()
+    );
+    return {
+      endpoint: "/api/integration/layer/invoke",
+      host: String(integrationDraft?.host || "generic"),
+      app_id: String(integrationDraft?.app_id || "external_app"),
+      action: String(integrationDraft?.action || "wrapper.respond"),
+      selected_contract: selectedAction || null,
+      options: {
+        model_role: String(integrationDraft?.model_role || "general"),
+        model_path: String(integrationDraft?.model_path || "").trim(),
+        auto_triage: Boolean(integrationDraft?.auto_triage),
+        triage_with_llm: Boolean(integrationDraft?.triage_with_llm),
+        apply_to_graph: Boolean(integrationDraft?.apply_to_graph),
+        use_memory: Boolean(integrationDraft?.use_memory),
+        use_llm_profile: Boolean(integrationDraft?.use_llm_profile),
+      },
+      input_example: {
+        message: String(integrationDraft?.message || "").trim() || "External app request",
+        context: String(integrationDraft?.context || "").trim(),
+        language: String(uiLanguage || "en"),
+      },
+    };
+  }, [integrationDraft, integrationManifest, uiLanguage]);
 
   const t = useMemo(() => {
-    const selected = {
-      ...(TRANSLATIONS.en || {}),
-      ...(EXTRA_TRANSLATIONS.en || {}),
+    const localized = {
       ...(TRANSLATIONS[uiLanguage] || {}),
       ...(EXTRA_TRANSLATIONS[uiLanguage] || {}),
+      ...(LOCALIZED_ADDITIONS[uiLanguage] || {}),
     };
-    return (key) => selected[key] || key;
+    const fallback = {
+      ...(TRANSLATIONS.en || {}),
+      ...(EXTRA_TRANSLATIONS.en || {}),
+      ...(LOCALIZED_ADDITIONS.en || {}),
+    };
+    return (key) => localized[key] ?? fallback[key] ?? key;
   }, [uiLanguage]);
 
   const boundedOverviewIndex = Math.max(
@@ -6124,6 +6659,14 @@ export default function App() {
       // ignore
     }
   }, [uiLanguage]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(INTERACTION_MODE_STORAGE_KEY, interactionMode);
+    } catch (_error) {
+      // ignore
+    }
+  }, [interactionMode]);
 
   useEffect(() => {
     try {
@@ -6503,6 +7046,10 @@ export default function App() {
 
   function patchAuditDraft(patch) {
     setAuditDraft((prev) => normalizeAuditDraft({ ...(prev || {}), ...(patch || {}) }));
+  }
+
+  function patchIntegrationDraft(patch) {
+    setIntegrationDraft((prev) => normalizeIntegrationDraft({ ...(prev || {}), ...(patch || {}) }));
   }
 
   function onSavePersonalization() {
@@ -7471,6 +8018,7 @@ export default function App() {
           user_id: `web_${sessionId}`,
           client: collectClientContext(),
         }),
+        integrationLayerClient.manifest(),
       ]);
       if (optional[0].status === "fulfilled") {
         setDbSchema(optional[0].value || null);
@@ -7480,6 +8028,9 @@ export default function App() {
       }
       if (optional[2].status === "fulfilled") {
         setClientProfile(optional[2].value?.profile || null);
+      }
+      if (optional[3].status === "fulfilled") {
+        setIntegrationManifest(optional[3].value || null);
       }
       appendLog(`${t("log_system")}: ${t("log_workspace_refreshed")}`);
     } catch (error) {
@@ -7624,6 +8175,7 @@ export default function App() {
           user_id: `web_${sessionId}`,
           client: collectClientContext(),
         }),
+        integrationLayerClient.manifest(),
       ]);
       setEvents(eventsResp.events || []);
       if (optional[0].status === "fulfilled") {
@@ -7634,6 +8186,9 @@ export default function App() {
       }
       if (optional[2].status === "fulfilled") {
         setClientProfile(optional[2].value?.profile || null);
+      }
+      if (optional[3].status === "fulfilled") {
+        setIntegrationManifest(optional[3].value || null);
       }
       appendLog(`${t("log_system")}: ${actionName} ${t("log_action_complete")}`);
       return payload;
@@ -7764,6 +8319,7 @@ export default function App() {
     }
     const sessionId = getClientSessionId();
     const clientContext = collectClientContext();
+    const useLlmProfile = interactionMode === "ai";
     const applyPersonalization = Boolean(personalizationDraft?.auto_apply_daily);
     const personalization = applyPersonalization ? personalizationPayload : {};
     const effectiveText = applyPersonalization
@@ -7781,7 +8337,7 @@ export default function App() {
           recommendation_count: 4,
           run_knowledge_analysis: true,
           apply_profile_update: true,
-          use_llm_profile: true,
+          use_llm_profile: useLlmProfile,
           include_client_profile: true,
           client: clientContext,
           personalization,
@@ -7795,9 +8351,35 @@ export default function App() {
 
   async function onApplyUserGraph() {
     const sessionId = getClientSessionId();
-    const text = String(userNarrativeText || "").trim();
+    const useLlmProfile = interactionMode === "ai";
+    const questionnaireLines = [
+      ...parseListText(userFearsText).map((item) => `${t("user_fears")}: ${item}`),
+      ...parseListText(userDesiresText).map((item) => `${t("user_desires")}: ${item}`),
+      ...parseListText(userGoalsText).map((item) => `${t("user_goals")}: ${item}`),
+      ...parseListText(userPrinciplesText).map((item) => `${t("user_principles")}: ${item}`),
+      ...parseListText(userOpportunitiesText).map((item) => `${t("user_opportunities")}: ${item}`),
+      ...parseListText(userAbilitiesText).map((item) => `${t("user_abilities")}: ${item}`),
+      ...parseListText(userAccessText).map((item) => `${t("user_access")}: ${item}`),
+      ...parseListText(userKnowledgeText).map((item) => `${t("user_knowledge")}: ${item}`),
+      ...parseListText(userAssetsText).map((item) => `${t("user_assets")}: ${item}`),
+    ];
+    const questionnaireText = questionnaireLines.join("\n").trim();
+    const text = String(userNarrativeText || "").trim() || (useLlmProfile ? "" : questionnaireText);
+    if (!text) {
+      appendLog(`${t("log_error")}: ${t("error_profile_input_empty")}`);
+      return;
+    }
     const clientContext = collectClientContext();
     const personalization = personalizationDraft?.auto_apply_user_graph ? personalizationPayload : {};
+    const fears = parseListText(userFearsText);
+    const desires = parseListText(userDesiresText);
+    const goals = parseListText(userGoalsText);
+    const principles = parseListText(userPrinciplesText);
+    const opportunities = parseListText(userOpportunitiesText);
+    const abilities = parseListText(userAbilitiesText);
+    const access = parseListText(userAccessText);
+    const knowledge = parseListText(userKnowledgeText);
+    const assets = parseListText(userAssetsText);
     try {
       const out = await runAction(t("action_user_graph_update"), () =>
         updateProjectUserGraph({
@@ -7806,20 +8388,34 @@ export default function App() {
           text,
           language: String(uiLanguage || "en"),
           session_id: `profile_${sessionId}`,
-          use_llm_profile: true,
+          use_llm_profile: useLlmProfile,
           include_client_profile: true,
           client: clientContext,
           profile_text: text,
+          profile: useLlmProfile
+            ? {}
+            : {
+                profile_text: text,
+                fears,
+                desires,
+                goals,
+                principles,
+                opportunities,
+                abilities,
+                access,
+                knowledge,
+                assets,
+              },
           personalization,
-          fears: parseListText(userFearsText),
-          desires: parseListText(userDesiresText),
-          goals: parseListText(userGoalsText),
-          principles: parseListText(userPrinciplesText),
-          opportunities: parseListText(userOpportunitiesText),
-          abilities: parseListText(userAbilitiesText),
-          access: parseListText(userAccessText),
-          knowledge: parseListText(userKnowledgeText),
-          assets: parseListText(userAssetsText),
+          fears,
+          desires,
+          goals,
+          principles,
+          opportunities,
+          abilities,
+          access,
+          knowledge,
+          assets,
         })
       );
       setUserGraphResult(out || null);
@@ -7958,6 +8554,78 @@ export default function App() {
         "assistant",
         String(out?.assistant_reply || "Reviewed edited draft. Check verification result in the review panel.")
       );
+    } catch (error) {
+      appendLog(`${t("log_error")}: ${error.message}`);
+    }
+  }
+
+  async function onLoadIntegrationManifest() {
+    const draft = normalizeIntegrationDraft(integrationDraft);
+    patchIntegrationDraft(draft);
+    try {
+      const out = await runAction(t("action_integration_manifest_load"), () =>
+        integrationLayerClient.manifest({
+          host: draft.host,
+          app_id: draft.app_id,
+        })
+      );
+      setIntegrationManifest(out || null);
+    } catch (error) {
+      appendLog(`${t("log_error")}: ${error.message}`);
+    }
+  }
+
+  async function onInvokeIntegrationLayer() {
+    const draft = normalizeIntegrationDraft(integrationDraft);
+    patchIntegrationDraft(draft);
+    let message = String(draft.message || "").trim();
+    if (!message && draft.action === "archive.chat") {
+      message = String(archiveChatMessageText || "").trim();
+    }
+    if (!message && draft.action === "user_graph.update") {
+      message = String(userNarrativeText || "").trim();
+    }
+    if (!message && draft.action === "personal_tree.ingest") {
+      message = String(personalTreeIngestDraft?.text || "").trim();
+    }
+    if (!message) {
+      appendLog(`${t("log_error")}: ${t("error_integration_message_empty")}`);
+      return;
+    }
+    const sessionId = getClientSessionId();
+    try {
+      const out = await runAction(t("action_integration_invoke"), () =>
+        integrationLayerClient.invoke({
+          action: draft.action,
+          host: draft.host,
+          app_id: draft.app_id,
+          user_id: `web_${sessionId}`,
+          session_id: `integration_${sessionId}`,
+          input: {
+            message,
+            context: String(draft.context || archiveChatContextText || "").trim(),
+            model_path: draft.model_path,
+            model_role: draft.model_role,
+            language: String(uiLanguage || "en"),
+            display_name: "Web User",
+          },
+          options: {
+            model_path: draft.model_path,
+            model_role: draft.model_role,
+            auto_triage: Boolean(draft.auto_triage),
+            triage_with_llm: Boolean(draft.triage_with_llm),
+            apply_to_graph: Boolean(draft.apply_to_graph),
+            use_memory: Boolean(draft.use_memory),
+            use_llm_profile: Boolean(draft.use_llm_profile),
+            store_interaction: true,
+          },
+        })
+      );
+      setIntegrationInvokeResult(out || null);
+      const chatResponse = String(out?.chat_response || "").trim();
+      if (chatResponse && (draft.action === "wrapper.respond" || draft.action === "archive.chat")) {
+        appendArchiveChatMessage("assistant", chatResponse);
+      }
     } catch (error) {
       appendLog(`${t("log_error")}: ${error.message}`);
     }
@@ -8194,6 +8862,199 @@ export default function App() {
     );
   }
 
+  function renderInteractionModePanel(extraClassName = "") {
+    const isAiMode = interactionMode === "ai";
+    const modeClass = isAiMode ? "interaction-mode-ai" : "interaction-mode-questionnaire";
+    return (
+      <div className={`interaction-mode-panel ${modeClass} ${extraClassName}`.trim()}>
+        <div className="interaction-mode-head">
+          <div>
+            <h3>{t("interaction_mode_title")}</h3>
+            <p>{t("interaction_mode_subtitle")}</p>
+          </div>
+          <span className="interaction-mode-badge">
+            {isAiMode ? t("interaction_mode_ai") : t("interaction_mode_questionnaire")}
+          </span>
+        </div>
+        <div className="interaction-mode-slider-wrap">
+          <label>{t("interaction_mode_slider_label")}</label>
+          <div className="interaction-mode-slider-row">
+            <span>{t("interaction_mode_questionnaire")}</span>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="1"
+              value={isAiMode ? 1 : 0}
+              onChange={(e) => setInteractionMode(Number(e.target.value) >= 1 ? "ai" : "questionnaire")}
+              aria-label={t("interaction_mode_slider_label")}
+            />
+            <span>{t("interaction_mode_ai")}</span>
+          </div>
+        </div>
+        <p className="interaction-mode-hint">
+          {isAiMode ? t("interaction_mode_hint_ai") : t("interaction_mode_hint_questionnaire")}
+        </p>
+      </div>
+    );
+  }
+
+  function renderIntegrationLayerPanel() {
+    const draft = normalizeIntegrationDraft(integrationDraft);
+    const actions = Array.isArray(integrationManifest?.actions) ? integrationManifest.actions : [];
+    const selectedAction = actions.find((item) => String(item?.key || "").trim() === String(draft.action || "").trim());
+    return (
+      <section className="card integration-layer-shell">
+        <div className="integration-layer-head">
+          <h2>{t("integration_layer_title")}</h2>
+          <p>{t("integration_layer_subtitle")}</p>
+        </div>
+        <div className="integration-layer-grid">
+          <div className="integration-layer-form">
+            <div className="grid-2">
+              <div className="row">
+                <label>{t("integration_layer_host")}</label>
+                <select
+                  value={draft.host}
+                  onChange={(e) => patchIntegrationDraft({ host: String(e.target.value || "") })}
+                >
+                  {integrationHostOptions.map((item) => (
+                    <option key={`integration-host-${item}`} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="row">
+                <label>{t("integration_layer_app_id")}</label>
+                <input
+                  value={draft.app_id}
+                  onChange={(e) => patchIntegrationDraft({ app_id: String(e.target.value || "") })}
+                />
+              </div>
+            </div>
+            <div className="row">
+              <label>{t("integration_layer_action")}</label>
+              <select
+                value={draft.action}
+                onChange={(e) => patchIntegrationDraft({ action: String(e.target.value || "") })}
+              >
+                {integrationActionOptions.map((item) => (
+                  <option key={`integration-action-${item}`} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="row">
+              <label>{t("integration_layer_message")}</label>
+              <textarea
+                value={draft.message}
+                onChange={(e) => patchIntegrationDraft({ message: e.target.value })}
+                rows={4}
+                placeholder={t("integration_layer_message_placeholder")}
+              />
+            </div>
+            <div className="row">
+              <label>{t("integration_layer_context")}</label>
+              <textarea
+                value={draft.context}
+                onChange={(e) => patchIntegrationDraft({ context: e.target.value })}
+                rows={3}
+              />
+            </div>
+            <div className="grid-2">
+              <div className="row">
+                <label>{t("integration_layer_model_path")}</label>
+                <input
+                  list="integration-model-options"
+                  value={draft.model_path}
+                  onChange={(e) => patchIntegrationDraft({ model_path: e.target.value })}
+                  placeholder="models/gguf/..."
+                />
+              </div>
+              <div className="row">
+                <label>{t("integration_layer_model_role")}</label>
+                <select
+                  value={draft.model_role}
+                  onChange={(e) => patchIntegrationDraft({ model_role: String(e.target.value || "") })}
+                >
+                  {LLM_ROLE_OPTIONS.map((role) => (
+                    <option key={`integration-role-${role}`} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="integration-layer-flags">
+              <label className="integration-flag">
+                <input
+                  type="checkbox"
+                  checked={Boolean(draft.auto_triage)}
+                  onChange={(e) => patchIntegrationDraft({ auto_triage: Boolean(e.target.checked) })}
+                />
+                <span>{t("integration_layer_auto_triage")}</span>
+              </label>
+              <label className="integration-flag">
+                <input
+                  type="checkbox"
+                  checked={Boolean(draft.triage_with_llm)}
+                  onChange={(e) => patchIntegrationDraft({ triage_with_llm: Boolean(e.target.checked) })}
+                />
+                <span>{t("integration_layer_use_llm_triage")}</span>
+              </label>
+              <label className="integration-flag">
+                <input
+                  type="checkbox"
+                  checked={Boolean(draft.apply_to_graph)}
+                  onChange={(e) => patchIntegrationDraft({ apply_to_graph: Boolean(e.target.checked) })}
+                />
+                <span>{t("integration_layer_apply_graph")}</span>
+              </label>
+              <label className="integration-flag">
+                <input
+                  type="checkbox"
+                  checked={Boolean(draft.use_memory)}
+                  onChange={(e) => patchIntegrationDraft({ use_memory: Boolean(e.target.checked) })}
+                />
+                <span>{t("integration_layer_use_memory")}</span>
+              </label>
+              <label className="integration-flag">
+                <input
+                  type="checkbox"
+                  checked={Boolean(draft.use_llm_profile)}
+                  onChange={(e) => patchIntegrationDraft({ use_llm_profile: Boolean(e.target.checked) })}
+                />
+                <span>{t("integration_layer_use_llm_profile")}</span>
+              </label>
+            </div>
+            {selectedAction?.description ? (
+              <p className="integration-layer-action-note">{String(selectedAction.description || "").trim()}</p>
+            ) : null}
+            <div className="row-actions">
+              <button disabled={busy} onClick={onLoadIntegrationManifest}>
+                {t("integration_layer_load_manifest")}
+              </button>
+              <button disabled={busy} onClick={onInvokeIntegrationLayer}>
+                {t("integration_layer_invoke")}
+              </button>
+            </div>
+          </div>
+
+          <div className="integration-layer-output">
+            <h3>{t("integration_layer_manifest")}</h3>
+            <pre>{stringifySafe(integrationManifest || {})}</pre>
+            <h3>{t("integration_layer_result")}</h3>
+            <pre>{stringifySafe(integrationInvokeResult || {})}</pre>
+            <h3>{t("integration_layer_embed_preview")}</h3>
+            <pre>{stringifySafe(integrationEmbedPreviewPayload)}</pre>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   function renderOverviewPage() {
     const sectionKey = OVERVIEW_SECTION_KEYS[boundedOverviewIndex] || OVERVIEW_SECTION_KEYS[0];
     const sectionTitle = overviewSectionLabel(sectionKey, t);
@@ -8250,6 +9111,7 @@ export default function App() {
         {sectionKey === "daily" && (
           <section className="card grid-2">
             <div>
+              {renderInteractionModePanel("interaction-mode-inline")}
               <h2>{t("daily_mode")}</h2>
               <div className="row">
                 <label>{t("daily_journal")}</label>
@@ -8276,6 +9138,7 @@ export default function App() {
         {sectionKey === "user_graph" && (
           <section className="card grid-2">
             <div>
+              {renderInteractionModePanel("interaction-mode-inline")}
               <div className="personalization-studio">
                 <div className="personalization-studio-head">
                   <h3>{t("personalization_studio")}</h3>
@@ -8607,29 +9470,23 @@ export default function App() {
                 <div className="grid-2">
                   <div className="row">
                     <label>{t("multitool_domain")}</label>
-                    <select
+                    <input
+                      list="multitool-domain-options"
                       value={multitoolRequestDraft.domain}
-                      onChange={(e) => patchMultitoolRequestDraft({ domain: e.target.value })}
-                    >
-                      {MULTITOOL_DOMAIN_OPTIONS.map((item) => (
-                        <option key={`request-domain-${item}`} value={item}>
-                          {humanizeToken(item)}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(e) =>
+                        patchMultitoolRequestDraft({ domain: normalizeMultitoolDomain(e.target.value) })
+                      }
+                    />
                   </div>
                   <div className="row">
                     <label>{t("multitool_country")}</label>
-                    <select
+                    <input
+                      list="multitool-country-options"
                       value={multitoolRequestDraft.country}
-                      onChange={(e) => patchMultitoolRequestDraft({ country: e.target.value })}
-                    >
-                      {LEGISLATION_COUNTRY_OPTIONS.map((item) => (
-                        <option key={`request-country-${item}`} value={item}>
-                          {humanizeToken(item)}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(e) =>
+                        patchMultitoolRequestDraft({ country: normalizeLegislationCountry(e.target.value) })
+                      }
+                    />
                   </div>
                 </div>
                 <div className="row-actions">
@@ -8720,29 +9577,23 @@ export default function App() {
                 <div className="grid-2">
                   <div className="row">
                     <label>{t("multitool_domain")}</label>
-                    <select
+                    <input
+                      list="multitool-domain-options"
                       value={multitoolPreferenceDraft.domain}
-                      onChange={(e) => patchMultitoolPreferenceDraft({ domain: e.target.value })}
-                    >
-                      {MULTITOOL_DOMAIN_OPTIONS.map((item) => (
-                        <option key={`pref-domain-${item}`} value={item}>
-                          {humanizeToken(item)}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(e) =>
+                        patchMultitoolPreferenceDraft({ domain: normalizeMultitoolDomain(e.target.value) })
+                      }
+                    />
                   </div>
                   <div className="row">
                     <label>{t("multitool_country")}</label>
-                    <select
+                    <input
+                      list="multitool-country-options"
                       value={multitoolPreferenceDraft.country}
-                      onChange={(e) => patchMultitoolPreferenceDraft({ country: e.target.value })}
-                    >
-                      {LEGISLATION_COUNTRY_OPTIONS.map((item) => (
-                        <option key={`pref-country-${item}`} value={item}>
-                          {humanizeToken(item)}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(e) =>
+                        patchMultitoolPreferenceDraft({ country: normalizeLegislationCountry(e.target.value) })
+                      }
+                    />
                   </div>
                 </div>
                 <div className="row-actions">
@@ -8837,29 +9688,23 @@ export default function App() {
                 <div className="grid-2">
                   <div className="row">
                     <label>{t("multitool_domain")}</label>
-                    <select
+                    <input
+                      list="multitool-domain-options"
                       value={multitoolTaskDraft.domain}
-                      onChange={(e) => patchMultitoolTaskDraft({ domain: e.target.value })}
-                    >
-                      {MULTITOOL_DOMAIN_OPTIONS.map((item) => (
-                        <option key={`task-domain-${item}`} value={item}>
-                          {humanizeToken(item)}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(e) =>
+                        patchMultitoolTaskDraft({ domain: normalizeMultitoolDomain(e.target.value) })
+                      }
+                    />
                   </div>
                   <div className="row">
                     <label>{t("multitool_country")}</label>
-                    <select
+                    <input
+                      list="multitool-country-options"
                       value={multitoolTaskDraft.country}
-                      onChange={(e) => patchMultitoolTaskDraft({ country: e.target.value })}
-                    >
-                      {LEGISLATION_COUNTRY_OPTIONS.map((item) => (
-                        <option key={`task-country-${item}`} value={item}>
-                          {humanizeToken(item)}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(e) =>
+                        patchMultitoolTaskDraft({ country: normalizeLegislationCountry(e.target.value) })
+                      }
+                    />
                   </div>
                 </div>
                 <div className="row-actions">
@@ -8954,29 +9799,23 @@ export default function App() {
                 <div className="grid-2">
                   <div className="row">
                     <label>{t("multitool_domain")}</label>
-                    <select
+                    <input
+                      list="multitool-domain-options"
                       value={multitoolRiskDraft.domain}
-                      onChange={(e) => patchMultitoolRiskDraft({ domain: e.target.value })}
-                    >
-                      {MULTITOOL_DOMAIN_OPTIONS.map((item) => (
-                        <option key={`risk-domain-${item}`} value={item}>
-                          {humanizeToken(item)}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(e) =>
+                        patchMultitoolRiskDraft({ domain: normalizeMultitoolDomain(e.target.value) })
+                      }
+                    />
                   </div>
                   <div className="row">
                     <label>{t("multitool_country")}</label>
-                    <select
+                    <input
+                      list="multitool-country-options"
                       value={multitoolRiskDraft.country}
-                      onChange={(e) => patchMultitoolRiskDraft({ country: e.target.value })}
-                    >
-                      {LEGISLATION_COUNTRY_OPTIONS.map((item) => (
-                        <option key={`risk-country-${item}`} value={item}>
-                          {humanizeToken(item)}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(e) =>
+                        patchMultitoolRiskDraft({ country: normalizeLegislationCountry(e.target.value) })
+                      }
+                    />
                   </div>
                 </div>
                 <div className="row-actions">
@@ -10668,6 +11507,8 @@ export default function App() {
               </div>
             </section>
 
+            {renderIntegrationLayerPanel()}
+
             <section className="card">
               <h2>{t("prompt_catalog")}</h2>
               <pre>{stringifySafe(modelAdvisors?.prompts || [])}</pre>
@@ -11213,6 +12054,22 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      <datalist id="multitool-domain-options">
+        {multitoolDomainOptions.map((item) => (
+          <option key={`domain-opt-${item}`} value={item} />
+        ))}
+      </datalist>
+      <datalist id="multitool-country-options">
+        {multitoolCountryOptions.map((item) => (
+          <option key={`country-opt-${item}`} value={item} />
+        ))}
+      </datalist>
+      <datalist id="integration-model-options">
+        {integrationModelOptions.map((item) => (
+          <option key={`integration-model-opt-${item}`} value={item} />
+        ))}
+      </datalist>
 
       <section className="card page-nav-card">
         <div className="page-nav">

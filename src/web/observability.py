@@ -184,6 +184,7 @@ INFERENCE_PATHS: tuple[str, ...] = (
     "/api/living/process",
     "/api/living/prompt/run",
     "/api/project/archive/chat",
+    "/api/integration/layer/invoke",
 )
 
 

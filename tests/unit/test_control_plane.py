@@ -127,6 +127,58 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertEqual(reason, "prompt_execution_disabled")
 
+    def test_graph_writes_gate_blocks_wrapper_profile_update(self):
+        plane = RuntimeControlPlane(
+            flags=ControlPlaneFlags(
+                allow_graph_writes=False,
+            )
+        )
+        allowed, reason = plane.allow_request(
+            method="POST",
+            path="/api/project/wrapper/profile",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "graph_writes_disabled")
+
+    def test_prompt_execution_gate_blocks_wrapper_respond(self):
+        plane = RuntimeControlPlane(
+            flags=ControlPlaneFlags(
+                allow_prompt_execution=False,
+            )
+        )
+        allowed, reason = plane.allow_request(
+            method="POST",
+            path="/api/project/wrapper/respond",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "prompt_execution_disabled")
+
+    def test_graph_writes_gate_blocks_integration_invoke(self):
+        plane = RuntimeControlPlane(
+            flags=ControlPlaneFlags(
+                allow_graph_writes=False,
+            )
+        )
+        allowed, reason = plane.allow_request(
+            method="POST",
+            path="/api/integration/layer/invoke",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "graph_writes_disabled")
+
+    def test_prompt_execution_gate_blocks_integration_invoke(self):
+        plane = RuntimeControlPlane(
+            flags=ControlPlaneFlags(
+                allow_prompt_execution=False,
+            )
+        )
+        allowed, reason = plane.allow_request(
+            method="POST",
+            path="/api/integration/layer/invoke",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "prompt_execution_disabled")
+
     def test_apply_patch_updates_known_flags_and_ignores_unknown(self):
         plane = RuntimeControlPlane(flags=ControlPlaneFlags())
         out = plane.apply_patch(

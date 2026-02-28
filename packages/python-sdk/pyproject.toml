@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autograph-integration-sdk"
+version = "0.1.0"
+description = "Standalone and HTTP client SDK for the Autograph integration layer"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Karapet" }]
+license = { text = "Proprietary" }
+keywords = ["autograph", "graph", "llm", "integration", "sdk"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "License :: Other/Proprietary License",
+  "Operating System :: OS Independent",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

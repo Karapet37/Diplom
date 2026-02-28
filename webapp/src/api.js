@@ -350,6 +350,53 @@ export function getProjectAuditLogs(payload = {}) {
   });
 }
 
+export function runProjectWrapperRespond(payload = {}) {
+  return request("/api/project/wrapper/respond", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getProjectWrapperProfile(userId = "default_user") {
+  const query = new URLSearchParams({ user_id: String(userId || "default_user") });
+  return request(`/api/project/wrapper/profile?${query.toString()}`);
+}
+
+export function updateProjectWrapperProfile(payload = {}) {
+  return request("/api/project/wrapper/profile", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function sendProjectWrapperFeedback(payload = {}) {
+  return request("/api/project/wrapper/feedback", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getProjectIntegrationLayerManifest(params = {}) {
+  const query = new URLSearchParams();
+  const host = String(params?.host || "generic").trim();
+  const appId = String(params?.app_id || params?.appId || "external_app").trim();
+  if (host) {
+    query.set("host", host);
+  }
+  if (appId) {
+    query.set("app_id", appId);
+  }
+  const suffix = query.toString();
+  return request(`/api/integration/layer/manifest${suffix ? `?${suffix}` : ""}`);
+}
+
+export function invokeProjectIntegrationLayer(payload = {}) {
+  return request("/api/integration/layer/invoke", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function importProjectAutoruns(payload = {}) {
   return request("/api/project/autoruns/import", {
     method: "POST",

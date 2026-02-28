@@ -30,6 +30,7 @@ Repository: `https://github.com/Karapet37/Diplom`
 - `src/web`՝ `API routing`, security middleware, monitoring endpoints, client introspection, workspace orchestration։
 - `src/living_system`՝ diagnostics, feedback loops, recovery/evolution primitives, `SQL-backed` knowledge representation։
 - `src/utils/local_llm_provider.py`՝ local model role resolution և `GGUF loading policy`։
+- `src/web/integration_sdk.py` և `packages/`՝ standalone/integration SDK-ներ արտաքին գործիքների մեջ շերտով միացնելու համար։
 - `webapp`՝ UI demo execution, daily mode, user graph updates, autoruns analysis և graph editing-ի համար։
 
 ### 2.2 Հիմնական data flow-ներ
@@ -105,6 +106,10 @@ Operational deployment՝
   - edge reasoning panel,
   - edge history timeline,
   - live edge stream visual effects։
+- Ավելացվել են առանձին installable SDK փաթեթներ՝
+  - `packages/python-sdk` (`autograph-integration-sdk`),
+  - `packages/integration-layer-sdk` (`@autograph/integration-layer-sdk`)։
+- Նույն integration contract-ը հիմա օգտագործվում է և UI-ում, և արտաքին հավելվածների embedding-ի համար։
 
 ## 5. Ինչ է պլանավորվում
 
@@ -235,6 +240,105 @@ Operational deployment՝
   - `ok`
   - `blocked_for_confirmation`
   - `cancelled_by_user`
+
+### 7.3 Efficiency-First Wrapper (առավել արդյունավետ աշխատանքային ռեժիմ)
+
+Եթե պետք է հենց `LLM GGUF`-ի վրա թեթև, արագ և user-adaptive շերտ (առանց UI «էֆեկտների»), օգտագործվում է wrapper API-ը՝
+
+- `POST /api/project/wrapper/respond`
+- `GET /api/project/wrapper/profile`
+- `POST /api/project/wrapper/profile`
+- `POST /api/project/wrapper/feedback`
+
+Հիմնական նպատակը՝
+- role/model selection (`role` կամ explicit `model_path`),
+- graph-memory retrieval (`owned/all` scope),
+- personalization կիրառություն (`style/depth/risk/tone/goals`),
+- feedback loop-ով ավտոմատ հարմարեցում օգտատիրոջ նախասիրություններին։
+
+Այս ռեժիմը նախագծի «արտադրողական» միջուկն է, երբ պետք է առավելագույն արդյունավետություն և նվազագույն ավելորդ ֆունկցիոնալ բեռ։
+
+### 7.4 Installable SDK-ներ (առանձին օգտագործման և embedding-ի համար)
+
+Համակարգի integration layer-ը հիմա հասանելի է ոչ միայն backend endpoint-ներով, այլ նաև առանձին installable փաթեթներով։
+
+Փաթեթներ՝
+- Python՝ `packages/python-sdk` (`autograph-integration-sdk`)
+- JavaScript՝ `packages/integration-layer-sdk` (`@autograph/integration-layer-sdk`)
+
+Տեղադրում՝
+
+```bash
+pip install ./packages/python-sdk
+npm install ./packages/integration-layer-sdk
+```
+
+Աջակցվող ռեժիմներ՝
+- `standalone`՝ անմիջապես աշխատում է local workspace/service-ի հետ, առանց HTTP-ի։
+- `integration`՝ աշխատում է `/api/integration/layer/manifest` և `/api/integration/layer/invoke` endpoint-ներով։
+
+Python standalone օրինակ՝
+
+```python
+from autograph_integration_sdk import IntegrationLayerClient
+from src.web.graph_workspace import GraphWorkspaceService
+
+workspace = GraphWorkspaceService(use_env_adapter=False, enable_living_system=False)
+client = IntegrationLayerClient.from_workspace(
+    workspace,
+    host="vscode",
+    app_id="workspace_plugin",
+)
+
+manifest = client.manifest()
+result = client.respond(
+    "Կազմիր հաջորդ կարճ գործողությունների պլանը",
+    user_id="demo_user",
+    session_id="sess_1",
+)
+```
+
+Python integration (HTTP) օրինակ՝
+
+```python
+from autograph_integration_sdk import IntegrationLayerClient
+
+client = IntegrationLayerClient.from_http(
+    "http://127.0.0.1:8008",
+    host="chat_agent",
+    app_id="bridge_tool",
+)
+
+manifest = client.manifest()
+result = client.invoke_action(
+    "archive.chat",
+    user_id="demo_user",
+    session_id="sess_2",
+    input_payload={"message": "ստուգիր այս update-ը"},
+)
+```
+
+JS փաթեթի օրինակ՝
+
+```javascript
+import {
+  createHttpIntegrationLayerClient,
+  createStandaloneIntegrationLayerClient,
+} from "@autograph/integration-layer-sdk";
+
+const httpClient = createHttpIntegrationLayerClient({
+  baseUrl: "http://127.0.0.1:8008",
+  host: "vscode",
+  appId: "workspace_plugin",
+});
+
+const standaloneClient = createStandaloneIntegrationLayerClient({
+  host: "generic",
+  appId: "local_tool",
+  standaloneManifest: async (payload) => ({ ok: true, payload }),
+  standaloneInvoke: async (payload) => ({ ok: true, result: payload }),
+});
+```
 
 ## 8. Առաջարկվող Quality Gates
 

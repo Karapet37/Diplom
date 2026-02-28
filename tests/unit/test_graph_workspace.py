@@ -771,6 +771,8 @@ class GraphWorkspaceServiceTests(unittest.TestCase):
         self.assertTrue(str(out.get("assistant_reply", "")).strip())
         self.assertEqual(out["model"]["resolution_mode"], "explicit_model_path")
         self.assertTrue(out["graph_binding"]["attached"])
+        self.assertIn("triage", out)
+        self.assertTrue(out["triage"]["enabled"])
         node_types = {row.get("type") for row in out["snapshot"]["nodes"]}
         self.assertIn("llm_archive_update_branch", node_types)
         self.assertIn("llm_archive_update_session", node_types)
@@ -1081,6 +1083,222 @@ class GraphWorkspaceServiceTests(unittest.TestCase):
         audit = self.svc.project_audit_logs({"limit": 200, "include_backups": True})
         self.assertIn("events", audit)
         self.assertGreaterEqual(int(audit["backup_count"]), 1)
+
+    def test_project_wrapper_profile_update_feedback_and_get(self):
+        got = self.svc.project_wrapper_profile_get({"user_id": "u_wrap"})
+        self.assertIn("profile", got)
+        self.assertEqual(str(got["profile"]["preferred_role"]), "general")
+
+        updated = self.svc.project_wrapper_profile_update(
+            {
+                "user_id": "u_wrap",
+                "preferred_role": "analyst",
+                "memory_scope": "owned",
+                "personalization": {
+                    "response_style": "concise",
+                    "reasoning_depth": "balanced",
+                    "risk_tolerance": "low",
+                    "tone": "direct",
+                    "focus_goals": ["reduce noise", "actionable steps"],
+                },
+            }
+        )
+        self.assertTrue(updated["ok"])
+        self.assertEqual(str(updated["profile"]["preferred_role"]), "analyst")
+        self.assertEqual(str(updated["profile"]["personalization"]["response_style"]), "concise")
+
+        feedback = self.svc.project_wrapper_feedback(
+            {
+                "user_id": "u_wrap",
+                "feedback_items": [
+                    {"message": "Shorter answers please", "decision": "accept", "score": 0.9},
+                    {"message": "Too risky suggestions", "decision": "reject", "score": 0.2},
+                ],
+                "attach_to_graph": True,
+            }
+        )
+        self.assertTrue(feedback["ok"])
+        self.assertGreaterEqual(int(feedback["summary"]["new_items"]), 2)
+        self.assertGreaterEqual(int(feedback["feedback_node_id"]), 1)
+
+    def test_project_wrapper_respond_with_memory_context_fallback(self):
+        self.svc.create_node(
+            {
+                "node_type": "generic",
+                "attributes": {
+                    "user_id": "u_wrap_2",
+                    "name": "Release constraints",
+                    "summary": "Do not deploy before legal and security checks are complete.",
+                    "namespace": "personal",
+                },
+            }
+        )
+        out = self.svc.project_wrapper_respond(
+            {
+                "user_id": "u_wrap_2",
+                "session_id": "s_wrap_2",
+                "message": "How should I plan deployment safely?",
+                "use_memory": True,
+                "memory_scope": "owned",
+                "memory_top_k": 5,
+                "apply_profile_update": True,
+            }
+        )
+        self.assertIn("reply", out)
+        self.assertTrue(str(out["reply"]).strip())
+        self.assertIn("memory", out)
+        self.assertTrue(out["memory"]["context"])
+        self.assertTrue(out["model"]["used_fallback"])
+        self.assertIn("triage", out)
+        self.assertTrue(out["triage"]["enabled"])
+
+    def test_project_wrapper_respond_with_explicit_model_path(self):
+        def fake_model_resolver(model_path: str):
+            token = str(model_path or "").strip()
+            if "h2o-danube3-4b-chat" not in token:
+                return None
+
+            def _run(_prompt: str) -> str:
+                return "Plan: first collect constraints, then execute one low-risk step."
+
+            return _run
+
+        svc = GraphWorkspaceService(
+            use_env_adapter=False,
+            enable_living_system=False,
+            model_llm_resolver=fake_model_resolver,
+        )
+        out = svc.project_wrapper_respond(
+            {
+                "user_id": "u_wrap_model",
+                "message": "Need concise action plan",
+                "model_path": "models/gguf/textGen/h2o-danube3-4b-chat-Q5_K_M.gguf",
+                "role": "general",
+                "use_memory": False,
+            }
+        )
+        self.assertFalse(out["model"]["used_fallback"])
+        self.assertEqual(str(out["model"]["resolution"]["mode"]), "explicit_model_path")
+        self.assertIn("collect constraints", str(out["reply"]).lower())
+        self.assertIn("triage", out)
+        self.assertTrue(out["triage"]["enabled"])
+
+    def test_project_wrapper_respond_creates_subject_branch_and_dialect_dictionary(self):
+        out = self.svc.project_wrapper_respond(
+            {
+                "user_id": "u_wrap_gossip",
+                "session_id": "s_wrap_gossip",
+                "message": "Давай перемоем кости Ивана, говорят он сорвал дедлайн и скрыл правки.",
+                "use_memory": False,
+                "store_interaction": True,
+                "subject_name": "Иван",
+                "gossip_mode": "auto",
+                "allow_subject_branch_write": True,
+                "capture_dialect": True,
+            }
+        )
+        self.assertTrue(out["gossip_detected"])
+        self.assertTrue(out["subject_binding"]["attached"])
+        self.assertGreaterEqual(len(out["subject_binding"]["subject_branch_node_ids"]), 1)
+        self.assertGreaterEqual(len(out["subject_binding"]["claim_node_ids"]), 1)
+        self.assertGreaterEqual(int(out["dialect"]["captured_terms"]), 1)
+        self.assertGreaterEqual(int(out["dialect"]["dictionary_size"]), 1)
+        node_types = {row.get("type") for row in out["snapshot"]["nodes"]}
+        self.assertIn("subject_profile_branch", node_types)
+        self.assertIn("subject_claim_node", node_types)
+        self.assertIn("user_dialect_dictionary", node_types)
+
+    def test_project_archive_chat_binds_subject_branch_when_gossip_detected(self):
+        def fake_model_resolver(model_path: str):
+            if "qwen2.5-7b-instruct" not in str(model_path or ""):
+                return None
+
+            def _run(_: str) -> str:
+                return json.dumps(
+                    {
+                        "summary": "Captured unverified discussion claims about subject profile.",
+                        "archive_updates": [
+                            {
+                                "entity": "Иван",
+                                "field": "rumor_note",
+                                "operation": "append",
+                                "value": "Claim about missed deadlines.",
+                                "reason": "Conversation mentions repeated delay concerns.",
+                                "source": "chat_user_report",
+                                "confidence": 0.66,
+                                "tags": ["gossip", "rumor"],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+
+            return _run
+
+        svc = GraphWorkspaceService(
+            use_env_adapter=False,
+            enable_living_system=False,
+            model_llm_resolver=fake_model_resolver,
+        )
+        out = svc.project_archive_verified_chat(
+            {
+                "user_id": "u_archive_gossip",
+                "session_id": "s_archive_gossip",
+                "message": "Сплетни про Ивана: говорят, что он постоянно срывает дедлайны.",
+                "model_path": "models/gguf/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf",
+                "apply_to_graph": True,
+                "verification_mode": "balanced",
+                "subject_name": "Иван",
+                "gossip_mode": "auto",
+                "allow_subject_branch_write": True,
+                "capture_dialect": True,
+            }
+        )
+        self.assertTrue(out["graph_binding"]["attached"])
+        self.assertTrue(out["gossip_detected"])
+        self.assertTrue(out["subject_binding"]["attached"])
+        self.assertGreaterEqual(len(out["subject_binding"]["subject_branch_node_ids"]), 1)
+        self.assertGreaterEqual(len(out["subject_binding"]["claim_node_ids"]), 1)
+        self.assertGreaterEqual(int(out["dialect"]["captured_terms"]), 1)
+        node_types = {row.get("type") for row in out["snapshot"]["nodes"]}
+        self.assertIn("subject_profile_branch", node_types)
+        self.assertIn("subject_claim_node", node_types)
+
+    def test_project_integration_layer_manifest_and_invoke_wrapper(self):
+        manifest = self.svc.project_integration_layer_manifest(
+            {
+                "host": "vscode",
+                "app_id": "workspace_plugin",
+            }
+        )
+        self.assertEqual(str(manifest.get("layer", "")), "autograph_integration_layer")
+        self.assertIn("capabilities", manifest)
+        self.assertGreaterEqual(len(manifest["capabilities"]), 1)
+        self.assertIn("actions_allowed", manifest)
+
+        out = self.svc.project_integration_layer_invoke(
+            {
+                "action": "wrapper.respond",
+                "host": "vscode",
+                "app_id": "workspace_plugin",
+                "user_id": "u_integration",
+                "session_id": "s_integration",
+                "input": {
+                    "message": "Give me one practical next step for release planning.",
+                },
+                "options": {
+                    "use_memory": False,
+                    "store_interaction": True,
+                    "auto_triage": True,
+                },
+            }
+        )
+        self.assertTrue(out["ok"])
+        self.assertEqual(str(out["action"]), "wrapper.respond")
+        self.assertTrue(str(out.get("chat_response", "")).strip())
+        self.assertIn("structured_result", out)
+        triage = (out.get("structured_result", {}) or {}).get("triage", {})
+        self.assertTrue(triage.get("enabled"))
 
 
 if __name__ == "__main__":

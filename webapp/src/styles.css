@@ -1104,6 +1104,165 @@ button:disabled {
   font-family: "IBM Plex Mono", "Consolas", monospace;
 }
 
+.interaction-mode-panel {
+  border: 1px solid #c4d7eb;
+  border-radius: 12px;
+  padding: 11px;
+  margin-bottom: 12px;
+  background:
+    radial-gradient(circle at 90% 4%, rgba(73, 135, 204, 0.13), transparent 35%),
+    linear-gradient(180deg, #f8fcff 0%, #eff7ff 100%);
+  display: grid;
+  gap: 8px;
+}
+
+.interaction-mode-panel.interaction-mode-ai {
+  border-color: #b9d9cf;
+  background:
+    radial-gradient(circle at 90% 4%, rgba(42, 143, 114, 0.16), transparent 35%),
+    linear-gradient(180deg, #f4fcf8 0%, #edf8f2 100%);
+}
+
+.interaction-mode-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.interaction-mode-head h3 {
+  margin: 0;
+  color: #1d4467;
+}
+
+.interaction-mode-head p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #3f617f;
+}
+
+.interaction-mode-badge {
+  border: 1px solid #b4cae1;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: #1d486b;
+  background: #ffffff;
+  white-space: nowrap;
+}
+
+.interaction-mode-slider-wrap {
+  display: grid;
+  gap: 6px;
+}
+
+.interaction-mode-slider-wrap label {
+  font-size: 12px;
+  color: #486882;
+}
+
+.interaction-mode-slider-row {
+  display: grid;
+  grid-template-columns: minmax(100px, auto) minmax(160px, 1fr) minmax(100px, auto);
+  align-items: center;
+  gap: 8px;
+}
+
+.interaction-mode-slider-row span {
+  font-size: 11px;
+  color: #2f536f;
+}
+
+.interaction-mode-slider-row span:last-child {
+  text-align: right;
+}
+
+.interaction-mode-slider-row input[type="range"] {
+  width: 100%;
+  accent-color: #10806b;
+}
+
+.interaction-mode-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #2f4f69;
+}
+
+.integration-layer-shell {
+  display: grid;
+  gap: 10px;
+  border-color: #bfcfe2;
+  background:
+    radial-gradient(circle at 85% 8%, rgba(24, 121, 196, 0.12), transparent 34%),
+    linear-gradient(180deg, #f9fcff 0%, #eef6ff 100%);
+}
+
+.integration-layer-head h2 {
+  margin: 0 0 4px;
+}
+
+.integration-layer-head p {
+  margin: 0;
+  font-size: 13px;
+  color: #3b5f7f;
+}
+
+.integration-layer-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 10px;
+}
+
+.integration-layer-form,
+.integration-layer-output {
+  border: 1px solid #cedded;
+  border-radius: 10px;
+  padding: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #f5faff 100%);
+  display: grid;
+  gap: 8px;
+}
+
+.integration-layer-flags {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.integration-flag {
+  border: 1px solid #d7e4f2;
+  border-radius: 8px;
+  background: #f9fcff;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #2d4f69;
+}
+
+.integration-flag input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.integration-layer-action-note {
+  margin: 0;
+  padding: 8px;
+  border: 1px dashed #c8dbee;
+  border-radius: 8px;
+  background: #f8fcff;
+  font-size: 12px;
+  color: #2e4f69;
+}
+
+.integration-layer-output h3 {
+  margin: 0;
+  font-size: 13px;
+  color: #244d6f;
+}
+
 .multitool-layout {
   display: grid;
   gap: 12px;
@@ -1306,9 +1465,19 @@ pre {
   .multitool-grid,
   .multitool-ops-grid,
   .multitool-stats-grid,
+  .integration-layer-grid,
+  .integration-layer-flags,
   .insight-chart-grid,
   .insight-list-grid,
   .insight-metrics-grid {
     grid-template-columns: 1fr;
+  }
+
+  .interaction-mode-slider-row {
+    grid-template-columns: 1fr;
+  }
+
+  .interaction-mode-slider-row span:last-child {
+    text-align: left;
   }
 }

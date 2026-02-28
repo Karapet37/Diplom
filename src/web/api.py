@@ -437,6 +437,47 @@ class ProjectAuditLogsRequest(BaseModel):
     include_backups: bool = True
 
 
+class ProjectWrapperRespondRequest(BaseModel):
+    user_id: str = "default_user"
+    session_id: str = ""
+    message: str
+    role: str = "general"
+    model_path: str = ""
+    use_memory: bool = True
+    memory_scope: str = "owned"
+    memory_namespace: str = ""
+    memory_top_k: int = 6
+    personalization: dict[str, Any] = Field(default_factory=dict)
+    feedback_items: list[dict[str, Any] | str] = Field(default_factory=list)
+    apply_profile_update: bool = True
+    store_interaction: bool = False
+    subject_name: str = ""
+    gossip_mode: str = "auto"
+    allow_subject_branch_write: bool = True
+    capture_dialect: bool = True
+    auto_triage: bool = True
+    triage_with_llm: bool = True
+
+
+class ProjectWrapperProfileUpdateRequest(BaseModel):
+    user_id: str = "default_user"
+    preferred_role: str = "general"
+    preferred_model_path: str = ""
+    memory_scope: str = "owned"
+    personalization: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectWrapperFeedbackRequest(BaseModel):
+    user_id: str = "default_user"
+    session_id: str = ""
+    feedback_items: list[dict[str, Any] | str] = Field(default_factory=list)
+    message: str = ""
+    decision: str = ""
+    score: float = 0.0
+    target: str = ""
+    attach_to_graph: bool = False
+
+
 class ProjectHallucinationReportRequest(BaseModel):
     user_id: str = "default_user"
     session_id: str = ""
@@ -467,6 +508,28 @@ class ProjectArchiveVerifiedChatRequest(BaseModel):
     apply_to_graph: bool = True
     verification_mode: str = "strict"
     top_k: int = 3
+    subject_name: str = ""
+    gossip_mode: str = "auto"
+    allow_subject_branch_write: bool = True
+    capture_dialect: bool = True
+    auto_triage: bool = True
+    triage_with_llm: bool = True
+
+
+class IntegrationLayerInvokeRequest(BaseModel):
+    action: str = "wrapper.respond"
+    host: str = "generic"
+    app_id: str = "external_app"
+    user_id: str = "default_user"
+    session_id: str = ""
+    input: dict[str, Any] = Field(default_factory=dict)
+    options: dict[str, Any] = Field(default_factory=dict)
+    message: str = ""
+    context: str = ""
+    model_path: str = ""
+    model_role: str = "general"
+    auto_triage: bool = True
+    triage_with_llm: bool = True
 
 
 class ProjectArchiveReviewApplyRequest(BaseModel):
@@ -1125,6 +1188,51 @@ def create_app() -> FastAPI:
     def project_audit_logs(payload: ProjectAuditLogsRequest) -> dict[str, Any]:
         try:
             return graph.project_audit_logs(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/wrapper/respond")
+    def project_wrapper_respond(payload: ProjectWrapperRespondRequest) -> dict[str, Any]:
+        try:
+            return graph.project_wrapper_respond(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/project/wrapper/profile")
+    def project_wrapper_profile(user_id: str = Query(default="default_user")) -> dict[str, Any]:
+        try:
+            return graph.project_wrapper_profile_get({"user_id": user_id})
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/wrapper/profile")
+    def project_wrapper_profile_update(payload: ProjectWrapperProfileUpdateRequest) -> dict[str, Any]:
+        try:
+            return graph.project_wrapper_profile_update(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/wrapper/feedback")
+    def project_wrapper_feedback(payload: ProjectWrapperFeedbackRequest) -> dict[str, Any]:
+        try:
+            return graph.project_wrapper_feedback(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/integration/layer/manifest")
+    def integration_layer_manifest(
+        host: str = Query(default="generic"),
+        app_id: str = Query(default="external_app"),
+    ) -> dict[str, Any]:
+        try:
+            return graph.project_integration_layer_manifest({"host": host, "app_id": app_id})
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/integration/layer/invoke")
+    def integration_layer_invoke(payload: IntegrationLayerInvokeRequest) -> dict[str, Any]:
+        try:
+            return graph.project_integration_layer_invoke(payload.model_dump())
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

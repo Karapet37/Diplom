@@ -403,6 +403,117 @@ _TASK_RISK_LEVELS: tuple[str, ...] = (
     "high",
     "critical",
 )
+_WRAPPER_PROFILE_NODE_TYPE = "llm_wrapper_profile"
+_WRAPPER_CONTEXT_NODE_TYPES_DENY: tuple[str, ...] = (
+    "llm_wrapper_feedback",
+    "llm_wrapper_session",
+)
+_WRAPPER_GOSSIP_MODE_ALLOWED: tuple[str, ...] = (
+    "auto",
+    "off",
+    "force",
+)
+_INTERACTION_TRIAGE_CATEGORIES_ALLOWED: tuple[str, ...] = (
+    "action",
+    "fact",
+    "risk",
+    "style",
+    "noise",
+)
+_INTEGRATION_LAYER_ACTIONS_ALLOWED: tuple[str, ...] = (
+    "wrapper.respond",
+    "archive.chat",
+    "user_graph.update",
+    "personal_tree.ingest",
+)
+_INTEGRATION_LAYER_HOSTS_ALLOWED: tuple[str, ...] = (
+    "generic",
+    "vscode",
+    "chat_agent",
+    "image_creator",
+    "web",
+)
+_GOSSIP_MARKERS: tuple[str, ...] = (
+    "gossip",
+    "rumor",
+    "rumour",
+    "hearsay",
+    "talking behind",
+    "перемыва",
+    "сплет",
+    "слух",
+    "говорят",
+    "բամբաս",
+)
+_SUBJECT_NAME_HINT_RE: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"(?:about|on|regarding)\s+([A-Za-z][A-Za-z0-9 ._'-]{1,64})",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:о|про|насчет|по поводу)\s+([A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё0-9 ._'-]{1,64})",
+        flags=re.IGNORECASE | re.UNICODE,
+    ),
+    re.compile(
+        r"(?:մասին)\s+([^\s,.;:!?]{2,64}(?:\s+[^\s,.;:!?]{2,64})?)",
+        flags=re.IGNORECASE | re.UNICODE,
+    ),
+)
+_DIALECT_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁёԱ-Ֆա-ֆ0-9][A-Za-zА-Яа-яЁёԱ-Ֆա-ֆ0-9_'-]{1,31}", flags=re.UNICODE)
+_DIALECT_STOPWORDS: tuple[str, ...] = (
+    "the",
+    "and",
+    "for",
+    "with",
+    "that",
+    "this",
+    "you",
+    "your",
+    "have",
+    "has",
+    "are",
+    "was",
+    "were",
+    "что",
+    "это",
+    "как",
+    "для",
+    "или",
+    "она",
+    "они",
+    "его",
+    "ее",
+    "мне",
+    "меня",
+    "когда",
+    "если",
+    "где",
+    "и",
+    "в",
+    "на",
+    "не",
+    "то",
+    "это",
+    "кто",
+    "как",
+    "для",
+    "он",
+    "она",
+    "они",
+    "ես",
+    "դու",
+    "նա",
+    "մենք",
+    "դուք",
+    "նրանք",
+    "ու",
+    "է",
+    "եմ",
+    "թե",
+    "որ",
+    "ինչ",
+    "ինչպես",
+)
 
 _PERSONALIZATION_STYLE_ALLOWED: tuple[str, ...] = (
     "adaptive",
@@ -1706,6 +1817,338 @@ class GraphWorkspaceService:
         token = re.sub(r"[^a-z0-9_]+", "_", str(value or "").strip().lower()).strip("_")
         return token or default
 
+    def _normalize_triage_items(
+        self,
+        value: Any,
+        *,
+        fallback_category: str = "fact",
+        limit: int = 12,
+    ) -> list[dict[str, Any]]:
+        rows = value if isinstance(value, list) else []
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in rows:
+            item = self._as_mapping(row)
+            if not item and isinstance(row, str):
+                item = {"summary": row}
+            summary = " ".join(
+                str(
+                    item.get(
+                        "summary",
+                        item.get("text", item.get("title", item.get("content", ""))),
+                    )
+                    or ""
+                ).split()
+            ).strip()
+            if not summary:
+                continue
+            category = self._pick_allowed_token(
+                item.get("category", fallback_category),
+                allowed=_INTERACTION_TRIAGE_CATEGORIES_ALLOWED,
+                default=fallback_category,
+            )
+            reason = " ".join(str(item.get("reason", "") or "").split()).strip()
+            confidence_default = 0.68 if category in {"action", "risk"} else 0.6
+            confidence = self._confidence(item.get("confidence", confidence_default), confidence_default)
+            fingerprint = f"{category}:{self._normalize_token(summary)[:220]}"
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            out.append(
+                {
+                    "category": category,
+                    "summary": summary[:360],
+                    "confidence": round(confidence, 4),
+                    "reason": reason[:420],
+                }
+            )
+            if len(out) >= max(1, int(limit)):
+                break
+        return out
+
+    def _heuristic_interaction_triage_items(
+        self,
+        *,
+        message: str,
+        reply: str,
+        updates: list[dict[str, Any]] | None = None,
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        action_hints = (
+            "should",
+            "need to",
+            "next",
+            "plan",
+            "action",
+            "todo",
+            "нужно",
+            "надо",
+            "сдел",
+            "план",
+            "следующ",
+            "պետք է",
+        )
+        risk_hints = (
+            "risk",
+            "issue",
+            "blocker",
+            "failure",
+            "опас",
+            "риск",
+            "угроз",
+            "խնդիր",
+            "վտանգ",
+        )
+        noise_hints = (
+            "rumor",
+            "gossip",
+            "сплет",
+            "слух",
+            "перемыва",
+            "junk",
+            "trash",
+            "noise",
+            "tmp",
+            "irrelevant",
+        )
+        style_hints = (
+            "style",
+            "tone",
+            "format",
+            "коротк",
+            "стиль",
+            "тон",
+            "ձև",
+            "ոճ",
+        )
+        source_parts: list[str] = []
+        source_parts.extend(self._split_sentences(message, limit=6))
+        source_parts.extend(self._split_sentences(reply, limit=6))
+        for row in list(updates or [])[:4]:
+            item = self._as_mapping(row)
+            entity = str(item.get("entity", "") or "").strip()
+            field = str(item.get("field", "") or "").strip()
+            reason = str(item.get("reason", "") or "").strip()
+            value = str(item.get("value", "") or "").strip()
+            update_line = " ".join(part for part in (entity, field, reason, value) if part).strip()
+            if update_line:
+                source_parts.append(update_line)
+
+        heuristics: list[dict[str, Any]] = []
+        for sentence in source_parts:
+            normalized = " ".join(str(sentence or "").split()).strip()
+            if not normalized:
+                continue
+            lowered = normalized.casefold()
+            category = "fact"
+            reason = "general_signal"
+            confidence = 0.58
+            if any(hint in lowered for hint in action_hints):
+                category = "action"
+                reason = "action_hint"
+                confidence = 0.76
+            elif any(hint in lowered for hint in risk_hints):
+                category = "risk"
+                reason = "risk_hint"
+                confidence = 0.72
+            elif any(hint in lowered for hint in noise_hints):
+                category = "noise"
+                reason = "noise_hint"
+                confidence = 0.78
+            elif any(hint in lowered for hint in style_hints):
+                category = "style"
+                reason = "style_hint"
+                confidence = 0.66
+
+            heuristics.append(
+                {
+                    "category": category,
+                    "summary": normalized,
+                    "confidence": confidence,
+                    "reason": reason,
+                }
+            )
+            if len(heuristics) >= max(3, int(limit) * 2):
+                break
+        return self._normalize_triage_items(heuristics, fallback_category="fact", limit=limit)
+
+    def _auto_interaction_triage(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        source: str,
+        message: str,
+        reply: str,
+        updates: list[dict[str, Any]] | None = None,
+        auto_triage: bool = True,
+        triage_with_llm: bool = True,
+        model_role: str = "analyst",
+        model_path: str = "",
+        attach_to_graph: bool = True,
+        related_node_id: int = 0,
+        llm_fn: Callable[[str], str] | None = None,
+        llm_resolution: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not auto_triage:
+            return {
+                "enabled": False,
+                "source": str(source or "wrapper"),
+                "items": [],
+                "counts": {},
+                "signal_score": 0.0,
+                "noise_ratio": 0.0,
+                "graph": {
+                    "attached": False,
+                    "session_node_id": 0,
+                    "item_node_ids": [],
+                },
+                "llm": {
+                    "requested": False,
+                    "used": False,
+                    "resolution": dict(llm_resolution or {}),
+                },
+            }
+
+        normalized_updates = [self._as_mapping(row) for row in list(updates or [])]
+        heuristic_items = self._heuristic_interaction_triage_items(
+            message=message,
+            reply=reply,
+            updates=normalized_updates,
+            limit=8,
+        )
+
+        llm_requested = bool(triage_with_llm)
+        llm_used = False
+        llm_raw_output = ""
+        llm_items: list[dict[str, Any]] = []
+        llm_resolution_payload = self._as_mapping(llm_resolution)
+        resolved_llm_fn = llm_fn
+        if llm_requested and resolved_llm_fn is None:
+            resolved_llm_fn, llm_resolution_payload = self._resolve_role_or_model_llm(
+                role=self._debate_role(model_role, fallback="analyst"),
+                model_path=model_path,
+            )
+
+        if llm_requested and resolved_llm_fn is not None:
+            triage_prompt = (
+                "You are a signal triage assistant.\n"
+                "Classify interaction fragments into categories: action, fact, risk, style, noise.\n"
+                "Return JSON only:\n"
+                '{ "items":[{ "category":"action|fact|risk|style|noise", "summary":"", "confidence":0.0, "reason":"" }] }\n'
+                "Keep max 8 concise items and avoid duplicates.\n"
+                f"Message: {message}\n"
+                f"Reply: {reply}\n"
+                f"Structured updates: {self._stable_json(normalized_updates)[:1600]}\n"
+            )
+            try:
+                llm_raw_output = str(resolved_llm_fn(triage_prompt) or "").strip()
+                parsed = self._extract_json_from_llm_output(llm_raw_output)
+                parsed_items = []
+                if isinstance(parsed, Mapping):
+                    parsed_items = parsed.get("items", parsed.get("triage_items", []))
+                elif isinstance(parsed, list):
+                    parsed_items = parsed
+                llm_items = self._normalize_triage_items(parsed_items, fallback_category="fact", limit=8)
+                llm_used = bool(llm_items)
+            except Exception:
+                llm_items = []
+                llm_used = False
+
+        items = llm_items or heuristic_items
+        counts = Counter(str(row.get("category", "fact") or "fact") for row in items)
+        total = max(1, len(items))
+        signal_total = float(counts.get("action", 0) + counts.get("fact", 0) + counts.get("risk", 0))
+        noise_total = float(counts.get("noise", 0))
+        signal_score = max(0.0, min(1.0, signal_total / float(total)))
+        noise_ratio = max(0.0, min(1.0, noise_total / float(total)))
+
+        graph_session_node_id = 0
+        graph_item_node_ids: list[int] = []
+        graph_attached = False
+        if attach_to_graph and items:
+            triage_session_node = self.api.engine.create_node(
+                "llm_triage_session",
+                attributes={
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "source": str(source or "wrapper"),
+                    "message": message[:1600],
+                    "reply": reply[:2400],
+                    "counts": dict(counts),
+                    "signal_score": round(signal_score, 4),
+                    "noise_ratio": round(noise_ratio, 4),
+                    "llm_used": bool(llm_used),
+                    "created_at": float(time.time()),
+                },
+                state={"confidence": max(0.3, 1.0 - (noise_ratio * 0.65))},
+            )
+            graph_session_node_id = int(triage_session_node.id)
+            graph_attached = True
+            if related_node_id > 0 and self.api.engine.get_node(related_node_id) is not None:
+                self._connect_nodes(
+                    from_node=int(related_node_id),
+                    to_node=int(triage_session_node.id),
+                    relation_type="triaged_by",
+                    weight=max(0.45, signal_score),
+                    logic_rule="interaction_triage",
+                )
+
+            for index, item in enumerate(items, start=1):
+                category = self._pick_allowed_token(
+                    item.get("category", "fact"),
+                    allowed=_INTERACTION_TRIAGE_CATEGORIES_ALLOWED,
+                    default="fact",
+                )
+                triage_item_node = self.api.engine.create_node(
+                    "llm_triage_item",
+                    attributes={
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "source": str(source or "wrapper"),
+                        "name": self._to_title(
+                            f"{category}: {str(item.get('summary', '') or '')}",
+                            fallback=f"Triage Item {index}",
+                            limit=96,
+                        ),
+                        "category": category,
+                        "summary": str(item.get("summary", "") or "")[:600],
+                        "reason": str(item.get("reason", "") or "")[:600],
+                        "rank": index,
+                        "created_at": float(time.time()),
+                    },
+                    state={"confidence": self._confidence(item.get("confidence", 0.6), 0.6)},
+                )
+                graph_item_node_ids.append(int(triage_item_node.id))
+                self._connect_nodes(
+                    from_node=int(triage_session_node.id),
+                    to_node=int(triage_item_node.id),
+                    relation_type="triage_item",
+                    weight=self._confidence(item.get("confidence", 0.6), 0.6),
+                    logic_rule="interaction_triage",
+                    metadata={"category": category, "rank": index},
+                )
+
+        return {
+            "enabled": True,
+            "source": str(source or "wrapper"),
+            "items": items,
+            "counts": dict(counts),
+            "signal_score": round(signal_score, 4),
+            "noise_ratio": round(noise_ratio, 4),
+            "graph": {
+                "attached": bool(graph_attached),
+                "session_node_id": int(graph_session_node_id),
+                "item_node_ids": graph_item_node_ids,
+            },
+            "llm": {
+                "requested": bool(llm_requested),
+                "used": bool(llm_used),
+                "resolution": llm_resolution_payload,
+                "raw_output": llm_raw_output[:3000],
+            },
+        }
+
     def _iter_user_nodes(
         self,
         *,
@@ -1833,6 +2276,630 @@ class GraphWorkspaceService:
             "created_nodes": int(created_nodes),
             "created_edges": int(created_edges),
         }
+
+    def _wrapper_profile_defaults(self, *, user_id: str) -> dict[str, Any]:
+        now = time.time()
+        return {
+            "user_id": user_id,
+            "name": f"Wrapper Profile · {user_id}",
+            "response_style": "adaptive",
+            "reasoning_depth": "balanced",
+            "risk_tolerance": "medium",
+            "tone": "neutral",
+            "focus_goals": [],
+            "domain_focus": [],
+            "avoid_topics": [],
+            "memory_notes": "",
+            "llm_roles": {
+                "proposer": _DEBATE_DEFAULT_ROLES["proposer"],
+                "critic": _DEBATE_DEFAULT_ROLES["critic"],
+                "judge": _DEBATE_DEFAULT_ROLES["judge"],
+            },
+            "preferred_role": "general",
+            "preferred_model_path": "",
+            "memory_scope": "owned",
+            "feedback_total": 0,
+            "feedback_positive": 0,
+            "feedback_negative": 0,
+            "feedback_recent": [],
+            "dialect_dictionary": [],
+            "dialect_last_update_at": 0.0,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    def _ensure_wrapper_profile_node(self, *, user_id: str):
+        defaults = self._wrapper_profile_defaults(user_id=user_id)
+        node, _ = self._ensure_shared_node(
+            node_type=_WRAPPER_PROFILE_NODE_TYPE,
+            identity_key="user_id",
+            identity_value=user_id,
+            attributes=defaults,
+        )
+        attrs = self._as_mapping(node.attributes)
+        for key, value in defaults.items():
+            if key not in attrs:
+                node.attributes[key] = value
+        node.attributes["updated_at"] = time.time()
+        return node
+
+    def _wrapper_profile_payload(self, node: Any) -> dict[str, Any]:
+        attrs = self._as_mapping(getattr(node, "attributes", {}))
+        personalization = self._sanitize_personalization(
+            {
+                "response_style": attrs.get("response_style", "adaptive"),
+                "reasoning_depth": attrs.get("reasoning_depth", "balanced"),
+                "risk_tolerance": attrs.get("risk_tolerance", "medium"),
+                "tone": attrs.get("tone", "neutral"),
+                "focus_goals": attrs.get("focus_goals", []),
+                "domain_focus": attrs.get("domain_focus", []),
+                "avoid_topics": attrs.get("avoid_topics", []),
+                "memory_notes": attrs.get("memory_notes", ""),
+                "llm_roles": attrs.get("llm_roles", {}),
+            }
+        )
+        preferred_role = self._debate_role(attrs.get("preferred_role"), fallback="general")
+        preferred_model_path = str(attrs.get("preferred_model_path", "") or "").strip()
+        memory_scope = self._pick_allowed_token(
+            attrs.get("memory_scope", "owned"),
+            allowed=_MEMORY_SCOPE_ALLOWED,
+            default="owned",
+        )
+        return {
+            "user_id": str(attrs.get("user_id", "") or "").strip(),
+            "name": str(attrs.get("name", "") or "").strip(),
+            "preferred_role": preferred_role,
+            "preferred_model_path": preferred_model_path,
+            "memory_scope": memory_scope,
+            "personalization": personalization,
+            "feedback": {
+                "total": self._to_int(attrs.get("feedback_total", 0), 0),
+                "positive": self._to_int(attrs.get("feedback_positive", 0), 0),
+                "negative": self._to_int(attrs.get("feedback_negative", 0), 0),
+                "recent": self._as_list(attrs.get("feedback_recent"))[-12:],
+                "updated_at": float(attrs.get("updated_at", 0.0) or 0.0),
+            },
+            "dialect": {
+                "dictionary": self._as_list(attrs.get("dialect_dictionary"))[:60],
+                "updated_at": float(attrs.get("dialect_last_update_at", 0.0) or 0.0),
+            },
+        }
+
+    def _merge_personalization(
+        self,
+        base: Mapping[str, Any] | None,
+        override: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        left = self._sanitize_personalization(base)
+        right = self._sanitize_personalization(override)
+        if not left:
+            return right
+        if not right:
+            return left
+
+        out = dict(left)
+        for key in ("response_style", "reasoning_depth", "risk_tolerance", "tone", "language"):
+            if key in right and str(right.get(key, "")).strip():
+                out[key] = right[key]
+
+        for key in ("focus_goals", "domain_focus", "avoid_topics"):
+            merged = self._dedupe_strings(
+                self._to_list_of_strings(left.get(key))
+                + self._to_list_of_strings(right.get(key)),
+                limit=24,
+            )
+            if merged:
+                out[key] = merged
+
+        notes = " ".join(
+            str(right.get("memory_notes", "") or left.get("memory_notes", "") or "").split()
+        ).strip()
+        if notes:
+            out["memory_notes"] = notes[:1200]
+
+        roles = {
+            **self._as_mapping(left.get("llm_roles")),
+            **self._as_mapping(right.get("llm_roles")),
+        }
+        if roles:
+            out["llm_roles"] = roles
+        return self._sanitize_personalization(out)
+
+    def _wrapper_memory_context(
+        self,
+        *,
+        user_id: str,
+        query: str,
+        scope: str = "owned",
+        namespace: str = "",
+        top_k: int = 6,
+    ) -> list[dict[str, Any]]:
+        query_tokens = self._token_set(query)
+        nodes = self._iter_user_nodes(user_id=user_id, namespace=namespace, scope=scope)
+        if not nodes:
+            nodes = list(self.api.engine.store.nodes.values())
+        degree_map = self._graph_degree_map({int(node.id) for node in nodes})
+
+        rows: list[dict[str, Any]] = []
+        for node in nodes:
+            if str(node.type or "") in _WRAPPER_CONTEXT_NODE_TYPES_DENY:
+                continue
+            text_blob = self._node_text_blob(node)
+            if not text_blob:
+                continue
+            node_tokens = self._token_set(text_blob)
+            overlap = self._jaccard_similarity(query_tokens, node_tokens) if query_tokens else 0.0
+            degree_boost = min(1.0, float(degree_map.get(int(node.id), 0)) / 12.0)
+            user_boost = 0.08 if self._node_belongs_to_user(node, user_id) else 0.0
+            score = (0.78 * overlap) + (0.22 * degree_boost) + user_boost
+            if query_tokens and score < 0.08:
+                continue
+            attrs = self._as_mapping(node.attributes)
+            summary = (
+                str(attrs.get("summary", "") or attrs.get("description", "") or attrs.get("note", "") or "").strip()
+            )
+            if len(summary) > 240:
+                summary = f"{summary[:237].rstrip()}..."
+            rows.append(
+                {
+                    "node_id": int(node.id),
+                    "type": str(node.type or "generic"),
+                    "name": str(attrs.get("name", "") or attrs.get("title", "") or "").strip() or f"Node {node.id}",
+                    "summary": summary,
+                    "namespace": self._node_namespace(node, default="global"),
+                    "score": round(max(0.0, min(1.0, score)), 4),
+                }
+            )
+        rows.sort(key=lambda row: float(row.get("score", 0.0)), reverse=True)
+        return rows[: max(1, min(24, int(top_k)))]
+
+    def _wrapper_prompt(
+        self,
+        *,
+        message: str,
+        personalization: Mapping[str, Any] | None,
+        memory_context: list[Mapping[str, Any]],
+    ) -> str:
+        profile_block = self._personalization_prompt_context(personalization)
+        context_lines: list[str] = []
+        for idx, row in enumerate(memory_context[:8], start=1):
+            title = str(row.get("name", "") or f"Node {row.get('node_id', idx)}")
+            summary = str(row.get("summary", "") or "").strip()
+            context_lines.append(
+                f"[{idx}] {title} (node:{row.get('node_id')}, ns:{row.get('namespace', 'global')}, score:{row.get('score')})"
+            )
+            if summary:
+                context_lines.append(f"    {summary}")
+        context_block = "\n".join(context_lines).strip() or "No strong graph context retrieved."
+
+        return (
+            "You are an efficiency-first LLM wrapper assistant.\n"
+            "Rules:\n"
+            "- Be practical and concise.\n"
+            "- Do not fabricate facts. If uncertain, state uncertainty explicitly.\n"
+            "- Prioritize actionable next steps.\n"
+            "- Use retrieved graph context when relevant.\n"
+            f"{profile_block}\n"
+            "Retrieved graph context:\n"
+            f"{context_block}\n"
+            "User message:\n"
+            f"{message}\n"
+            "Answer:"
+        )
+
+    def _wrapper_fallback_reply(
+        self,
+        *,
+        message: str,
+        memory_context: list[Mapping[str, Any]],
+    ) -> str:
+        lead = self._to_title(message, fallback="User request", limit=120)
+        if memory_context:
+            hints = ", ".join(str(item.get("name", "")) for item in memory_context[:3] if str(item.get("name", "")).strip())
+            if hints:
+                return f"{lead}. Context from your graph: {hints}. Next: refine goal, constraints, and first measurable action."
+        return f"{lead}. Next: define goal, constraints, and first measurable action."
+
+    def _apply_wrapper_feedback_to_profile(
+        self,
+        *,
+        profile_node: Any,
+        feedback_items: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        attrs = self._as_mapping(profile_node.attributes)
+        accepted = 0
+        rejected = 0
+        combined_messages: list[str] = []
+        for row in feedback_items:
+            decision = str(row.get("decision", "") or "").strip()
+            score = self._confidence(row.get("score", 0.0), 0.0)
+            if decision in {"accept", "accepted", "like", "liked"} or score >= 0.66:
+                accepted += 1
+            if decision in {"reject", "rejected", "dislike", "discard"} or score <= 0.34:
+                rejected += 1
+            message = " ".join(str(row.get("message", "") or "").split()).strip()
+            if message:
+                combined_messages.append(message.lower())
+        message_blob = " ".join(combined_messages)
+
+        if any(hint in message_blob for hint in ("короче", "short", "concise", "кратко")):
+            profile_node.attributes["response_style"] = "concise"
+            profile_node.attributes["reasoning_depth"] = "quick"
+        if any(hint in message_blob for hint in ("подроб", "detail", "deeper", "глубже")):
+            profile_node.attributes["response_style"] = "deep"
+            profile_node.attributes["reasoning_depth"] = "deep"
+        if any(hint in message_blob for hint in ("осторож", "safe", "risk", "conservative")):
+            profile_node.attributes["risk_tolerance"] = "low"
+        if any(hint in message_blob for hint in ("смел", "aggressive", "bold")):
+            profile_node.attributes["risk_tolerance"] = "high"
+
+        prev_total = self._to_int(attrs.get("feedback_total", 0), 0)
+        prev_pos = self._to_int(attrs.get("feedback_positive", 0), 0)
+        prev_neg = self._to_int(attrs.get("feedback_negative", 0), 0)
+        profile_node.attributes["feedback_total"] = prev_total + len(feedback_items)
+        profile_node.attributes["feedback_positive"] = prev_pos + accepted
+        profile_node.attributes["feedback_negative"] = prev_neg + rejected
+        history = self._as_list(attrs.get("feedback_recent")) + feedback_items
+        profile_node.attributes["feedback_recent"] = history[-20:]
+        profile_node.attributes["updated_at"] = time.time()
+        return {
+            "new_items": len(feedback_items),
+            "accepted": accepted,
+            "rejected": rejected,
+            "feedback_total": int(profile_node.attributes.get("feedback_total", 0) or 0),
+        }
+
+    def _normalize_gossip_mode(self, value: Any, *, default: str = "auto") -> str:
+        return self._pick_allowed_token(
+            value,
+            allowed=_WRAPPER_GOSSIP_MODE_ALLOWED,
+            default=default,
+        )
+
+    @staticmethod
+    def _identity_slug(value: Any, *, fallback: str = "item") -> str:
+        token = re.sub(r"[^\w]+", "_", str(value or "").strip().casefold(), flags=re.UNICODE).strip("_")
+        return token or fallback
+
+    def _looks_like_gossip(self, text: Any) -> bool:
+        source = self._normalize_token(text)
+        if not source:
+            return False
+        return any(marker in source for marker in _GOSSIP_MARKERS)
+
+    def _extract_subject_candidates(
+        self,
+        *,
+        message: str,
+        explicit_subject: Any = "",
+        updates: list[Mapping[str, Any]] | None = None,
+    ) -> list[str]:
+        candidates: list[str] = []
+        explicit = " ".join(str(explicit_subject or "").split()).strip()
+        if explicit:
+            candidates.append(explicit[:120])
+
+        for row in updates or []:
+            entity = " ".join(str(row.get("entity", "") or "").split()).strip()
+            if entity:
+                candidates.append(entity[:120])
+
+        source = str(message or "")
+        for pattern in _SUBJECT_NAME_HINT_RE:
+            for match in pattern.finditer(source):
+                candidate = " ".join(str(match.group(1) or "").split()).strip(" \t\r\n,.;:!?")
+                if not candidate:
+                    continue
+                if len(candidate) < 2:
+                    continue
+                candidates.append(candidate[:120])
+
+        out = self._dedupe_strings(candidates, limit=8)
+        return [item for item in out if len(item) >= 2]
+
+    def _ensure_subject_branch_node(self, *, user_id: str, subject_name: str):
+        clean = " ".join(str(subject_name or "").split()).strip()
+        if not clean:
+            clean = "Unknown Subject"
+        subject_slug = self._identity_slug(clean, fallback="subject")
+        subject_key = f"{user_id}:{subject_slug}"
+        node, _ = self._ensure_shared_node(
+            node_type="subject_profile_branch",
+            identity_key="subject_key",
+            identity_value=subject_key,
+            attributes={
+                "subject_key": subject_key,
+                "user_id": user_id,
+                "subject_name": clean,
+                "name": clean,
+                "description": "Subject-centric branch for socially sourced claims and context.",
+                "created_at": float(time.time()),
+            },
+        )
+        node.attributes["subject_name"] = clean
+        node.attributes["name"] = clean
+        node.attributes["updated_at"] = float(time.time())
+        return node
+
+    def _bind_subject_conversation(
+        self,
+        *,
+        user_id: str,
+        session_node_id: int,
+        message: str,
+        reply: str,
+        explicit_subject: Any,
+        updates: list[Mapping[str, Any]] | None,
+        verification: Mapping[str, Any] | None,
+        gossip_mode: str,
+        allow_write: bool,
+    ) -> dict[str, Any]:
+        detected = self._looks_like_gossip(message)
+        mode = self._normalize_gossip_mode(gossip_mode, default="auto")
+        subjects = self._extract_subject_candidates(
+            message=message,
+            explicit_subject=explicit_subject,
+            updates=updates,
+        )
+
+        binding: dict[str, Any] = {
+            "attached": False,
+            "gossip_detected": bool(detected),
+            "mode": mode,
+            "subject_branch_node_ids": [],
+            "claim_node_ids": [],
+        }
+        if not allow_write:
+            binding["blocked"] = "subject_branch_write_disabled"
+            return binding
+        if mode == "off":
+            return binding
+        if mode == "auto" and not detected and not subjects:
+            return binding
+        if not subjects:
+            fallback_subject = self._to_title(
+                message,
+                fallback="Conversation Subject",
+                limit=48,
+            )
+            subjects = [fallback_subject]
+
+        verified = bool((verification or {}).get("verified", False))
+        claim_rows = self._as_list(updates) if isinstance(updates, list) else []
+        claim_node_ids: list[int] = []
+        subject_node_ids: list[int] = []
+        now = float(time.time())
+        for subject in subjects[:6]:
+            subject_node = self._ensure_subject_branch_node(user_id=user_id, subject_name=subject)
+            subject_node_ids.append(int(subject_node.id))
+            binding["attached"] = True
+
+            if session_node_id > 0:
+                self._connect_nodes(
+                    from_node=int(session_node_id),
+                    to_node=int(subject_node.id),
+                    relation_type="discusses_subject",
+                    weight=0.76 if detected else 0.62,
+                    logic_rule="subject_branch_bind",
+                    metadata={
+                        "gossip_detected": bool(detected),
+                        "mode": mode,
+                    },
+                )
+
+            selected_rows: list[Mapping[str, Any]] = []
+            for row in claim_rows:
+                entity = self._normalize_token(row.get("entity"))
+                if entity and entity == self._normalize_token(subject):
+                    selected_rows.append(row)
+            if not selected_rows:
+                selected_rows = claim_rows[:3]
+
+            if not selected_rows:
+                selected_rows = [
+                    {
+                        "entity": subject,
+                        "field": "conversation_summary",
+                        "operation": "append",
+                        "value": self._to_title(message, fallback="discussion", limit=180),
+                        "reason": self._to_title(reply, fallback="conversation reply", limit=180),
+                        "source": "conversation_memory",
+                        "confidence": 0.4 if detected else 0.58,
+                        "tags": ["gossip"] if detected else ["conversation"],
+                    }
+                ]
+
+            for row in selected_rows[:8]:
+                field = " ".join(str(row.get("field", "") or "").split()).strip() or "detail"
+                operation = " ".join(str(row.get("operation", "") or "").split()).strip() or "append"
+                reason = " ".join(str(row.get("reason", "") or "").split()).strip()
+                source = " ".join(str(row.get("source", "") or "").split()).strip()
+                claim_text = reason
+                if not claim_text:
+                    claim_text = f"{field}: {self._stable_json(row.get('value'))[:240]}"
+                if not claim_text:
+                    continue
+                claim_key = self._hallucination_signature(user_id, subject, field, operation, claim_text)
+                claim_node, _ = self._ensure_shared_node(
+                    node_type="subject_claim_node",
+                    identity_key="claim_key",
+                    identity_value=claim_key,
+                    attributes={
+                        "claim_key": claim_key,
+                        "user_id": user_id,
+                        "subject_name": subject,
+                        "field": field,
+                        "operation": operation,
+                        "claim": claim_text[:500],
+                        "value": row.get("value"),
+                        "source": source[:500],
+                        "verified": bool(verified),
+                        "gossip_flag": bool(detected),
+                        "tags": self._to_list_of_strings(row.get("tags")),
+                        "created_at": now,
+                    },
+                )
+                claim_node.attributes["claim"] = claim_text[:500]
+                claim_node.attributes["value"] = row.get("value")
+                claim_node.attributes["source"] = source[:500]
+                claim_node.attributes["verified"] = bool(verified)
+                claim_node.attributes["gossip_flag"] = bool(detected)
+                claim_node.attributes["subject_name"] = subject
+                claim_node.attributes["updated_at"] = now
+                claim_node.attributes["confidence"] = self._confidence(row.get("confidence", 0.55), 0.55)
+
+                self._connect_nodes(
+                    from_node=int(subject_node.id),
+                    to_node=int(claim_node.id),
+                    relation_type="has_subject_claim",
+                    weight=self._confidence(row.get("confidence", 0.55), 0.55),
+                    logic_rule="subject_branch_claim",
+                    metadata={
+                        "verified": bool(verified),
+                        "gossip_flag": bool(detected),
+                    },
+                )
+                claim_node_ids.append(int(claim_node.id))
+
+        binding["subject_branch_node_ids"] = self._dedupe_strings([str(item) for item in subject_node_ids], limit=128)
+        binding["subject_branch_node_ids"] = [int(item) for item in binding["subject_branch_node_ids"] if str(item).isdigit()]
+        binding["claim_node_ids"] = self._dedupe_strings([str(item) for item in claim_node_ids], limit=256)
+        binding["claim_node_ids"] = [int(item) for item in binding["claim_node_ids"] if str(item).isdigit()]
+        return binding
+
+    def _extract_dialect_terms(self, text: str) -> dict[str, int]:
+        counter: Counter[str] = Counter()
+        for raw in _DIALECT_TOKEN_RE.findall(str(text or "")):
+            token = self._normalize_token(raw).replace(" ", "")
+            if not token:
+                continue
+            if token in _DIALECT_STOPWORDS:
+                continue
+            if token.isdigit():
+                continue
+            if len(token) < 2:
+                continue
+            counter[token] += 1
+        out: dict[str, int] = {}
+        for token, count in counter.most_common(80):
+            if count <= 0:
+                continue
+            if count == 1 and len(token) > 8:
+                continue
+            out[token] = int(count)
+        return out
+
+    def _capture_wrapper_dialect(
+        self,
+        *,
+        user_id: str,
+        profile_node: Any,
+        message: str,
+        reply: str,
+        attach_to_graph: bool,
+    ) -> dict[str, Any]:
+        merged = f"{message}\n{reply}".strip()
+        terms = self._extract_dialect_terms(merged)
+        summary = {
+            "captured_terms": 0,
+            "dictionary_size": 0,
+            "top_terms": [],
+            "dictionary_node_id": 0,
+        }
+        if not terms:
+            return summary
+
+        attrs = self._as_mapping(profile_node.attributes)
+        existing_rows = self._as_list(attrs.get("dialect_dictionary"))
+        by_term: dict[str, dict[str, Any]] = {}
+        for row in existing_rows:
+            item = self._as_mapping(row)
+            term = self._normalize_token(item.get("term")).replace(" ", "")
+            if not term:
+                continue
+            by_term[term] = {
+                "term": term,
+                "count": self._to_int(item.get("count", 0), 0),
+                "last_seen_at": float(item.get("last_seen_at", 0.0) or 0.0),
+            }
+
+        now = float(time.time())
+        for term, count in terms.items():
+            row = by_term.get(term, {"term": term, "count": 0, "last_seen_at": 0.0})
+            row["count"] = self._to_int(row.get("count", 0), 0) + int(count)
+            row["last_seen_at"] = now
+            by_term[term] = row
+
+        dictionary_rows = list(by_term.values())
+        dictionary_rows.sort(
+            key=lambda row: (
+                int(row.get("count", 0) or 0),
+                float(row.get("last_seen_at", 0.0) or 0.0),
+            ),
+            reverse=True,
+        )
+        dictionary_rows = dictionary_rows[:160]
+        profile_node.attributes["dialect_dictionary"] = dictionary_rows
+        profile_node.attributes["dialect_last_update_at"] = now
+
+        dictionary_node_id = 0
+        if attach_to_graph:
+            dictionary_node, _ = self._ensure_shared_node(
+                node_type="user_dialect_dictionary",
+                identity_key="user_id",
+                identity_value=user_id,
+                attributes={
+                    "user_id": user_id,
+                    "name": f"Dialect Dictionary ({user_id})",
+                    "description": "Adaptive short-style/slang lexicon extracted from user interactions.",
+                    "created_at": now,
+                },
+            )
+            dictionary_node.attributes["terms_count"] = len(dictionary_rows)
+            dictionary_node.attributes["top_terms"] = [row.get("term") for row in dictionary_rows[:20]]
+            dictionary_node.attributes["updated_at"] = now
+            dictionary_node_id = int(dictionary_node.id)
+
+            self._connect_nodes(
+                from_node=int(profile_node.id),
+                to_node=int(dictionary_node.id),
+                relation_type="tracks_dialect_dictionary",
+                weight=0.83,
+                logic_rule="wrapper_dialect_capture",
+            )
+
+            for row in dictionary_rows[:24]:
+                term = str(row.get("term", "") or "").strip()
+                if not term:
+                    continue
+                term_key = f"{user_id}:{self._identity_slug(term, fallback='term')}"
+                term_node, _ = self._ensure_shared_node(
+                    node_type="dialect_term",
+                    identity_key="term_key",
+                    identity_value=term_key,
+                    attributes={
+                        "term_key": term_key,
+                        "user_id": user_id,
+                        "term": term,
+                        "created_at": now,
+                    },
+                )
+                term_node.attributes["term"] = term
+                term_node.attributes["count"] = self._to_int(row.get("count", 0), 0)
+                term_node.attributes["last_seen_at"] = float(row.get("last_seen_at", now) or now)
+                self._connect_nodes(
+                    from_node=int(dictionary_node.id),
+                    to_node=int(term_node.id),
+                    relation_type="has_dialect_term",
+                    weight=min(1.0, 0.3 + (0.06 * float(self._to_int(row.get("count", 1), 1)))),
+                    logic_rule="wrapper_dialect_capture",
+                )
+
+        summary["captured_terms"] = len(terms)
+        summary["dictionary_size"] = len(dictionary_rows)
+        summary["top_terms"] = [str(row.get("term", "") or "") for row in dictionary_rows[:12]]
+        summary["dictionary_node_id"] = int(dictionary_node_id)
+        return summary
 
     def _sanitize_personalization(self, payload: Any) -> dict[str, Any]:
         root = self._as_mapping(payload)
@@ -2193,6 +3260,12 @@ class GraphWorkspaceService:
         )
         top_k = max(1, min(8, self._to_int(root.get("top_k", 3), 3)))
         apply_to_graph = self._to_bool(root.get("apply_to_graph", True))
+        subject_name = " ".join(str(root.get("subject_name", "") or "").split()).strip()
+        gossip_mode = self._normalize_gossip_mode(root.get("gossip_mode"), default="auto")
+        allow_subject_branch_write = self._to_bool(root.get("allow_subject_branch_write", True))
+        capture_dialect = self._to_bool(root.get("capture_dialect", True))
+        auto_triage = self._to_bool(root.get("auto_triage", True))
+        triage_with_llm = self._to_bool(root.get("triage_with_llm", True))
         return {
             "message": message[:2400],
             "context": context[:2400],
@@ -2201,6 +3274,12 @@ class GraphWorkspaceService:
             "verification_mode": verification_mode,
             "top_k": top_k,
             "apply_to_graph": apply_to_graph,
+            "subject_name": subject_name[:140],
+            "gossip_mode": gossip_mode,
+            "allow_subject_branch_write": allow_subject_branch_write,
+            "capture_dialect": capture_dialect,
+            "auto_triage": auto_triage,
+            "triage_with_llm": triage_with_llm,
         }
 
     def _normalize_archive_updates(self, value: Any) -> list[dict[str, Any]]:
@@ -2406,12 +3485,22 @@ class GraphWorkspaceService:
         raw_output: str,
         verification_mode: str,
         apply_to_graph: bool,
+        subject_name: str = "",
+        gossip_mode: str = "auto",
+        allow_subject_branch_write: bool = True,
     ) -> dict[str, Any]:
         graph_binding: dict[str, Any] = {
             "attached": False,
             "branch_node_id": 0,
             "session_node_id": 0,
             "update_node_ids": [],
+            "subject_binding": {
+                "attached": False,
+                "gossip_detected": False,
+                "mode": self._normalize_gossip_mode(gossip_mode, default="auto"),
+                "subject_branch_node_ids": [],
+                "claim_node_ids": [],
+            },
         }
         if not apply_to_graph:
             return graph_binding
@@ -2512,6 +3601,18 @@ class GraphWorkspaceService:
             )
             update_node_ids.append(int(update_node.id))
         graph_binding["update_node_ids"] = update_node_ids
+        subject_binding = self._bind_subject_conversation(
+            user_id=user_id,
+            session_node_id=int(session_node.id),
+            message=message,
+            reply=summary or "",
+            explicit_subject=subject_name,
+            updates=updates,
+            verification=verification,
+            gossip_mode=gossip_mode,
+            allow_write=allow_subject_branch_write,
+        )
+        graph_binding["subject_binding"] = subject_binding
         return graph_binding
 
     def _build_archive_chat_reply(
@@ -7543,6 +8644,674 @@ class GraphWorkspaceService:
             "backup_count": len(backups),
         }
 
+    def project_wrapper_profile_get(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        user_id = str(root.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        node = self._ensure_wrapper_profile_node(user_id=user_id)
+        return {
+            "profile": self._wrapper_profile_payload(node),
+            "roles_allowed": list(_DEBATE_ROLES_ALLOWED),
+            "memory_scopes_allowed": list(_MEMORY_SCOPE_ALLOWED),
+        }
+
+    def project_wrapper_profile_update(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        user_id = str(root.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        node = self._ensure_wrapper_profile_node(user_id=user_id)
+        current_profile = self._wrapper_profile_payload(node)
+        current_personalization = self._as_mapping(current_profile.get("personalization"))
+
+        personalization_source = root.get("personalization")
+        if not isinstance(personalization_source, Mapping):
+            personalization_source = root
+        requested_personalization = self._sanitize_personalization(personalization_source)
+        merged = self._merge_personalization(current_personalization, requested_personalization)
+
+        attrs = self._as_mapping(node.attributes)
+        for key in ("response_style", "reasoning_depth", "risk_tolerance", "tone"):
+            if key in merged:
+                node.attributes[key] = merged.get(key)
+        for key in ("focus_goals", "domain_focus", "avoid_topics"):
+            if key in merged:
+                node.attributes[key] = self._to_list_of_strings(merged.get(key))
+        if "memory_notes" in merged:
+            node.attributes["memory_notes"] = str(merged.get("memory_notes", "") or "")[:1200]
+        if "llm_roles" in merged:
+            node.attributes["llm_roles"] = self._as_mapping(merged.get("llm_roles"))
+
+        preferred_role = self._debate_role(
+            root.get("preferred_role", attrs.get("preferred_role", "general")),
+            fallback="general",
+        )
+        preferred_model_path = str(root.get("preferred_model_path", attrs.get("preferred_model_path", "")) or "").strip()
+        memory_scope = self._pick_allowed_token(
+            root.get("memory_scope", attrs.get("memory_scope", "owned")),
+            allowed=_MEMORY_SCOPE_ALLOWED,
+            default="owned",
+        )
+        node.attributes["preferred_role"] = preferred_role
+        node.attributes["preferred_model_path"] = preferred_model_path
+        node.attributes["memory_scope"] = memory_scope
+        node.attributes["updated_at"] = time.time()
+
+        persisted = self._persist_graph_safe()
+        self.api.engine._record_event(  # noqa: SLF001
+            "wrapper_profile_updated",
+            {
+                "user_id": user_id,
+                "preferred_role": preferred_role,
+                "memory_scope": memory_scope,
+            },
+        )
+        return {
+            "ok": True,
+            "persisted": bool(persisted),
+            "profile": self._wrapper_profile_payload(node),
+            "roles_allowed": list(_DEBATE_ROLES_ALLOWED),
+            "memory_scopes_allowed": list(_MEMORY_SCOPE_ALLOWED),
+            **self.snapshot_payload(),
+        }
+
+    def project_wrapper_feedback(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        user_id = str(root.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(root.get("session_id", "") or "").strip()
+        feedback_items = self._normalize_feedback_items(
+            root.get("feedback_items", root.get("items", []))
+        )
+        if not feedback_items:
+            feedback_items = self._normalize_feedback_items(
+                [
+                    {
+                        "message": str(root.get("message", "") or "").strip(),
+                        "score": self._confidence(root.get("score", 0.0), 0.0),
+                        "decision": str(root.get("decision", "") or "").strip(),
+                        "target": str(root.get("target", "") or "").strip(),
+                    }
+                ]
+            )
+        if not feedback_items:
+            raise ValueError("feedback_items is required")
+
+        node = self._ensure_wrapper_profile_node(user_id=user_id)
+        summary = self._apply_wrapper_feedback_to_profile(
+            profile_node=node,
+            feedback_items=feedback_items,
+        )
+        node.attributes["updated_at"] = time.time()
+
+        attach_to_graph = self._to_bool(root.get("attach_to_graph", False))
+        feedback_node_id = 0
+        if attach_to_graph:
+            feedback_node = self.api.engine.create_node(
+                "llm_wrapper_feedback",
+                attributes={
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "items": feedback_items,
+                    "summary": summary,
+                    "created_at": time.time(),
+                },
+                state={"confidence": 0.72},
+            )
+            feedback_node_id = int(feedback_node.id)
+            self._connect_nodes(
+                from_node=int(node.id),
+                to_node=int(feedback_node.id),
+                relation_type="wrapper_feedback",
+                weight=0.84,
+                logic_rule="wrapper_feedback",
+            )
+
+        persisted = self._persist_graph_safe()
+        self.api.engine._record_event(  # noqa: SLF001
+            "wrapper_feedback_saved",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "items": len(feedback_items),
+                "feedback_node_id": feedback_node_id,
+            },
+        )
+        return {
+            "ok": True,
+            "persisted": bool(persisted),
+            "summary": summary,
+            "feedback_node_id": int(feedback_node_id),
+            "profile": self._wrapper_profile_payload(node),
+            **self.snapshot_payload(),
+        }
+
+    def project_wrapper_respond(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        user_id = str(root.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(root.get("session_id", "") or "").strip()
+        message = " ".join(
+            str(root.get("message", root.get("prompt", root.get("text", ""))) or "").split()
+        ).strip()
+        if not message:
+            raise ValueError("message is required")
+
+        profile_node = self._ensure_wrapper_profile_node(user_id=user_id)
+        profile = self._wrapper_profile_payload(profile_node)
+        base_personalization = self._as_mapping(profile.get("personalization"))
+        override_personalization = self._sanitize_personalization(root.get("personalization"))
+        personalization = self._merge_personalization(base_personalization, override_personalization)
+
+        preferred_role = str(profile.get("preferred_role", "general") or "general").strip() or "general"
+        requested_role = root.get("role", root.get("model_role", preferred_role))
+        role = self._debate_role(requested_role, fallback=preferred_role or "general")
+        model_path = str(root.get("model_path", profile.get("preferred_model_path", "")) or "").strip()
+        use_memory = self._to_bool(root.get("use_memory", True))
+        memory_scope = self._pick_allowed_token(
+            root.get("memory_scope", profile.get("memory_scope", "owned")),
+            allowed=_MEMORY_SCOPE_ALLOWED,
+            default="owned",
+        )
+        memory_namespace = str(root.get("memory_namespace", "") or "").strip()
+        memory_top_k = max(1, min(24, self._to_int(root.get("memory_top_k", 6), 6)))
+        subject_name = " ".join(str(root.get("subject_name", "") or "").split()).strip()
+        gossip_mode = self._normalize_gossip_mode(root.get("gossip_mode"), default="auto")
+        allow_subject_branch_write = self._to_bool(root.get("allow_subject_branch_write", True))
+        capture_dialect = self._to_bool(root.get("capture_dialect", True))
+        auto_triage = self._to_bool(root.get("auto_triage", True))
+        triage_with_llm = self._to_bool(root.get("triage_with_llm", True))
+        memory_context = (
+            self._wrapper_memory_context(
+                user_id=user_id,
+                query=message,
+                scope=memory_scope,
+                namespace=memory_namespace,
+                top_k=memory_top_k,
+            )
+            if use_memory
+            else []
+        )
+
+        llm_fn, resolution = self._resolve_role_or_model_llm(
+            role=role,
+            model_path=model_path,
+        )
+        prompt = self._wrapper_prompt(
+            message=message,
+            personalization=personalization,
+            memory_context=memory_context,
+        )
+        raw_output = ""
+        reply = ""
+        used_fallback = False
+        if llm_fn is not None:
+            try:
+                raw_output = str(llm_fn(prompt) or "").strip()
+            except Exception:
+                raw_output = ""
+            reply = " ".join(raw_output.split()).strip()
+        if not reply:
+            used_fallback = True
+            reply = self._wrapper_fallback_reply(
+                message=message,
+                memory_context=memory_context,
+            )
+
+        apply_profile_update = self._to_bool(root.get("apply_profile_update", True))
+        if apply_profile_update:
+            profile_node.attributes["response_style"] = personalization.get("response_style", "adaptive")
+            profile_node.attributes["reasoning_depth"] = personalization.get("reasoning_depth", "balanced")
+            profile_node.attributes["risk_tolerance"] = personalization.get("risk_tolerance", "medium")
+            profile_node.attributes["tone"] = personalization.get("tone", "neutral")
+            profile_node.attributes["focus_goals"] = self._to_list_of_strings(personalization.get("focus_goals"))
+            profile_node.attributes["domain_focus"] = self._to_list_of_strings(personalization.get("domain_focus"))
+            profile_node.attributes["avoid_topics"] = self._to_list_of_strings(personalization.get("avoid_topics"))
+            profile_node.attributes["memory_notes"] = str(personalization.get("memory_notes", "") or "")[:1200]
+            profile_node.attributes["llm_roles"] = self._as_mapping(personalization.get("llm_roles"))
+            profile_node.attributes["preferred_role"] = role
+            profile_node.attributes["preferred_model_path"] = model_path
+            profile_node.attributes["memory_scope"] = memory_scope
+            profile_node.attributes["last_query"] = message[:1600]
+            profile_node.attributes["last_reply"] = reply[:2400]
+            profile_node.attributes["last_context_nodes"] = [int(row.get("node_id", 0)) for row in memory_context[:12]]
+            profile_node.attributes["query_total"] = self._to_int(profile_node.attributes.get("query_total", 0), 0) + 1
+            profile_node.attributes["updated_at"] = time.time()
+
+        feedback_items = self._normalize_feedback_items(root.get("feedback_items"))
+        feedback_summary: dict[str, Any] = {}
+        if feedback_items:
+            feedback_summary = self._apply_wrapper_feedback_to_profile(
+                profile_node=profile_node,
+                feedback_items=feedback_items,
+            )
+
+        store_interaction = self._to_bool(root.get("store_interaction", False))
+        session_node_id = 0
+        if store_interaction:
+            session_node = self.api.engine.create_node(
+                "llm_wrapper_session",
+                attributes={
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "message": message,
+                    "reply": reply,
+                    "role": role,
+                    "model_path": model_path,
+                    "memory_context": memory_context[:8],
+                    "used_fallback": bool(used_fallback),
+                    "created_at": time.time(),
+                },
+                state={"confidence": 0.74 if not used_fallback else 0.45},
+            )
+            session_node_id = int(session_node.id)
+            self._connect_nodes(
+                from_node=int(profile_node.id),
+                to_node=int(session_node.id),
+                relation_type="wrapper_interaction",
+                weight=0.84 if not used_fallback else 0.55,
+                logic_rule="wrapper_respond",
+            )
+
+        subject_binding = self._bind_subject_conversation(
+            user_id=user_id,
+            session_node_id=int(session_node_id),
+            message=message,
+            reply=reply,
+            explicit_subject=subject_name,
+            updates=[],
+            verification={},
+            gossip_mode=gossip_mode,
+            allow_write=allow_subject_branch_write,
+        )
+        dialect_summary = self._capture_wrapper_dialect(
+            user_id=user_id,
+            profile_node=profile_node,
+            message=message,
+            reply=reply,
+            attach_to_graph=bool(capture_dialect and (store_interaction or apply_profile_update)),
+        ) if capture_dialect else {"captured_terms": 0, "dictionary_size": 0, "top_terms": [], "dictionary_node_id": 0}
+        triage = self._auto_interaction_triage(
+            user_id=user_id,
+            session_id=session_id,
+            source="wrapper",
+            message=message,
+            reply=reply,
+            updates=[],
+            auto_triage=auto_triage,
+            triage_with_llm=triage_with_llm,
+            model_role=role,
+            model_path=model_path,
+            attach_to_graph=bool(store_interaction or apply_profile_update),
+            related_node_id=int(session_node_id or profile_node.id),
+            llm_fn=llm_fn,
+            llm_resolution=resolution,
+        )
+
+        should_persist = bool(
+            apply_profile_update
+            or feedback_items
+            or store_interaction
+            or bool(subject_binding.get("attached", False))
+            or int(dialect_summary.get("captured_terms", 0) or 0) > 0
+            or bool(self._as_mapping(triage.get("graph")).get("attached", False))
+        )
+        persisted = self._persist_graph_safe() if should_persist else False
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "wrapper_responded",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "role": role,
+                "model_path": model_path,
+                "llm_available": llm_fn is not None,
+                "used_fallback": bool(used_fallback),
+                "context_nodes": len(memory_context),
+                "session_node_id": int(session_node_id),
+                "gossip_detected": bool(subject_binding.get("gossip_detected", False)),
+                "subject_branch_attached": bool(subject_binding.get("attached", False)),
+                "dialect_terms_captured": int(dialect_summary.get("captured_terms", 0) or 0),
+                "triage_items": len(self._as_list(triage.get("items"))),
+                "triage_noise_ratio": self._to_float(triage.get("noise_ratio", 0.0), 0.0),
+            },
+        )
+        return {
+            "user_id": user_id,
+            "session_id": session_id,
+            "reply": reply,
+            "model": {
+                "role": role,
+                "model_path": model_path,
+                "resolution": resolution,
+                "llm_available": llm_fn is not None,
+                "used_fallback": bool(used_fallback),
+            },
+            "memory": {
+                "enabled": bool(use_memory),
+                "scope": memory_scope,
+                "namespace": memory_namespace,
+                "top_k": memory_top_k,
+                "context": memory_context,
+            },
+            "profile": self._wrapper_profile_payload(profile_node),
+            "feedback": feedback_summary,
+            "subject_binding": subject_binding,
+            "gossip_detected": bool(subject_binding.get("gossip_detected", False)),
+            "dialect": dialect_summary,
+            "triage": triage,
+            "persisted": bool(persisted),
+            "session_node_id": int(session_node_id),
+            "raw_output": raw_output[:6000],
+            **self.snapshot_payload(),
+        }
+
+    def project_integration_layer_manifest(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        requested_host = self._safe_slug(root.get("host", "generic"), default="generic")
+        host = requested_host if requested_host in _INTEGRATION_LAYER_HOSTS_ALLOWED else "generic"
+        app_id = self._safe_slug(root.get("app_id", "external_app"), default="external_app")
+
+        model_advisors: dict[str, Any] = {}
+        try:
+            from src.utils.local_llm_provider import list_model_advisors
+
+            model_advisors = self._as_mapping(list_model_advisors())
+        except Exception:
+            model_advisors = {
+                "detected_models": [],
+                "advisors": [],
+            }
+
+        capabilities = [
+            {
+                "action": "wrapper.respond",
+                "description": "Conversational response with memory + triage.",
+                "writes_graph": True,
+                "supports_chat_response": True,
+                "supports_structured_result": True,
+            },
+            {
+                "action": "archive.chat",
+                "description": "Verification-first archive update chat.",
+                "writes_graph": True,
+                "supports_chat_response": True,
+                "supports_structured_result": True,
+            },
+            {
+                "action": "user_graph.update",
+                "description": "Apply profile/questionnaire updates into semantic user graph.",
+                "writes_graph": True,
+                "supports_chat_response": True,
+                "supports_structured_result": True,
+            },
+            {
+                "action": "personal_tree.ingest",
+                "description": "Extract summary + thought points and write into personal tree.",
+                "writes_graph": True,
+                "supports_chat_response": True,
+                "supports_structured_result": True,
+            },
+        ]
+
+        return {
+            "layer": "autograph_integration_layer",
+            "version": "1.0.0",
+            "generated_at": float(time.time()),
+            "host": host,
+            "app_id": app_id,
+            "endpoint": {
+                "manifest": "/api/integration/layer/manifest",
+                "invoke": "/api/integration/layer/invoke",
+            },
+            "hosts_allowed": list(_INTEGRATION_LAYER_HOSTS_ALLOWED),
+            "actions_allowed": list(_INTEGRATION_LAYER_ACTIONS_ALLOWED),
+            "capabilities": capabilities,
+            "ui_contract": {
+                "chat_response_field": "chat_response",
+                "structured_result_field": "structured_result",
+                "raw_result_field": "result",
+                "editable_output_paths": [
+                    "result.archive_updates",
+                    "result.triage.items",
+                    "result.review.archive_updates",
+                ],
+            },
+            "defaults": {
+                "auto_triage": True,
+                "triage_with_llm": True,
+                "apply_to_graph": True,
+                "use_llm_profile": True,
+            },
+            "models": {
+                "detected": self._to_list_of_strings(model_advisors.get("detected_models")),
+                "advisors": self._as_list(model_advisors.get("advisors")),
+            },
+            "examples": {
+                "wrapper.respond": {
+                    "action": "wrapper.respond",
+                    "host": host,
+                    "app_id": app_id,
+                    "user_id": "demo_user",
+                    "session_id": "sess_demo_wrapper",
+                    "input": {
+                        "message": "Give me a concise action plan for my next step.",
+                    },
+                    "options": {
+                        "role": "general",
+                        "use_memory": True,
+                        "auto_triage": True,
+                    },
+                },
+            },
+        }
+
+    def project_integration_layer_invoke(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        raw_action = " ".join(str(root.get("action", "wrapper.respond") or "wrapper.respond").split()).strip().lower()
+        action_alias = raw_action.replace("/", ".").replace(":", ".").replace("__", ".")
+        if action_alias not in _INTEGRATION_LAYER_ACTIONS_ALLOWED:
+            raise ValueError(f"unsupported action: {raw_action}")
+        action = action_alias
+
+        requested_host = self._safe_slug(root.get("host", "generic"), default="generic")
+        host = requested_host if requested_host in _INTEGRATION_LAYER_HOSTS_ALLOWED else "generic"
+        app_id = self._safe_slug(root.get("app_id", "external_app"), default="external_app")
+        user_id = str(root.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(root.get("session_id", "") or "").strip() or f"{host}_session"
+
+        input_payload = self._as_mapping(root.get("input"))
+        options = self._as_mapping(root.get("options"))
+
+        message = " ".join(
+            str(
+                input_payload.get(
+                    "message",
+                    input_payload.get("text", root.get("message", root.get("text", ""))),
+                )
+                or ""
+            ).split()
+        ).strip()
+        context = " ".join(str(input_payload.get("context", root.get("context", "")) or "").split()).strip()
+        model_path = str(
+            options.get("model_path", input_payload.get("model_path", root.get("model_path", ""))) or ""
+        ).strip()
+        model_role = self._debate_role(
+            options.get("model_role", input_payload.get("model_role", root.get("model_role", "general"))),
+            fallback="general",
+        )
+        auto_triage = self._to_bool(options.get("auto_triage", root.get("auto_triage", True)))
+        triage_with_llm = self._to_bool(options.get("triage_with_llm", root.get("triage_with_llm", True)))
+
+        chat_response = ""
+        structured_result: dict[str, Any] = {}
+        result: dict[str, Any] = {}
+
+        if action == "wrapper.respond":
+            if not message:
+                raise ValueError("input.message is required for wrapper.respond")
+            result = self.project_wrapper_respond(
+                {
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "message": message,
+                    "role": self._debate_role(options.get("role", model_role), fallback=model_role),
+                    "model_path": model_path,
+                    "use_memory": self._to_bool(options.get("use_memory", True)),
+                    "memory_scope": self._pick_allowed_token(
+                        options.get("memory_scope", "owned"),
+                        allowed=_MEMORY_SCOPE_ALLOWED,
+                        default="owned",
+                    ),
+                    "memory_namespace": str(options.get("memory_namespace", "") or "").strip(),
+                    "memory_top_k": max(1, min(24, self._to_int(options.get("memory_top_k", 6), 6))),
+                    "apply_profile_update": self._to_bool(options.get("apply_profile_update", True)),
+                    "store_interaction": self._to_bool(options.get("store_interaction", True)),
+                    "auto_triage": auto_triage,
+                    "triage_with_llm": triage_with_llm,
+                }
+            )
+            chat_response = " ".join(str(result.get("reply", "") or "").split()).strip()
+            structured_result = {
+                "triage": self._as_mapping(result.get("triage")),
+                "memory": self._as_mapping(result.get("memory")),
+                "subject_binding": self._as_mapping(result.get("subject_binding")),
+                "dialect": self._as_mapping(result.get("dialect")),
+            }
+
+        elif action == "archive.chat":
+            if not message:
+                raise ValueError("input.message is required for archive.chat")
+            result = self.project_archive_verified_chat(
+                {
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "message": message,
+                    "context": context,
+                    "model_path": model_path,
+                    "model_role": model_role,
+                    "apply_to_graph": self._to_bool(options.get("apply_to_graph", True)),
+                    "verification_mode": self._pick_allowed_token(
+                        options.get("verification_mode", "strict"),
+                        allowed=_ARCHIVE_VERIFICATION_MODES_ALLOWED,
+                        default="strict",
+                    ),
+                    "top_k": max(1, min(8, self._to_int(options.get("top_k", 3), 3))),
+                    "auto_triage": auto_triage,
+                    "triage_with_llm": triage_with_llm,
+                }
+            )
+            chat_response = " ".join(str(result.get("assistant_reply", "") or "").split()).strip()
+            structured_result = {
+                "verification": self._as_mapping(result.get("verification")),
+                "archive_updates": self._as_list(result.get("archive_updates")),
+                "triage": self._as_mapping(result.get("triage")),
+                "graph_binding": self._as_mapping(result.get("graph_binding")),
+            }
+
+        elif action == "user_graph.update":
+            text = message
+            if not text:
+                text = " ".join(
+                    self._to_list_of_strings(
+                        input_payload.get(
+                            "profile_lines",
+                            input_payload.get("facts", []),
+                        )
+                    )
+                ).strip()
+            if not text:
+                raise ValueError("input.message or input.profile_lines is required for user_graph.update")
+
+            result = self.project_user_graph_update(
+                {
+                    "user_id": user_id,
+                    "display_name": str(input_payload.get("display_name", user_id) or user_id).strip() or user_id,
+                    "text": text,
+                    "language": str(input_payload.get("language", "en") or "en").strip() or "en",
+                    "session_id": session_id,
+                    "use_llm_profile": self._to_bool(options.get("use_llm_profile", True)),
+                    "include_client_profile": self._to_bool(options.get("include_client_profile", False)),
+                    "profile_text": text,
+                    "fears": input_payload.get("fears", []),
+                    "desires": input_payload.get("desires", []),
+                    "goals": input_payload.get("goals", []),
+                    "principles": input_payload.get("principles", []),
+                    "opportunities": input_payload.get("opportunities", []),
+                    "abilities": input_payload.get("abilities", []),
+                    "access": input_payload.get("access", []),
+                    "knowledge": input_payload.get("knowledge", []),
+                    "assets": input_payload.get("assets", []),
+                }
+            )
+            profile_json = self._as_mapping(result.get("profile_update_json"))
+            dimensions = self._as_mapping(profile_json.get("dimensions"))
+            non_empty_dimensions = sum(
+                1 for rows in dimensions.values() if isinstance(rows, list) and len(rows) > 0
+            )
+            chat_response = (
+                f"User graph updated. Non-empty dimensions: {non_empty_dimensions}. "
+                f"Profile source: {str(profile_json.get('source', 'heuristic') or 'heuristic')}."
+            )
+            structured_result = {
+                "profile_update_json": profile_json,
+                "semantic_binding": self._as_mapping(result.get("semantic_binding")),
+            }
+
+        elif action == "personal_tree.ingest":
+            text = message
+            if not text:
+                raise ValueError("input.message is required for personal_tree.ingest")
+            result = self.project_personal_tree_ingest(
+                {
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "title": str(input_payload.get("title", "") or "").strip(),
+                    "topic": str(input_payload.get("topic", "") or "").strip(),
+                    "text": text,
+                    "source_type": self._pick_allowed_token(
+                        input_payload.get("source_type", "text"),
+                        allowed=_PERSONAL_TREE_SOURCE_TYPES_ALLOWED,
+                        default="text",
+                    ),
+                    "source_url": str(input_payload.get("source_url", "") or "").strip(),
+                    "source_title": str(input_payload.get("source_title", "") or "").strip(),
+                    "max_points": max(2, min(12, self._to_int(input_payload.get("max_points", 6), 6))),
+                    "max_nodes": max(40, min(300, self._to_int(options.get("max_nodes", 180), 180))),
+                }
+            )
+            extraction = self._as_mapping(result.get("extraction"))
+            chat_response = " ".join(
+                str(extraction.get("summary", "") or result.get("ingest", {}).get("title", "Ingest completed")).split()
+            ).strip()
+            if not chat_response:
+                chat_response = "Ingest completed."
+            structured_result = {
+                "extraction": extraction,
+                "semantic_binding": self._as_mapping(result.get("semantic_binding")),
+                "tree": self._as_mapping(result.get("tree")),
+            }
+
+        self.api.engine._record_event(  # noqa: SLF001
+            "integration_layer_invoked",
+            {
+                "host": host,
+                "app_id": app_id,
+                "action": action,
+                "user_id": user_id,
+                "session_id": session_id,
+                "auto_triage": bool(auto_triage),
+            },
+        )
+
+        return {
+            "ok": True,
+            "layer": "autograph_integration_layer",
+            "host": host,
+            "app_id": app_id,
+            "action": action,
+            "user_id": user_id,
+            "session_id": session_id,
+            "chat_response": chat_response,
+            "structured_result": structured_result,
+            "result": result,
+        }
+
     def project_db_schema(self) -> dict[str, Any]:
         if self.living_system is None:
             return {
@@ -8008,6 +9777,12 @@ class GraphWorkspaceService:
         top_k = max(1, min(8, self._to_int(sanitized.get("top_k", 3), 3)))
         verification_mode = str(sanitized.get("verification_mode", "strict") or "strict").strip() or "strict"
         apply_to_graph = self._to_bool(sanitized.get("apply_to_graph", True))
+        subject_name = str(sanitized.get("subject_name", "") or "").strip()
+        gossip_mode = self._normalize_gossip_mode(sanitized.get("gossip_mode"), default="auto")
+        allow_subject_branch_write = self._to_bool(sanitized.get("allow_subject_branch_write", True))
+        capture_dialect = self._to_bool(sanitized.get("capture_dialect", True))
+        auto_triage = self._to_bool(sanitized.get("auto_triage", True))
+        triage_with_llm = self._to_bool(sanitized.get("triage_with_llm", True))
 
         llm_fn, selected_model_path, resolution_mode = self._resolve_archive_chat_llm(
             model_path=model_path,
@@ -8089,12 +9864,46 @@ class GraphWorkspaceService:
             raw_output=raw_output,
             verification_mode=verification_mode,
             apply_to_graph=apply_to_graph,
+            subject_name=subject_name,
+            gossip_mode=gossip_mode,
+            allow_subject_branch_write=allow_subject_branch_write,
         )
         assistant_reply = self._build_archive_chat_reply(
             message=message,
             summary=summary,
             updates=updates,
             verification=verification,
+        )
+        profile_node = self._ensure_wrapper_profile_node(user_id=user_id)
+        dialect_summary = self._capture_wrapper_dialect(
+            user_id=user_id,
+            profile_node=profile_node,
+            message=message,
+            reply=assistant_reply,
+            attach_to_graph=bool(apply_to_graph and capture_dialect),
+        ) if capture_dialect else {"captured_terms": 0, "dictionary_size": 0, "top_terms": [], "dictionary_node_id": 0}
+        if capture_dialect:
+            profile_node.attributes["updated_at"] = float(time.time())
+        triage = self._auto_interaction_triage(
+            user_id=user_id,
+            session_id=session_id,
+            source="archive",
+            message=message,
+            reply=assistant_reply,
+            updates=updates,
+            auto_triage=auto_triage,
+            triage_with_llm=triage_with_llm,
+            model_role=model_role,
+            model_path=selected_path,
+            attach_to_graph=bool(apply_to_graph),
+            related_node_id=self._to_int(graph_binding.get("session_node_id", 0), 0),
+            llm_fn=llm_fn,
+            llm_resolution={
+                "mode": resolution_mode,
+                "selected_model_path": selected_path,
+                "requested_model_path": model_path,
+                "requested_role": model_role,
+            },
         )
 
         self.api.engine._record_event(  # noqa: SLF001
@@ -8110,6 +9919,12 @@ class GraphWorkspaceService:
                 "hallucination_guard_hits": int(verification.get("hallucination_guard_hits", 0) or 0),
                 "verification_mode": verification_mode,
                 "attached_to_graph": bool(graph_binding.get("attached", False)),
+                "gossip_detected": bool(
+                    self._as_mapping(graph_binding.get("subject_binding")).get("gossip_detected", False)
+                ),
+                "dialect_terms_captured": int(dialect_summary.get("captured_terms", 0) or 0),
+                "triage_items": len(self._as_list(triage.get("items"))),
+                "triage_noise_ratio": self._to_float(triage.get("noise_ratio", 0.0), 0.0),
             },
         )
 
@@ -8131,6 +9946,13 @@ class GraphWorkspaceService:
             "archive_updates": updates,
             "verification": verification,
             "graph_binding": graph_binding,
+            "subject_binding": self._as_mapping(graph_binding.get("subject_binding")),
+            "gossip_detected": bool(
+                self._as_mapping(graph_binding.get("subject_binding")).get("gossip_detected", False)
+            ),
+            "dialect": dialect_summary,
+            "triage": triage,
+            "profile": self._wrapper_profile_payload(profile_node),
             "review": {
                 "summary": summary,
                 "archive_updates": updates,

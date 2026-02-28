@@ -1,3 +1,5 @@
 """Web package for FastAPI service and React integration."""
 
-__all__: list[str] = []
+from .integration_sdk import IntegrationLayerClient
+
+__all__ = ["IntegrationLayerClient"]

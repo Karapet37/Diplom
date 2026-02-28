@@ -44,6 +44,10 @@ _GRAPH_MUTATION_PATHS = {
     "/api/project/task-risk/board",
     "/api/project/llm-policy",
     "/api/project/backup/restore",
+    "/api/project/wrapper/respond",
+    "/api/project/wrapper/profile",
+    "/api/project/wrapper/feedback",
+    "/api/integration/layer/invoke",
 }
 
 _KNOWLEDGE_MUTATION_PATHS = {
@@ -211,6 +215,8 @@ class RuntimeControlPlane:
                 "/api/project/archive/chat",
                 "/api/project/graph-rag/query",
                 "/api/project/packages/manage",
+                "/api/project/wrapper/respond",
+                "/api/integration/layer/invoke",
             }:
                 return False, "prompt_execution_disabled"
 

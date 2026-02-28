@@ -46,9 +46,11 @@ Legacy agent/speech/personalizer modules were removed.
 - `src/autonomous_graph/storage.py`: JSON / Neo4j adapters.
 - `src/web/graph_workspace.py`: workspace service + LLM profile import into graph.
 - `src/web/api.py`: FastAPI routes.
+- `src/web/integration_sdk.py`: shared Python SDK contract for standalone + HTTP integration.
 - `src/living_system/`: 10-layer resilient runtime (SQL knowledge, diagnostics, recovery, evolution, prompt brain).
 - `src/utils/env_loader.py`: `.env` loader.
 - `src/utils/local_llm_provider.py`: local GGUF orchestration.
+- `packages/`: installable Python and JS SDK wrappers for external integrations.
 - `webapp/`: React UI.
 
 ## Install
@@ -106,6 +108,156 @@ Open `http://127.0.0.1:5173`.
 5. Chat and archive updates:
 - ask in natural language via `POST /api/project/archive/chat` with selected GGUF model path or role.
 - review/edit generated archive updates separately via `POST /api/project/archive/review`.
+
+## Efficiency-First Wrapper (Recommended)
+
+If you want a minimal productive layer over GGUF models (without visual extras), use the wrapper endpoints:
+
+- `POST /api/project/wrapper/respond`
+- `GET /api/project/wrapper/profile`
+- `POST /api/project/wrapper/profile`
+- `POST /api/project/wrapper/feedback`
+
+What it does:
+- resolves GGUF by `role` or explicit `model_path`,
+- retrieves top relevant graph-memory context (owned/all scope),
+- applies user personalization (`style/depth/risk/tone/goals`),
+- stores profile adaptation and feedback loop.
+
+Minimal response call:
+
+```bash
+curl -s -X POST "http://127.0.0.1:8008/api/project/wrapper/respond" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id":"demo_user",
+    "session_id":"demo_session",
+    "message":"Собери короткий план безопасного релиза",
+    "role":"analyst",
+    "use_memory":true,
+    "memory_scope":"owned",
+    "memory_top_k":6
+  }'
+```
+
+Update profile preferences:
+
+```bash
+curl -s -X POST "http://127.0.0.1:8008/api/project/wrapper/profile" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id":"demo_user",
+    "preferred_role":"analyst",
+    "memory_scope":"owned",
+    "personalization":{
+      "response_style":"concise",
+      "reasoning_depth":"balanced",
+      "risk_tolerance":"low",
+      "tone":"direct"
+    }
+  }'
+```
+
+Send feedback for adaptation:
+
+```bash
+curl -s -X POST "http://127.0.0.1:8008/api/project/wrapper/feedback" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id":"demo_user",
+    "feedback_items":[
+      {"message":"короче и по шагам", "decision":"accept", "score":0.9},
+      {"message":"без рискованных действий", "decision":"accept", "score":0.8}
+    ]
+  }'
+```
+
+## Integration SDK Packages
+
+The integration layer is now available both inside this repository and as installable packages.
+
+Available packages:
+- Python: `packages/python-sdk` (`autograph-integration-sdk`)
+- JS: `packages/integration-layer-sdk` (`@autograph/integration-layer-sdk`)
+
+Install the Python package:
+
+```bash
+pip install ./packages/python-sdk
+```
+
+Install the JS package:
+
+```bash
+npm install ./packages/integration-layer-sdk
+```
+
+Two usage modes are supported:
+- `standalone`: direct in-process calls to the workspace service, no HTTP required.
+- `integration`: remote calls to `/api/integration/layer/manifest` and `/api/integration/layer/invoke`.
+
+Python standalone example:
+
+```python
+from autograph_integration_sdk import IntegrationLayerClient
+from src.web.graph_workspace import GraphWorkspaceService
+
+workspace = GraphWorkspaceService(use_env_adapter=False, enable_living_system=False)
+client = IntegrationLayerClient.from_workspace(
+    workspace,
+    host="vscode",
+    app_id="workspace_plugin",
+)
+
+manifest = client.manifest()
+result = client.respond(
+    "Build a concise next-step plan",
+    user_id="demo_user",
+    session_id="sess_1",
+)
+```
+
+Python HTTP integration example:
+
+```python
+from autograph_integration_sdk import IntegrationLayerClient
+
+client = IntegrationLayerClient.from_http(
+    "http://127.0.0.1:8008",
+    host="chat_agent",
+    app_id="bridge_tool",
+)
+
+manifest = client.manifest()
+result = client.invoke_action(
+    "archive.chat",
+    user_id="demo_user",
+    session_id="sess_2",
+    input_payload={"message": "verify this update"},
+)
+```
+
+JS package example:
+
+```javascript
+import {
+  createHttpIntegrationLayerClient,
+  createStandaloneIntegrationLayerClient,
+} from "@autograph/integration-layer-sdk";
+
+const httpClient = createHttpIntegrationLayerClient({
+  baseUrl: "http://127.0.0.1:8008",
+  host: "vscode",
+  appId: "workspace_plugin",
+});
+
+const standaloneClient = createStandaloneIntegrationLayerClient({
+  host: "generic",
+  appId: "local_tool",
+  standaloneManifest: async (payload) => ({ ok: true, payload }),
+  standaloneInvoke: async (payload) => ({ ok: true, result: payload }),
+});
+```
 
 ## Local GGUF Models
 
@@ -225,6 +377,10 @@ data/profile_exports/
 - `POST /api/project/hallucination/check`
 - `POST /api/project/archive/chat`
 - `POST /api/project/archive/review`
+- `POST /api/project/wrapper/respond`
+- `GET /api/project/wrapper/profile`
+- `POST /api/project/wrapper/profile`
+- `POST /api/project/wrapper/feedback`
 - `POST /api/project/user-graph/update`
 - `POST /api/project/autoruns/import`
 - `GET /api/project/model-advisors`
