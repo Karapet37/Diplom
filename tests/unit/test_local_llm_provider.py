@@ -12,6 +12,7 @@ from src.utils import local_llm_provider as provider
 class _FakeLlama:
     calls_lock = threading.Lock()
     init_calls = 0
+    last_messages = None
 
     def __init__(self, *args, **kwargs):
         with _FakeLlama.calls_lock:
@@ -20,6 +21,7 @@ class _FakeLlama:
         time.sleep(0.03)
 
     def create_chat_completion(self, *args, **kwargs):
+        _FakeLlama.last_messages = kwargs.get("messages")
         return {"choices": [{"message": {"content": "{}"}}]}
 
 
@@ -35,6 +37,7 @@ class LocalLlmProviderTests(unittest.TestCase):
         provider._ROLE_LLM_FN.clear()
         provider._ROLE_ERRORS_WARNED.clear()
         _FakeLlama.init_calls = 0
+        _FakeLlama.last_messages = None
 
     def test_missing_model_warns_once_and_short_circuits(self) -> None:
         with patch.object(provider, "_get_model_path", return_value=None), patch.object(provider, "_warn") as warn_mock:
@@ -71,6 +74,37 @@ class LocalLlmProviderTests(unittest.TestCase):
         self.assertIn("coder_architect", roles)
         self.assertIn("madlad", roles["translator"].lower())
         self.assertIn("coder", roles["coder_architect"].lower())
+
+    def test_role_mapping_prefers_configured_fast_and_uncensored_models(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            gguf = root / "gguf"
+            gguf.mkdir(parents=True, exist_ok=True)
+            fast = gguf / "Nanbeige4.1-3B.Q3_K_M.gguf"
+            uncensored = gguf / "Mistral-Nemo-2407-12B-Thinking-Claude-Gemini-GPT5.2-Uncensored-HERETIC_Q3_k_m.gguf"
+            general = gguf / "mistral-7b-instruct.gguf"
+            fast.write_text("", encoding="utf-8")
+            uncensored.write_text("", encoding="utf-8")
+            general.write_text("", encoding="utf-8")
+
+            with patch.dict("os.environ", {"LOCAL_MODELS_DIR": str(gguf)}, clear=False):
+                roles = provider._resolve_model_role_paths()
+
+        self.assertEqual(Path(roles["analyst"]).name, fast.name)
+        self.assertEqual(Path(roles["uncensored"]).name, uncensored.name)
+
+    def test_analysis_alias_maps_to_analyst_role(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            gguf = root / "gguf"
+            gguf.mkdir(parents=True, exist_ok=True)
+            fast = gguf / "Nanbeige4.1-3B.Q3_K_M.gguf"
+            fast.write_text("", encoding="utf-8")
+
+            with patch.dict("os.environ", {"LOCAL_MODELS_DIR": str(gguf)}, clear=False), patch.object(provider, "Llama", _FakeLlama):
+                fn = provider.build_role_llm_fn("analysis")
+                self.assertTrue(callable(fn))
+                self.assertTrue(provider._is_model_loaded(str(fast)))
 
     def test_build_role_llm_fn_uses_role_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -172,7 +206,74 @@ class LocalLlmProviderTests(unittest.TestCase):
                 self.assertTrue(callable(fn))
                 out = fn("return json")
                 self.assertIsInstance(out, str)
-                self.assertIn(str(first), provider._PATH_LLM_FN)
+                self.assertTrue(provider._is_model_loaded(str(first)))
+
+    def test_build_role_llm_fn_supports_context_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            gguf = root / "gguf"
+            gguf.mkdir(parents=True, exist_ok=True)
+            model = gguf / "Nanbeige4.1-3B.Q3_K_M.gguf"
+            model.write_text("", encoding="utf-8")
+
+            with patch.dict("os.environ", {"LOCAL_MODELS_DIR": str(gguf)}, clear=False), patch.object(provider, "Llama", _FakeLlama):
+                fn = provider.build_role_llm_fn("analyst", n_ctx=1024, max_tokens=512)
+                self.assertTrue(callable(fn))
+                cache_key = provider._llm_cache_key(str(model), n_ctx=1024, max_tokens=512)
+                self.assertIn(cache_key, provider._PATH_LLM_FN)
+
+    def test_llm_fn_uses_user_role_message_for_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            gguf = root / "gguf"
+            gguf.mkdir(parents=True, exist_ok=True)
+            model = gguf / "mistral-7b-instruct.gguf"
+            model.write_text("", encoding="utf-8")
+
+            with patch.dict("os.environ", {"LOCAL_MODELS_DIR": str(gguf)}, clear=False), patch.object(provider, "Llama", _FakeLlama):
+                fn = provider.build_local_llm_fn()
+                self.assertTrue(callable(fn))
+                fn("respond in JSON")
+
+        self.assertEqual(_FakeLlama.last_messages, [{"role": "user", "content": "respond in JSON"}])
+
+    def test_missing_translator_env_path_returns_none_without_init(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            gguf = root / "gguf"
+            gguf.mkdir(parents=True, exist_ok=True)
+            missing = gguf / "translator.gguf"
+
+            with patch.dict(
+                "os.environ",
+                {"LOCAL_MODELS_DIR": str(gguf), "LOCAL_TRANSLATOR_GGUF_MODEL": str(missing)},
+                clear=False,
+            ), patch.object(provider, "Llama", _FakeLlama):
+                fn = provider.build_role_llm_fn("translator")
+
+        self.assertIsNone(fn)
+        self.assertEqual(_FakeLlama.init_calls, 0)
+
+    def test_default_n_ctx_falls_back_to_2048(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            gguf = root / "gguf"
+            gguf.mkdir(parents=True, exist_ok=True)
+            model = gguf / "mistral-7b-instruct.gguf"
+            model.write_text("", encoding="utf-8")
+
+            with patch.dict(
+                "os.environ",
+                {
+                    "LOCAL_MODELS_DIR": str(gguf),
+                    "LOCAL_GGUF_N_CTX": "",
+                },
+                clear=False,
+            ), patch.object(provider, "Llama", _FakeLlama):
+                fn = provider.build_local_llm_fn()
+                self.assertTrue(callable(fn))
+                cache_key = provider._llm_cache_key(str(model), n_ctx=2048, max_tokens=2048)
+                self.assertIn(cache_key, provider._PATH_LLM_FN)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 .env
 .venv/
 .idea/
+.vscode/
 
 # Python cache/build artifacts
 __pycache__/
@@ -9,28 +10,50 @@ __pycache__/
 *.so
 *.egg-info/
 .pytest_cache/
-
-# Runtime data
-*.sqlite3
-*.sqlite3-shm
-*.sqlite3-wal
-*.db
-
-# Generated outputs
-reports/
-READMEREPORT.md
-data/profile_exports/
-models/*.gguf
-models/**/*.gguf
-
-# OS files
-.DS_Store
+.mypy_cache/
+.ruff_cache/
 
 # Web UI
 webapp/node_modules/
 webapp/dist/
 
-# TLS certificates (mounted into nginx container)
+# Runtime databases and snapshots
+*.db
+*.db-*
+*.sqlite3
+*.sqlite3-*
+data/*.db
+data/*.db-*
+data/*.sqlite3
+data/*.sqlite3-*
+data/autonomous_graph_snapshot.json
+
+# Runtime-generated graph/session/style artifacts
+data/project_backups/*.json
+data/sessions/*.json
+!data/sessions/.gitkeep
+graph/pending/*.json
+!graph/pending/.gitkeep
+graph/verified/*.json
+!graph/verified/.gitkeep
+style_profiles/*.json
+!style_profiles/.gitkeep
+roaches_viz/logs/*.txt
+!roaches_viz/logs/.gitkeep
+style_tests/style_test_metrics.json
+
+# Generated exports and reports
+reports/
+data/profile_exports/
+
+# Large local models
+models/*.gguf
+models/**/*.gguf
+
+# TLS certificates
 infra/nginx/certs/*.pem
 infra/nginx/certs/*.key
 infra/nginx/certs/*.crt
+
+# OS files
+.DS_Store

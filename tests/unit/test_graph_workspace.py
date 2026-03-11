@@ -135,6 +135,34 @@ class GraphWorkspaceServiceTests(unittest.TestCase):
         self.assertTrue(linguistics.get("connections"))
         self.assertTrue(linguistics.get("usage"))
 
+        philosophy_nodes = [
+            row
+            for row in snap.get("nodes", [])
+            if str(row.get("type")) == "domain"
+            and str(row.get("attributes", {}).get("name", "")).strip().casefold() == "philosophy"
+        ]
+        self.assertTrue(philosophy_nodes)
+        philosophy = philosophy_nodes[0].get("attributes", {})
+        self.assertIn("knowledge", str(philosophy.get("summary", "")).casefold())
+        self.assertTrue(str(philosophy.get("details", "")).strip())
+        self.assertIn("Философия", list(philosophy.get("aliases", []) or []))
+        localized = philosophy.get("localized_labels", {}) if isinstance(philosophy.get("localized_labels"), dict) else {}
+        self.assertEqual(str(localized.get("ru", "")), "Философия")
+
+        ethics_nodes = [
+            row
+            for row in snap.get("nodes", [])
+            if str(row.get("type")) == "concept"
+            and str(row.get("attributes", {}).get("name", "")).strip().casefold() == "ethics"
+        ]
+        self.assertTrue(ethics_nodes)
+        ethics = ethics_nodes[0].get("attributes", {})
+        self.assertIn("foundational concept", str(ethics.get("summary", "")).casefold())
+        self.assertTrue(str(ethics.get("details", "")).strip())
+        self.assertIn("Этика", list(ethics.get("aliases", []) or []))
+        localized_ethics = ethics.get("localized_labels", {}) if isinstance(ethics.get("localized_labels"), dict) else {}
+        self.assertEqual(str(localized_ethics.get("hy", "")), "Էթիկա")
+
         domain_nodes = [
             row
             for row in snap.get("nodes", [])
@@ -846,6 +874,314 @@ class GraphWorkspaceServiceTests(unittest.TestCase):
         self.assertIn("llm_archive_update_session", node_types)
         self.assertIn("llm_archive_update_record", node_types)
 
+    @patch("src.web.graph_workspace.collect_web_context")
+    def test_project_chat_graph_uses_dual_models_and_attaches_updates(self, mock_collect_web_context):
+        mock_collect_web_context.return_value = {
+            "enabled": True,
+            "terms": ["coffee"],
+            "snippets": [
+                {
+                    "source": "wikipedia",
+                    "title": "Coffee",
+                    "url": "https://en.wikipedia.org/wiki/Coffee",
+                    "snippet": "Coffee is a brewed drink prepared from roasted coffee beans.",
+                }
+            ],
+            "warning": "",
+        }
+        prompts: dict[str, str] = {}
+
+        def fake_model_resolver(model_path: str):
+            token = str(model_path or "").strip()
+
+            def _run(prompt: str) -> str:
+                prompts[token] = prompt
+                if "qwen2.5-7b-instruct" in token:
+                    return json.dumps(
+                        {
+                            "summary": "Useful coffee facts captured.",
+                            "archive_updates": [
+                                {
+                                    "entity": "coffee",
+                                    "field": "definition",
+                                    "operation": "upsert",
+                                    "value": "A brewed drink made from roasted coffee beans.",
+                                    "reason": "Stable factual definition extracted from the conversation.",
+                                    "source": "wikipedia:Coffee",
+                                    "confidence": 0.86,
+                                    "tags": ["coffee", "definition"],
+                                }
+                            ],
+                        },
+                        ensure_ascii=False,
+                    )
+                return "Coffee is best introduced as a practical topic with clear definitions first."
+
+            return _run
+
+        svc = GraphWorkspaceService(
+            use_env_adapter=False,
+            enable_living_system=False,
+            model_llm_resolver=fake_model_resolver,
+        )
+        out = svc.project_chat_graph(
+            {
+                "user_id": "u_chat_graph",
+                "session_id": "s_chat_graph_1",
+                "message": "Explain coffee clearly and store only useful facts.",
+                "context": "Keep it concise.",
+                "chat_model_path": "models/gguf/textGen/mistral-7b-instruct-v0.3-q4_k_m.gguf",
+                "parser_backend": "local",
+                "parser_model_path": "models/gguf/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf",
+                "use_internet": True,
+                "apply_to_graph": True,
+            }
+        )
+        self.assertTrue(out["ok"])
+        self.assertIn("Coffee is best introduced", out["assistant_reply"])
+        self.assertEqual(len(out["archive_updates"]), 1)
+        self.assertEqual(out["archive_updates"][0]["entity"], "coffee")
+        self.assertTrue(out["graph_binding"]["attached"])
+        self.assertTrue(out["graph_diff"]["attached"])
+        self.assertGreaterEqual(out["graph_diff"]["node_count"], 2)
+        self.assertGreaterEqual(out["graph_diff"]["edge_count"], 1)
+        edge_types = {row.get("type") for row in out["graph_diff"]["edges"]}
+        self.assertIn("proposes_archive_update", edge_types)
+        self.assertEqual(out["parser_model"]["backend"], "local")
+        self.assertEqual(len(out["web_context"]["snippets"]), 1)
+        self.assertIn("Internet snippets", prompts["models/gguf/textGen/mistral-7b-instruct-v0.3-q4_k_m.gguf"])
+        self.assertIn("Assistant reply", prompts["models/gguf/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"])
+
+    def test_project_mode_policy_resolve_builds_weighted_context(self):
+        mode_node = self.svc.api.engine.create_node(
+            "context_mode",
+            attributes={
+                "user_id": "u_mode",
+                "name": "Coffee Planner",
+                "domain": "coffee",
+                "prompt_guardrails": "Stay practical and compare roast and brewing choices.",
+                "protected_memory": "Prefer balanced acidity over burnt bitterness.",
+                "llm_role": "planner",
+                "updated_at": 123.0,
+            },
+            state={"context_weight": 1.34},
+        )
+        focus_node = self.svc.api.engine.create_node(
+            "context_focus",
+            attributes={
+                "user_id": "u_mode",
+                "name": "Pour Over",
+                "summary": "Clean cup, clear acidity, and high control over extraction.",
+            },
+            state={"importance": 0.9},
+        )
+        self.svc._connect_nodes(  # noqa: SLF001
+            from_node=int(mode_node.id),
+            to_node=int(focus_node.id),
+            relation_type="mode_focus",
+            weight=0.91,
+            logic_rule="test_mode_policy",
+        )
+
+        out = self.svc.project_mode_policy_resolve(
+            {
+                "user_id": "u_mode",
+                "session_id": "s_mode_1",
+                "message": "Help me choose a brew for sweet balanced coffee.",
+                "context": "Keep it short.",
+                "model_role": "general",
+            }
+        )
+        policy = out["mode_policy"]
+        self.assertTrue(policy["selected"])
+        self.assertEqual(policy["mode_node_id"], int(mode_node.id))
+        self.assertEqual(policy["resolved_role"], "planner")
+        self.assertEqual(policy["selection_reason"], "user_weighted")
+        self.assertEqual(len(policy["memory_items"]), 1)
+        self.assertIn("Protected memory", policy["effective_context"])
+        self.assertIn("Weighted important context", policy["effective_context"])
+
+    def test_context_mode_endpoints_save_focus_and_feedback_reorder_memory(self):
+        created = self.svc.project_context_mode_upsert(
+            {
+                "user_id": "u_mode_mgr",
+                "session_id": "s_mode_mgr_1",
+                "name": "Star Profile",
+                "domain": "persona",
+                "prompt_guardrails": "Stay structured across body, psyche, duties, and rights.",
+                "protected_memory": "Do not let unverified gossip overwrite stable profile facts.",
+                "llm_role": "analyst",
+            }
+        )
+        mode_id = int(created["mode"]["mode_node_id"])
+        self.assertGreater(mode_id, 0)
+        self.assertTrue(created["mode_policy"]["selected"])
+
+        focus_a = self.svc.project_context_mode_capture_focus(
+            {
+                "user_id": "u_mode_mgr",
+                "session_id": "s_mode_mgr_1",
+                "mode_node_id": mode_id,
+                "name": "Physical Structure",
+                "summary": "Stable physical traits and visible presentation.",
+                "manual_capture": True,
+                "weight": 0.9,
+            }
+        )
+        focus_b = self.svc.project_context_mode_capture_focus(
+            {
+                "user_id": "u_mode_mgr",
+                "session_id": "s_mode_mgr_1",
+                "mode_node_id": mode_id,
+                "name": "Rights And Duties",
+                "summary": "Rights, obligations, and legal constraints.",
+                "manual_capture": True,
+                "weight": 0.82,
+            }
+        )
+        focus_a_id = int(focus_a["focus"]["focus_node_id"])
+        focus_b_id = int(focus_b["focus"]["focus_node_id"])
+        self.assertGreater(focus_a_id, 0)
+        self.assertGreater(focus_b_id, 0)
+
+        before = self.svc.project_mode_policy_resolve(
+            {
+                "user_id": "u_mode_mgr",
+                "session_id": "s_mode_mgr_1",
+                "message": "Build context for a person profile.",
+                "context": "",
+                "mode_node_id": mode_id,
+            }
+        )
+        self.assertEqual(before["mode_policy"]["memory_items"][0]["name"], "Physical Structure")
+
+        self.svc.project_context_mode_feedback(
+            {
+                "user_id": "u_mode_mgr",
+                "session_id": "s_mode_mgr_1",
+                "mode_node_id": mode_id,
+                "target_focus_node_id": focus_a_id,
+                "decision": "bad",
+                "summary": "This branch was overused.",
+            }
+        )
+        self.svc.project_context_mode_feedback(
+            {
+                "user_id": "u_mode_mgr",
+                "session_id": "s_mode_mgr_1",
+                "mode_node_id": mode_id,
+                "target_focus_node_id": focus_b_id,
+                "decision": "good",
+                "summary": "This branch should lead context assembly.",
+            }
+        )
+
+        after = self.svc.project_mode_policy_resolve(
+            {
+                "user_id": "u_mode_mgr",
+                "session_id": "s_mode_mgr_1",
+                "message": "Build context for a person profile.",
+                "context": "",
+                "mode_node_id": mode_id,
+            }
+        )
+        self.assertEqual(after["mode_policy"]["memory_items"][0]["name"], "Rights And Duties")
+        self.assertGreater(
+            float(after["mode_policy"]["memory_items"][0]["learned_score"]),
+            float(after["mode_policy"]["memory_items"][1]["learned_score"]),
+        )
+        self.assertGreaterEqual(float(after["mode_policy"]["mode_state"]["learned_score"]), 0.5)
+
+    def test_project_archive_chat_uses_backend_mode_policy(self):
+        captured: dict[str, str] = {}
+
+        def fake_model_resolver(model_path: str):
+            token = str(model_path or "").strip()
+            if "qwen2.5-7b-instruct" not in token:
+                return None
+
+            def _run(prompt: str) -> str:
+                captured.setdefault("prompt", str(prompt))
+                return json.dumps(
+                    {
+                        "summary": "Saved one coffee choice note.",
+                        "archive_updates": [
+                            {
+                                "entity": "coffee_preference",
+                                "field": "next_brew",
+                                "operation": "upsert",
+                                "value": "Use pour over for a cleaner cup.",
+                                "reason": "Matches the weighted saved context.",
+                                "source": "mode_policy_test",
+                                "confidence": 0.82,
+                                "tags": ["coffee"],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+
+            return _run
+
+        svc = GraphWorkspaceService(
+            use_env_adapter=False,
+            enable_living_system=False,
+            model_llm_resolver=fake_model_resolver,
+        )
+        mode_node = svc.api.engine.create_node(
+            "context_mode",
+            attributes={
+                "user_id": "u_mode_chat",
+                "name": "Coffee Planner",
+                "domain": "coffee",
+                "prompt_guardrails": "Prefer practical brewing advice.",
+                "protected_memory": "Avoid burnt or overly bitter recommendations.",
+                "llm_role": "planner",
+                "updated_at": 456.0,
+            },
+            state={"context_weight": 1.22},
+        )
+        focus_node = svc.api.engine.create_node(
+            "context_focus",
+            attributes={
+                "user_id": "u_mode_chat",
+                "name": "Pour Over",
+                "summary": "Clean cup and better clarity for balanced sweetness.",
+            },
+            state={"importance": 0.88},
+        )
+        svc._connect_nodes(  # noqa: SLF001
+            from_node=int(mode_node.id),
+            to_node=int(focus_node.id),
+            relation_type="mode_focus",
+            weight=0.93,
+            logic_rule="test_mode_policy",
+        )
+
+        out = svc.project_archive_verified_chat(
+            {
+                "user_id": "u_mode_chat",
+                "session_id": "s_mode_chat_1",
+                "message": "Recommend a coffee brewing direction.",
+                "context": "Need one concise next step.",
+                "model_path": "models/gguf/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf",
+                "model_role": "general",
+                "mode_node_id": int(mode_node.id),
+                "use_mode_policy": True,
+                "apply_to_graph": False,
+                "verification_mode": "balanced",
+                "top_k": 3,
+                "auto_triage": False,
+            }
+        )
+        self.assertIn("Mode anchor: Coffee Planner", captured.get("prompt", ""))
+        self.assertIn("Weighted important context:", captured.get("prompt", ""))
+        self.assertEqual(out["mode_policy"]["resolved_role"], "planner")
+        self.assertEqual(out["model"]["requested_model_role"], "general")
+        self.assertEqual(out["model"]["effective_model_role"], "planner")
+        self.assertIn("effective_context", out["input"])
+        self.assertIn("Protected memory", out["input"]["effective_context"])
+
     def test_project_graph_node_assist_links_to_selected_node(self):
         def fake_model_resolver(model_path: str):
             token = str(model_path or "").strip()
@@ -1095,12 +1431,14 @@ class GraphWorkspaceServiceTests(unittest.TestCase):
         self.assertGreater(int(foundation["root_node_id"]), 0)
         self.assertGreaterEqual(int(foundation["created_nodes"]), 5)
         self.assertGreaterEqual(int(foundation["created_edges"]), 5)
+        self.assertEqual(foundation["foundation_kind"], "planning")
         self.assertEqual(out["model"]["selected_model_path"], "models/gguf/textGen/mistral-7b-instruct-v0.3-q4_k_m.gguf")
         self.assertFalse(out["model"]["used_fallback"])
         relation_types = {str(edge.get("relation_type", "")) for edge in out["snapshot"]["edges"]}
         self.assertIn("expands_concept", relation_types)
         self.assertIn("contains_concept", relation_types)
         self.assertIn("deepens_concept", relation_types)
+        self.assertIn("enables", relation_types)
         node_types = {str(node.get("type", "")) for node in out["snapshot"]["nodes"]}
         self.assertIn("foundation_branch", node_types)
         created_names = {
@@ -1109,6 +1447,69 @@ class GraphWorkspaceServiceTests(unittest.TestCase):
         }
         self.assertIn("Skills Audit", created_names)
         self.assertIn("Transferable Skills", created_names)
+        self.assertEqual(out["blueprint"]["foundation_kind"], "planning")
+        self.assertGreaterEqual(len(out["blueprint"].get("frame_plan", [])), 4)
+        self.assertGreaterEqual(len(out["blueprint"].get("links", [])), 1)
+
+    def test_project_graph_foundation_create_uses_logical_fallback_for_philosophy(self):
+        svc = GraphWorkspaceService(
+            use_env_adapter=False,
+            enable_living_system=False,
+            model_llm_resolver=lambda _path: None,
+        )
+
+        out = svc.project_graph_foundation_create(
+            {
+                "topic": "Philosophy",
+                "context": "Treat philosophy as a field of inquiry, with branches, questions, methods, and practical use.",
+                "depth": 2,
+                "concept_limit": 5,
+            }
+        )
+
+        self.assertTrue(out["ok"])
+        self.assertTrue(out["model"]["used_fallback"])
+        self.assertEqual(out["foundation"]["foundation_kind"], "philosophy")
+        self.assertEqual(out["blueprint"]["foundation_kind"], "philosophy")
+        frame_plan = out["blueprint"].get("frame_plan", [])
+        self.assertGreaterEqual(len(frame_plan), 5)
+        self.assertEqual(str(frame_plan[0].get("key", "")), "definition")
+        created_names = {
+            str(node.get("attributes", {}).get("name", node.get("attributes", {}).get("title", ""))).strip()
+            for node in out["snapshot"]["nodes"]
+        }
+        self.assertIn("Definition of Philosophy", created_names)
+        self.assertIn("Main Branches of Philosophy", created_names)
+        relation_types = {str(edge.get("relation_type", "")) for edge in out["snapshot"]["edges"]}
+        self.assertIn("organizes", relation_types)
+        self.assertIn("raises_questions", relation_types)
+
+    def test_project_graph_foundation_create_detects_coffee_domain_frames(self):
+        svc = GraphWorkspaceService(
+            use_env_adapter=False,
+            enable_living_system=False,
+            model_llm_resolver=lambda _path: None,
+        )
+
+        out = svc.project_graph_foundation_create(
+            {
+                "topic": "Coffee",
+                "context": "Include history, varieties, processing, brewing methods, and taste preferences.",
+                "depth": 2,
+                "concept_limit": 6,
+            }
+        )
+
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["foundation"]["foundation_kind"], "coffee")
+        created_names = {
+            str(node.get("attributes", {}).get("name", node.get("attributes", {}).get("title", ""))).strip()
+            for node in out["snapshot"]["nodes"]
+        }
+        self.assertIn("What Coffee Is", created_names)
+        self.assertIn("Brewing Methods", created_names)
+        relation_types = {str(edge.get("relation_type", "")) for edge in out["snapshot"]["edges"]}
+        self.assertIn("guides_action", relation_types)
 
     def test_project_archive_review_apply_allows_edit_and_recheck(self):
         edited_updates = [

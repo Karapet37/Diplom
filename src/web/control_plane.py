@@ -14,6 +14,7 @@ _CONTROL_WRITE_EXEMPT_PATHS = {
     "/api/auth/token",
     "/api/control/update",
     "/api/control/reload",
+    "/api/project/mode-policy/resolve",
 }
 
 _GRAPH_MUTATION_PATHS = {
@@ -37,7 +38,11 @@ _GRAPH_MUTATION_PATHS = {
     "/api/project/user-graph/update",
     "/api/project/llm/debate",
     "/api/project/hallucination/report",
+    "/api/project/mode/save",
+    "/api/project/mode/focus",
+    "/api/project/mode/feedback",
     "/api/project/archive/chat",
+    "/api/project/chat-graph",
     "/api/project/archive/review",
     "/api/project/personal-tree/ingest",
     "/api/project/personal-tree/note",
@@ -213,6 +218,7 @@ class RuntimeControlPlane:
                 "/api/graph/edge/assist",
                 "/api/project/llm/debate",
                 "/api/project/archive/chat",
+                "/api/project/chat-graph",
                 "/api/project/graph-rag/query",
                 "/api/project/packages/manage",
                 "/api/project/wrapper/respond",

@@ -16,6 +16,12 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertTrue(allowed)
         self.assertEqual(reason, "")
 
+    def test_read_only_keeps_mode_policy_resolve_available(self):
+        plane = RuntimeControlPlane(flags=ControlPlaneFlags(read_only=True))
+        allowed, reason = plane.allow_request(method="POST", path="/api/project/mode-policy/resolve")
+        self.assertTrue(allowed)
+        self.assertEqual(reason, "")
+
     def test_feature_gate_blocks_specific_path(self):
         plane = RuntimeControlPlane(
             flags=ControlPlaneFlags(
@@ -55,6 +61,19 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertEqual(reason, "graph_writes_disabled")
 
+    def test_graph_writes_gate_blocks_context_mode_save(self):
+        plane = RuntimeControlPlane(
+            flags=ControlPlaneFlags(
+                allow_graph_writes=False,
+            )
+        )
+        allowed, reason = plane.allow_request(
+            method="POST",
+            path="/api/project/mode/save",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "graph_writes_disabled")
+
     def test_prompt_execution_gate_blocks_archive_chat(self):
         plane = RuntimeControlPlane(
             flags=ControlPlaneFlags(
@@ -64,6 +83,19 @@ class ControlPlaneTests(unittest.TestCase):
         allowed, reason = plane.allow_request(
             method="POST",
             path="/api/project/archive/chat",
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "prompt_execution_disabled")
+
+    def test_prompt_execution_gate_blocks_chat_graph(self):
+        plane = RuntimeControlPlane(
+            flags=ControlPlaneFlags(
+                allow_prompt_execution=False,
+            )
+        )
+        allowed, reason = plane.allow_request(
+            method="POST",
+            path="/api/project/chat-graph",
         )
         self.assertFalse(allowed)
         self.assertEqual(reason, "prompt_execution_disabled")

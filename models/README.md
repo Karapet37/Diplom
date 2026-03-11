@@ -82,7 +82,7 @@ Resolver treats `madlad400` as translator-priority inside translator role.
 ## Optional `.env` tuning
 
 - `LOCAL_MODELS_DIR=models/gguf`
-- `LOCAL_GGUF_N_CTX=8192`
+- `LOCAL_GGUF_N_CTX=2048`
 - `LOCAL_GGUF_TEMPERATURE=0.25`
 - `LOCAL_GGUF_MAX_TOKENS=220`
 - `LOCAL_GGUF_MAX_LOADED=2`

@@ -1,0 +1,420 @@
+{
+  "kind": "narrative_series",
+  "id": "psychology_foundations",
+  "series": {
+    "id": "domain:psychology",
+    "label": "Psychology",
+    "short_gloss": "A readable base graph for psychology, family dynamics, childhood trauma, and practical prompt framing.",
+    "plain_explanation": "This dataset is designed to be read by a human, not only by a parser. It explains what psychology is, where the field came from, which core terms matter, and how to structure psychologically informed prompts for family conflict, childhood trauma, attachment, and boundaries.",
+    "examples": [
+      "Understanding what psychology is before asking for advice.",
+      "Preparing a careful prompt for family conflict or childhood trauma analysis.",
+      "Separating concepts, terms, and practical intervention questions."
+    ],
+    "tags": [
+      "psychology",
+      "family",
+      "trauma",
+      "prompting",
+      "foundations"
+    ],
+    "type": "DOMAIN"
+  },
+  "characters": [
+    {
+      "id": "person:human",
+      "type": "PERSON",
+      "label": "Human Person",
+      "short_gloss": "The person whose feelings, memories, defenses, habits, and relationships are being interpreted.",
+      "plain_explanation": "A human person is not just a body or a set of symptoms. They are a living system with history, attachment patterns, emotional triggers, current stressors, social roles, and limits in what they can understand or tolerate at one time.",
+      "examples": [
+        "A parent reacting strongly to a child's independence.",
+        "An adult who shuts down during conflict because of earlier experiences."
+      ],
+      "tags": [
+        "person",
+        "subject",
+        "human"
+      ]
+    },
+    {
+      "id": "person:psychologist",
+      "type": "PERSON",
+      "label": "Psychologist",
+      "short_gloss": "A trained observer who tries to understand behavior, emotion, meaning, and patterns without collapsing everything into labels.",
+      "plain_explanation": "A psychologist looks at development, emotion, cognition, relationships, family systems, trauma history, coping style, and present context. The goal is to understand what pattern is happening and what intervention or question would actually help.",
+      "examples": [
+        "A psychologist asking how conflict is repeated across generations.",
+        "A psychologist separating current behavior from earlier trauma adaptations."
+      ],
+      "tags": [
+        "psychologist",
+        "observer",
+        "analysis"
+      ]
+    }
+  ],
+  "concepts": [
+    {
+      "id": "concept:psychology",
+      "label": "Psychology",
+      "short_gloss": "The science and practice of understanding mind, behavior, emotion, development, and relationships.",
+      "plain_explanation": "Psychology studies how people perceive, feel, think, remember, attach, defend themselves, change, suffer, and recover. It is useful when you need to understand not only what a person did, but why it made sense to them, what pattern it belongs to, and what response is likely to help or harm.",
+      "examples": [
+        "Explaining why a child repeats a stressful pattern.",
+        "Understanding why a calm conversation suddenly becomes threatening for one person."
+      ],
+      "tags": [
+        "psychology",
+        "mind",
+        "behavior",
+        "relationships"
+      ]
+    },
+    {
+      "id": "concept:psychology_origin",
+      "label": "Origin of Psychology",
+      "short_gloss": "The historical formation of psychology as a field that moved from philosophy into observation, experiment, and clinical practice.",
+      "plain_explanation": "Psychology emerged from philosophy, physiology, and medicine. Over time it developed branches for experimental research, development, personality, social interaction, psychopathology, therapy, and applied work with families, schools, and organizations.",
+      "examples": [
+        "Early psychology asked how the mind can be studied instead of only speculated about."
+      ],
+      "tags": [
+        "history",
+        "origin",
+        "science"
+      ]
+    },
+    {
+      "id": "concept:psychology_terms",
+      "label": "Core Psychological Terms",
+      "short_gloss": "A branch that explains the vocabulary needed to read or write psychological analysis without getting lost.",
+      "plain_explanation": "This branch groups essential terms like attachment, trauma, defense, regulation, projection, shame, boundary, family system, and coping style. A good graph should explain each term in plain language, not hide behind jargon.",
+      "examples": [
+        "Attachment means the way safety and closeness are organized.",
+        "Emotional regulation means how a person returns from overwhelm to stability."
+      ],
+      "tags": [
+        "terms",
+        "vocabulary",
+        "plain language"
+      ]
+    },
+    {
+      "id": "concept:attachment",
+      "label": "Attachment",
+      "short_gloss": "The pattern by which a person expects closeness, safety, rejection, distance, or reassurance in relationships.",
+      "plain_explanation": "Attachment shapes how people ask for closeness, react to distance, interpret silence, and manage fear of loss. It often becomes visible in love, parenting, dependency, jealousy, and conflict repair.",
+      "examples": [
+        "Anxious attachment can read delay as abandonment.",
+        "Avoidant attachment can feel closeness as pressure."
+      ],
+      "tags": [
+        "attachment",
+        "relationships",
+        "safety"
+      ]
+    },
+    {
+      "id": "concept:childhood_trauma",
+      "label": "Childhood Trauma",
+      "short_gloss": "Earlier experiences of fear, neglect, humiliation, chaos, or violation that continue to shape present reactions.",
+      "plain_explanation": "Childhood trauma does not only mean one dramatic event. It can include chronic instability, emotional neglect, unpredictable care, coercion, shame, violence, or enmeshment. Later in life it can appear as hypervigilance, shutdown, people-pleasing, emotional numbing, anger, or repeated relational patterns.",
+      "examples": [
+        "A person overexplains because silence once felt dangerous.",
+        "A person freezes in family conflict because their nervous system expects escalation."
+      ],
+      "tags": [
+        "trauma",
+        "childhood",
+        "history"
+      ]
+    },
+    {
+      "id": "concept:family_system",
+      "label": "Family System",
+      "short_gloss": "The family seen as a living pattern of roles, alliances, repetition, and pressure rather than as isolated individuals.",
+      "plain_explanation": "A family system approach asks how behavior is distributed across the whole pattern: who stabilizes, who rebels, who absorbs blame, who avoids conflict, who mediates, and how old roles survive into new situations.",
+      "examples": [
+        "One child becomes the responsible one while another carries open rebellion."
+      ],
+      "tags": [
+        "family",
+        "system",
+        "roles"
+      ]
+    },
+    {
+      "id": "concept:boundaries",
+      "label": "Boundaries",
+      "short_gloss": "The limits that protect privacy, autonomy, timing, responsibility, and emotional safety.",
+      "plain_explanation": "In psychology, boundaries help separate what belongs to me from what belongs to you: feelings, choices, duties, access, touch, time, and responsibility. Weak boundaries create confusion, guilt, intrusion, and resentment.",
+      "examples": [
+        "A parent can care deeply and still allow a child psychological space."
+      ],
+      "tags": [
+        "boundaries",
+        "limits",
+        "autonomy"
+      ]
+    },
+    {
+      "id": "concept:emotion_regulation",
+      "label": "Emotional Regulation",
+      "short_gloss": "How a person notices, names, contains, and recovers from emotional activation.",
+      "plain_explanation": "Emotional regulation is not the same as suppression. It means staying connected to what is felt while still being able to think, choose, and communicate without losing the whole conversation to panic, rage, shame, or collapse.",
+      "examples": [
+        "Taking time before answering instead of exploding or disappearing."
+      ],
+      "tags": [
+        "emotion",
+        "regulation",
+        "stability"
+      ]
+    },
+    {
+      "id": "concept:family_prompt_keys",
+      "label": "Prompt Keys for Family Psychology",
+      "short_gloss": "A practical branch for building psychologically informed prompts about family conflict, roles, loyalty, and intergenerational patterns.",
+      "plain_explanation": "Useful family psychology prompts should ask: who is involved, what role each person plays, what repeats across generations, what boundaries are weak, what unspoken rule is being enforced, who carries guilt or responsibility, and what a safer next step would look like.",
+      "examples": [
+        "Map the family roles, emotional debts, and conflict loops before proposing advice."
+      ],
+      "tags": [
+        "prompting",
+        "family",
+        "practical"
+      ]
+    },
+    {
+      "id": "concept:trauma_prompt_keys",
+      "label": "Prompt Keys for Childhood Trauma Analysis",
+      "short_gloss": "A branch for building careful prompts about trauma, triggers, coping, shame, nervous-system reactions, and safe pacing.",
+      "plain_explanation": "Trauma-informed prompts should ask what triggers the reaction, what the body does first, what the person expects will happen next, what old pattern the present moment resembles, what protective strategy appears, and what response reduces overload instead of intensifying it.",
+      "examples": [
+        "Describe the trigger, body response, protective reaction, and safer intervention."
+      ],
+      "tags": [
+        "prompting",
+        "trauma",
+        "safety"
+      ]
+    }
+  ],
+  "styles": [
+    {
+      "id": "style:analytical",
+      "label": "Analytical Reasoning",
+      "short_gloss": "Separates terms, patterns, causes, and alternatives before concluding.",
+      "plain_explanation": "Useful for structuring a psychological case without losing track of evidence.",
+      "tags": [
+        "analysis",
+        "structure"
+      ]
+    },
+    {
+      "id": "style:empathetic",
+      "label": "Empathetic Reasoning",
+      "short_gloss": "Tracks feelings, vulnerability, shame, attachment fear, and emotional impact.",
+      "plain_explanation": "Necessary when a technically correct answer would still wound or miss the human problem.",
+      "tags": [
+        "empathy",
+        "care"
+      ]
+    },
+    {
+      "id": "style:pragmatic",
+      "label": "Pragmatic Reasoning",
+      "short_gloss": "Turns understanding into a workable next question, intervention, or communication step.",
+      "plain_explanation": "Needed when the goal is not only insight, but a safer and more effective next move.",
+      "tags": [
+        "action",
+        "planning"
+      ]
+    }
+  ],
+  "style_links": [
+    {
+      "src_id": "person:psychologist",
+      "dst_id": "style:analytical",
+      "weight": 0.89,
+      "evidence": "A psychologist needs structured case reasoning."
+    },
+    {
+      "src_id": "person:psychologist",
+      "dst_id": "style:empathetic",
+      "weight": 0.92,
+      "evidence": "A psychologist must understand the human feeling-state, not only the pattern."
+    },
+    {
+      "src_id": "person:psychologist",
+      "dst_id": "style:pragmatic",
+      "weight": 0.86,
+      "evidence": "A psychologist still needs workable interventions, not only explanations."
+    }
+  ],
+  "links": [
+    {
+      "src_id": "person:human",
+      "dst_id": "concept:attachment",
+      "type": "SHAPED_BY",
+      "weight": 0.91,
+      "evidence": "Human behavior in relationships is shaped by attachment expectations."
+    },
+    {
+      "src_id": "person:human",
+      "dst_id": "concept:emotion_regulation",
+      "type": "REQUIRES",
+      "weight": 0.88,
+      "evidence": "A person needs regulation to think clearly under stress."
+    },
+    {
+      "src_id": "person:human",
+      "dst_id": "concept:boundaries",
+      "type": "NEEDS",
+      "weight": 0.9,
+      "evidence": "Healthy functioning depends on meaningful boundaries."
+    },
+    {
+      "src_id": "person:human",
+      "dst_id": "concept:family_system",
+      "type": "EMBEDDED_IN",
+      "weight": 0.87,
+      "evidence": "People often repeat family-system roles."
+    },
+    {
+      "src_id": "person:human",
+      "dst_id": "concept:childhood_trauma",
+      "type": "MAY_BE_SHAPED_BY",
+      "weight": 0.8,
+      "evidence": "Present reactions may carry old trauma logic."
+    },
+    {
+      "src_id": "concept:psychology",
+      "dst_id": "concept:psychology_origin",
+      "type": "HAS_BRANCH",
+      "weight": 0.94,
+      "evidence": "To understand psychology, it helps to understand where the field came from."
+    },
+    {
+      "src_id": "concept:psychology",
+      "dst_id": "concept:psychology_terms",
+      "type": "HAS_BRANCH",
+      "weight": 0.96,
+      "evidence": "Psychology becomes readable when the core vocabulary is explained."
+    },
+    {
+      "src_id": "concept:psychology",
+      "dst_id": "concept:attachment",
+      "type": "USES_TERM",
+      "weight": 0.9,
+      "evidence": "Attachment is a core psychological concept for relationships."
+    },
+    {
+      "src_id": "concept:psychology",
+      "dst_id": "concept:family_system",
+      "type": "USES_TERM",
+      "weight": 0.9,
+      "evidence": "Family systems psychology studies patterns across the whole family."
+    },
+    {
+      "src_id": "concept:psychology",
+      "dst_id": "concept:childhood_trauma",
+      "type": "USES_TERM",
+      "weight": 0.91,
+      "evidence": "Trauma is central to understanding repeated defensive reactions."
+    },
+    {
+      "src_id": "concept:psychology",
+      "dst_id": "concept:boundaries",
+      "type": "USES_TERM",
+      "weight": 0.88,
+      "evidence": "Boundary work is central in many psychological interventions."
+    },
+    {
+      "src_id": "concept:psychology",
+      "dst_id": "concept:emotion_regulation",
+      "type": "USES_TERM",
+      "weight": 0.9,
+      "evidence": "Regulation links mind, body, and action."
+    },
+    {
+      "src_id": "concept:psychology",
+      "dst_id": "concept:family_prompt_keys",
+      "type": "PRACTICAL_BRANCH",
+      "weight": 0.84,
+      "evidence": "Psychology can be operationalized through careful prompt structure."
+    },
+    {
+      "src_id": "concept:psychology",
+      "dst_id": "concept:trauma_prompt_keys",
+      "type": "PRACTICAL_BRANCH",
+      "weight": 0.84,
+      "evidence": "Trauma-informed prompting needs a dedicated branch."
+    },
+    {
+      "src_id": "concept:psychology_terms",
+      "dst_id": "concept:attachment",
+      "type": "INCLUDES",
+      "weight": 0.86,
+      "evidence": "Attachment is part of the core vocabulary."
+    },
+    {
+      "src_id": "concept:psychology_terms",
+      "dst_id": "concept:childhood_trauma",
+      "type": "INCLUDES",
+      "weight": 0.86,
+      "evidence": "Childhood trauma belongs to the basic working vocabulary."
+    },
+    {
+      "src_id": "concept:psychology_terms",
+      "dst_id": "concept:family_system",
+      "type": "INCLUDES",
+      "weight": 0.84,
+      "evidence": "Family system is a key explanatory term."
+    },
+    {
+      "src_id": "concept:psychology_terms",
+      "dst_id": "concept:boundaries",
+      "type": "INCLUDES",
+      "weight": 0.82,
+      "evidence": "Boundaries are a practical and conceptual core term."
+    },
+    {
+      "src_id": "concept:psychology_terms",
+      "dst_id": "concept:emotion_regulation",
+      "type": "INCLUDES",
+      "weight": 0.83,
+      "evidence": "Regulation is essential vocabulary for coping and therapy."
+    },
+    {
+      "src_id": "concept:family_prompt_keys",
+      "dst_id": "concept:family_system",
+      "type": "BUILDS_ON",
+      "weight": 0.9,
+      "evidence": "Family prompts should be built on systemic understanding."
+    },
+    {
+      "src_id": "concept:family_prompt_keys",
+      "dst_id": "concept:boundaries",
+      "type": "BUILDS_ON",
+      "weight": 0.88,
+      "evidence": "Family prompts must ask where boundaries are weak or violated."
+    },
+    {
+      "src_id": "concept:trauma_prompt_keys",
+      "dst_id": "concept:childhood_trauma",
+      "type": "BUILDS_ON",
+      "weight": 0.92,
+      "evidence": "Trauma prompts should map the earlier pattern being reactivated."
+    },
+    {
+      "src_id": "concept:trauma_prompt_keys",
+      "dst_id": "concept:emotion_regulation",
+      "type": "BUILDS_ON",
+      "weight": 0.87,
+      "evidence": "Trauma prompts should ask how the person becomes overwhelmed and stabilizes."
+    }
+  ],
+  "episodes": []
+}

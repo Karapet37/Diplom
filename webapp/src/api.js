@@ -23,6 +23,12 @@ async function request(path, options = {}) {
   return response.json();
 }
 
+async function requestAt(prefix, path, options = {}) {
+  const normalizedPrefix = String(prefix || "").replace(/\/+$/, "");
+  const normalizedPath = String(path || "").startsWith("/") ? path : `/${path}`;
+  return request(`${normalizedPrefix}${normalizedPath}`, options);
+}
+
 function resolveWebSocketUrl(path) {
   const base = String(API_BASE || "").trim();
 
@@ -86,8 +92,16 @@ export function getStatus() {
   return request("/api/status");
 }
 
+export function getControlState() {
+  return request("/api/control/state");
+}
+
 export function getModules() {
   return request("/api/modules");
+}
+
+export function getProjectOverview() {
+  return request("/api/project/overview");
 }
 
 export function getNodeTypes() {
@@ -229,6 +243,55 @@ export function runProjectLLMDebate(payload = {}) {
 
 export function runProjectArchiveChat(payload = {}) {
   return request("/api/project/archive/chat", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runProjectChatGraph(payload = {}) {
+  return request("/api/project/chat-graph", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getProjectWikipediaRandom(language = "ru") {
+  const query = new URLSearchParams({ language: String(language || "ru") });
+  return request(`/api/project/wiki/random?${query.toString()}`);
+}
+
+export function searchProjectWikipedia(queryText = "", language = "ru", limit = 5) {
+  const query = new URLSearchParams({
+    query: String(queryText || ""),
+    language: String(language || "ru"),
+    limit: String(limit || 5),
+  });
+  return request(`/api/project/wiki/search?${query.toString()}`);
+}
+
+export function resolveProjectModePolicy(payload = {}) {
+  return request("/api/project/mode-policy/resolve", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function saveProjectContextMode(payload = {}) {
+  return request("/api/project/mode/save", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function captureProjectContextFocus(payload = {}) {
+  return request("/api/project/mode/focus", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function feedbackProjectContextMode(payload = {}) {
+  return request("/api/project/mode/feedback", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -431,6 +494,164 @@ export function getProjectDbSchema() {
 
 export function getProjectModelAdvisors() {
   return request("/api/project/model-advisors");
+}
+
+export function getCognitiveHealth() {
+  return requestAt("/api/cognitive", "/health");
+}
+
+export function getCognitiveGraph(params = {}) {
+  const query = new URLSearchParams();
+  if (params.edge_type) {
+    query.set("edge_type", String(params.edge_type));
+  }
+  if (params.min_weight != null) {
+    query.set("min_weight", String(params.min_weight));
+  }
+  const suffix = query.toString();
+  return requestAt("/api/cognitive", `/graph${suffix ? `?${suffix}` : ""}`);
+}
+
+export function getCognitiveGraphSubgraph(params = {}) {
+  const query = new URLSearchParams();
+  if (params.query) {
+    query.set("query", String(params.query));
+  }
+  if (params.limit != null) {
+    query.set("limit", String(params.limit));
+  }
+  if (params.hops != null) {
+    query.set("hops", String(params.hops));
+  }
+  return requestAt("/api/cognitive", `/graph/subgraph?${query.toString()}`);
+}
+
+export function getCognitiveLoops() {
+  return requestAt("/api/cognitive", "/analysis/loops");
+}
+
+export function getCognitiveGraphAudit() {
+  return requestAt("/api/cognitive", "/graph/audit");
+}
+
+export function getCognitiveFoundations() {
+  return requestAt("/api/cognitive", "/foundations");
+}
+
+
+export function getCognitiveSources() {
+  return requestAt("/api/cognitive", "/sources");
+}
+
+export function listCognitiveSessions() {
+  return requestAt("/api/cognitive", "/sessions");
+}
+
+export function createCognitiveSession(payload = {}) {
+  return requestAt("/api/cognitive", "/sessions", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getCognitiveSession(sessionId) {
+  return requestAt("/api/cognitive", `/sessions/${encodeURIComponent(String(sessionId || ""))}`);
+}
+
+export function saveCognitiveSession(sessionId, payload = {}) {
+  return requestAt("/api/cognitive", `/sessions/${encodeURIComponent(String(sessionId || ""))}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function ingestCognitiveText(payload = {}) {
+  return requestAt("/api/cognitive", "/ingest", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function rebuildCognitiveGraph(payload = {}) {
+  return requestAt("/api/cognitive", "/rebuild", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function interpretCognitiveText(payload = {}) {
+  return requestAt("/api/cognitive", "/interpret", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function planCognitive(payload = {}) {
+  return requestAt("/api/cognitive", "/plan", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function loadCognitiveFoundation(payload = {}) {
+  return requestAt("/api/cognitive", "/foundations/load", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function importCognitiveGraph(payload = {}) {
+  return requestAt("/api/cognitive", "/graph/import", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function respondCognitiveChat(payload = {}) {
+  return requestAt("/api/cognitive", "/chat/respond", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function learnCognitiveStyle(payload = {}) {
+  return requestAt("/api/cognitive", "/style/learn", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getCognitiveStyleProfile(userId) {
+  const query = new URLSearchParams({ user_id: String(userId || "") });
+  return requestAt("/api/cognitive", `/style/profile?${query.toString()}`);
+}
+
+export function updateCognitiveNode(nodeId, payload = {}) {
+  return requestAt("/api/cognitive", `/nodes/${encodeURIComponent(String(nodeId || ""))}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createCognitiveNode(payload = {}) {
+  return requestAt("/api/cognitive", "/nodes", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateCognitiveEdge(payload = {}) {
+  return requestAt("/api/cognitive", "/edges", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createCognitiveEdge(payload = {}) {
+  return requestAt("/api/cognitive", "/edges", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getProfilePrompt(entityTypeHint = "human") {

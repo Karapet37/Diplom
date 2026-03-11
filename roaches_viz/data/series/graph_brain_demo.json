@@ -1,0 +1,3168 @@
+{
+  "kind": "graph_foundation",
+  "id": "graph_brain_demo",
+  "title": "Graph Brain Demo",
+  "nodes": [
+    {
+      "id": "root:graph_brain",
+      "type": "DOMAIN",
+      "name": "Graph Brain",
+      "description": "Root knowledge layer that organizes behavior, communication, and reasoning.",
+      "what_it_is": "A root core that holds the stable knowledge structure for behavior simulation.",
+      "how_it_works": "Root core links high-level domains to concepts, patterns, and examples.",
+      "how_to_recognize": "Use it when you need the top-level structure of the graph.",
+      "tags": [
+        "root_core",
+        "graph_brain"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.95,
+        "emotion_weight": 0.4,
+        "risk_weight": 0.55,
+        "relevance_weight": 0.92
+      }
+    },
+    {
+      "id": "domain:behavior",
+      "type": "DOMAIN",
+      "name": "Behavior",
+      "description": "Domain for recurring actions, motives, and adaptation patterns.",
+      "what_it_is": "Domain for recurring actions, motives, and adaptation patterns.",
+      "how_it_works": "This domain groups related concepts and keeps their context together.",
+      "how_to_recognize": "When a query concerns this area repeatedly, this domain should appear in RAM context.",
+      "tags": [
+        "domain_core",
+        "behavior"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.85,
+        "emotion_weight": 0.55,
+        "risk_weight": 0.55,
+        "relevance_weight": 0.82
+      }
+    },
+    {
+      "id": "domain:communication",
+      "type": "DOMAIN",
+      "name": "Communication",
+      "description": "Domain for spoken, implied, and relational meaning in dialogue.",
+      "what_it_is": "Domain for spoken, implied, and relational meaning in dialogue.",
+      "how_it_works": "This domain groups related concepts and keeps their context together.",
+      "how_to_recognize": "When a query concerns this area repeatedly, this domain should appear in RAM context.",
+      "tags": [
+        "domain_core",
+        "communication"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.85,
+        "emotion_weight": 0.55,
+        "risk_weight": 0.55,
+        "relevance_weight": 0.82
+      }
+    },
+    {
+      "id": "domain:reasoning",
+      "type": "DOMAIN",
+      "name": "Reasoning",
+      "description": "Domain for judgment, tradeoffs, and internal decision logic.",
+      "what_it_is": "Domain for judgment, tradeoffs, and internal decision logic.",
+      "how_it_works": "This domain groups related concepts and keeps their context together.",
+      "how_to_recognize": "When a query concerns this area repeatedly, this domain should appear in RAM context.",
+      "tags": [
+        "domain_core",
+        "reasoning"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.85,
+        "emotion_weight": 0.55,
+        "risk_weight": 0.55,
+        "relevance_weight": 0.82
+      }
+    },
+    {
+      "id": "concept:attention",
+      "type": "CONCEPT",
+      "name": "Attention",
+      "description": "Selective focus that shapes what a person notices and ignores.",
+      "what_it_is": "Selective focus that shapes what a person notices and ignores.",
+      "how_it_works": "Tracks what gets mental priority under pressure or interest.",
+      "how_to_recognize": "Notice when dialogue or notes repeatedly point to attention as the hidden organizing idea.",
+      "examples": [
+        "Attention becomes visible when pressure changes how a person interprets the same event."
+      ],
+      "tags": [
+        "concept_core",
+        "attention",
+        "behavior"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.82,
+        "emotion_weight": 0.64,
+        "risk_weight": 0.58,
+        "relevance_weight": 0.86
+      }
+    },
+    {
+      "id": "concept:memory",
+      "type": "CONCEPT",
+      "name": "Memory",
+      "description": "How past examples and emotionally charged events are recalled.",
+      "what_it_is": "How past examples and emotionally charged events are recalled.",
+      "how_it_works": "Links current interpretation to stored examples and repeated situations.",
+      "how_to_recognize": "Notice when dialogue or notes repeatedly point to memory as the hidden organizing idea.",
+      "examples": [
+        "Memory becomes visible when pressure changes how a person interprets the same event."
+      ],
+      "tags": [
+        "concept_core",
+        "memory",
+        "communication"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.82,
+        "emotion_weight": 0.64,
+        "risk_weight": 0.58,
+        "relevance_weight": 0.86
+      }
+    },
+    {
+      "id": "concept:trust",
+      "type": "CONCEPT",
+      "name": "Trust",
+      "description": "Expectation that another person is reliable and safe enough to rely on.",
+      "what_it_is": "Expectation that another person is reliable and safe enough to rely on.",
+      "how_it_works": "Changes how strongly signals are treated as threat or support.",
+      "how_to_recognize": "Notice when dialogue or notes repeatedly point to trust as the hidden organizing idea.",
+      "examples": [
+        "Trust becomes visible when pressure changes how a person interprets the same event."
+      ],
+      "tags": [
+        "concept_core",
+        "trust",
+        "reasoning"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.82,
+        "emotion_weight": 0.64,
+        "risk_weight": 0.58,
+        "relevance_weight": 0.86
+      }
+    },
+    {
+      "id": "concept:boundary",
+      "type": "CONCEPT",
+      "name": "Boundary",
+      "description": "Limit around what a person allows, rejects, or protects.",
+      "what_it_is": "Limit around what a person allows, rejects, or protects.",
+      "how_it_works": "Shows where consent, discomfort, or self-protection becomes active.",
+      "how_to_recognize": "Notice when dialogue or notes repeatedly point to boundary as the hidden organizing idea.",
+      "examples": [
+        "Boundary becomes visible when pressure changes how a person interprets the same event."
+      ],
+      "tags": [
+        "concept_core",
+        "boundary",
+        "behavior"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.82,
+        "emotion_weight": 0.64,
+        "risk_weight": 0.58,
+        "relevance_weight": 0.86
+      }
+    },
+    {
+      "id": "concept:conflict",
+      "type": "CONCEPT",
+      "name": "Conflict",
+      "description": "Active friction between goals, values, or people.",
+      "what_it_is": "Active friction between goals, values, or people.",
+      "how_it_works": "Creates escalation, avoidance, or repair patterns.",
+      "how_to_recognize": "Notice when dialogue or notes repeatedly point to conflict as the hidden organizing idea.",
+      "examples": [
+        "Conflict becomes visible when pressure changes how a person interprets the same event."
+      ],
+      "tags": [
+        "concept_core",
+        "conflict",
+        "communication"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.82,
+        "emotion_weight": 0.64,
+        "risk_weight": 0.58,
+        "relevance_weight": 0.86
+      }
+    },
+    {
+      "id": "concept:motivation",
+      "type": "CONCEPT",
+      "name": "Motivation",
+      "description": "Forces that push a person toward action or inaction.",
+      "what_it_is": "Forces that push a person toward action or inaction.",
+      "how_it_works": "Combines reward, fear, duty, and identity pressure.",
+      "how_to_recognize": "Notice when dialogue or notes repeatedly point to motivation as the hidden organizing idea.",
+      "examples": [
+        "Motivation becomes visible when pressure changes how a person interprets the same event."
+      ],
+      "tags": [
+        "concept_core",
+        "motivation",
+        "reasoning"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.82,
+        "emotion_weight": 0.64,
+        "risk_weight": 0.58,
+        "relevance_weight": 0.86
+      }
+    },
+    {
+      "id": "concept:decision",
+      "type": "CONCEPT",
+      "name": "Decision",
+      "description": "Commitment to a course of action among alternatives.",
+      "what_it_is": "Commitment to a course of action among alternatives.",
+      "how_it_works": "Reveals tradeoffs, risk tolerance, and reasoning style.",
+      "how_to_recognize": "Notice when dialogue or notes repeatedly point to decision as the hidden organizing idea.",
+      "examples": [
+        "Decision becomes visible when pressure changes how a person interprets the same event."
+      ],
+      "tags": [
+        "concept_core",
+        "decision",
+        "behavior"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.82,
+        "emotion_weight": 0.64,
+        "risk_weight": 0.58,
+        "relevance_weight": 0.86
+      }
+    },
+    {
+      "id": "concept:communication",
+      "type": "CONCEPT",
+      "name": "Communication",
+      "description": "Exchange of meaning through wording, tone, timing, and context.",
+      "what_it_is": "Exchange of meaning through wording, tone, timing, and context.",
+      "how_it_works": "Carries explicit and implicit intent at the same time.",
+      "how_to_recognize": "Notice when dialogue or notes repeatedly point to communication as the hidden organizing idea.",
+      "examples": [
+        "Communication becomes visible when pressure changes how a person interprets the same event."
+      ],
+      "tags": [
+        "concept_core",
+        "communication",
+        "communication"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.82,
+        "emotion_weight": 0.64,
+        "risk_weight": 0.58,
+        "relevance_weight": 0.86
+      }
+    },
+    {
+      "id": "concept:self_image",
+      "type": "CONCEPT",
+      "name": "Self-image",
+      "description": "Working model of how a person sees themselves.",
+      "what_it_is": "Working model of how a person sees themselves.",
+      "how_it_works": "Shapes defensiveness, ambition, shame, and consistency pressure.",
+      "how_to_recognize": "Notice when dialogue or notes repeatedly point to self-image as the hidden organizing idea.",
+      "examples": [
+        "Self-image becomes visible when pressure changes how a person interprets the same event."
+      ],
+      "tags": [
+        "concept_core",
+        "self_image",
+        "reasoning"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.82,
+        "emotion_weight": 0.64,
+        "risk_weight": 0.58,
+        "relevance_weight": 0.86
+      }
+    },
+    {
+      "id": "concept:social_pressure",
+      "type": "CONCEPT",
+      "name": "Social pressure",
+      "description": "Force created by expectations, status, rejection risk, or loyalty demands.",
+      "what_it_is": "Force created by expectations, status, rejection risk, or loyalty demands.",
+      "how_it_works": "Often drives compliance without explicit threats.",
+      "how_to_recognize": "Notice when dialogue or notes repeatedly point to social pressure as the hidden organizing idea.",
+      "examples": [
+        "Social pressure becomes visible when pressure changes how a person interprets the same event."
+      ],
+      "tags": [
+        "concept_core",
+        "social_pressure",
+        "behavior"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.82,
+        "emotion_weight": 0.64,
+        "risk_weight": 0.58,
+        "relevance_weight": 0.86
+      }
+    },
+    {
+      "id": "pattern:guilt_pressure",
+      "type": "PATTERN",
+      "name": "Guilt pressure",
+      "description": "Pressure framed as proof of love, loyalty, or care.",
+      "what_it_is": "Pressure framed as proof of love, loyalty, or care.",
+      "how_it_works": "A person implies that refusal means emotional failure.",
+      "how_to_recognize": "Watch for emotional debt, moral pressure, and conditional affection.",
+      "examples": [
+        "After criticism, the speaker says refusal means you do not really care."
+      ],
+      "tags": [
+        "pattern_core",
+        "guilt_pressure"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:double_bind",
+      "type": "PATTERN",
+      "name": "Double bind",
+      "description": "A setup where every available response is punished.",
+      "what_it_is": "A setup where every available response is punished.",
+      "how_it_works": "The target is cornered into losing regardless of choice.",
+      "how_to_recognize": "Look for contradictory demands and blame in both outcomes.",
+      "examples": [
+        "The person delays a clear answer until the other side becomes anxious."
+      ],
+      "tags": [
+        "pattern_core",
+        "double_bind"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:status_testing",
+      "type": "PATTERN",
+      "name": "Status testing",
+      "description": "Small moves that probe confidence, rank, or dominance.",
+      "what_it_is": "Small moves that probe confidence, rank, or dominance.",
+      "how_it_works": "The speaker checks whether they can define the frame.",
+      "how_to_recognize": "Notice teasing, dismissal, or public correction.",
+      "examples": [
+        "A third party is mentioned to increase pressure without direct ownership."
+      ],
+      "tags": [
+        "pattern_core",
+        "status_testing"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:strategic_silence",
+      "type": "PATTERN",
+      "name": "Strategic silence",
+      "description": "Silence used to create pressure or force disclosure.",
+      "what_it_is": "Silence used to create pressure or force disclosure.",
+      "how_it_works": "Lack of reply becomes a social lever.",
+      "how_to_recognize": "Watch for delayed answers after key emotional moments.",
+      "examples": [
+        "Praise is used early to speed up closeness and soften caution."
+      ],
+      "tags": [
+        "pattern_core",
+        "strategic_silence"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:boundary_push",
+      "type": "PATTERN",
+      "name": "Boundary push",
+      "description": "Incremental testing of another person's limits.",
+      "what_it_is": "Incremental testing of another person's limits.",
+      "how_it_works": "Small violations normalize larger ones later.",
+      "how_to_recognize": "Look for repeated requests after clear refusal.",
+      "examples": [
+        "A boundary is restated, but the same request returns in softer words."
+      ],
+      "tags": [
+        "pattern_core",
+        "boundary_push"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:mirroring",
+      "type": "PATTERN",
+      "name": "Mirroring",
+      "description": "Copying language or emotion to build rapid rapport.",
+      "what_it_is": "Copying language or emotion to build rapid rapport.",
+      "how_it_works": "Surface similarity increases comfort and compliance.",
+      "how_to_recognize": "Notice repeated phrasing, posture matching, or tone copying.",
+      "examples": [
+        "After criticism, the speaker says refusal means you do not really care."
+      ],
+      "tags": [
+        "pattern_core",
+        "mirroring"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:gaslighting",
+      "type": "PATTERN",
+      "name": "Gaslighting",
+      "description": "Destabilizing a person's confidence in their own perception.",
+      "what_it_is": "Destabilizing a person's confidence in their own perception.",
+      "how_it_works": "Reality is reframed to create dependence or doubt.",
+      "how_to_recognize": "Look for denial of obvious events and confident reversal.",
+      "examples": [
+        "The person delays a clear answer until the other side becomes anxious."
+      ],
+      "tags": [
+        "pattern_core",
+        "gaslighting"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:love_bombing",
+      "type": "PATTERN",
+      "name": "Love bombing",
+      "description": "Intense positive attention used to accelerate attachment.",
+      "what_it_is": "Intense positive attention used to accelerate attachment.",
+      "how_it_works": "Fast closeness bypasses slower trust building.",
+      "how_to_recognize": "Notice grand praise early in unstable relationships.",
+      "examples": [
+        "A third party is mentioned to increase pressure without direct ownership."
+      ],
+      "tags": [
+        "pattern_core",
+        "love_bombing"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:triangulation",
+      "type": "PATTERN",
+      "name": "Triangulation",
+      "description": "Using a third party to create pressure or comparison.",
+      "what_it_is": "Using a third party to create pressure or comparison.",
+      "how_it_works": "Indirect influence changes the emotional frame.",
+      "how_to_recognize": "Look for references to what others think or do.",
+      "examples": [
+        "Praise is used early to speed up closeness and soften caution."
+      ],
+      "tags": [
+        "pattern_core",
+        "triangulation"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:avoidant_delay",
+      "type": "PATTERN",
+      "name": "Avoidant delay",
+      "description": "Delay used to avoid clarity, commitment, or accountability.",
+      "what_it_is": "Delay used to avoid clarity, commitment, or accountability.",
+      "how_it_works": "Time is used to weaken urgency or confrontation.",
+      "how_to_recognize": "Notice vague postponement without concrete next steps.",
+      "examples": [
+        "A boundary is restated, but the same request returns in softer words."
+      ],
+      "tags": [
+        "pattern_core",
+        "avoidant_delay"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:reassurance_loop",
+      "type": "PATTERN",
+      "name": "Reassurance loop",
+      "description": "Repeated need for validation that resets quickly.",
+      "what_it_is": "Repeated need for validation that resets quickly.",
+      "how_it_works": "Comfort is requested again because the root uncertainty remains.",
+      "how_to_recognize": "Watch for repeated \"are you sure\" cycles.",
+      "examples": [
+        "After criticism, the speaker says refusal means you do not really care."
+      ],
+      "tags": [
+        "pattern_core",
+        "reassurance_loop"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:projection",
+      "type": "PATTERN",
+      "name": "Projection",
+      "description": "Attributing one's own motive or emotion to someone else.",
+      "what_it_is": "Attributing one's own motive or emotion to someone else.",
+      "how_it_works": "Internal discomfort is externalized as accusation.",
+      "how_to_recognize": "Look for claims that fit the speaker better than the target.",
+      "examples": [
+        "The person delays a clear answer until the other side becomes anxious."
+      ],
+      "tags": [
+        "pattern_core",
+        "projection"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:selective_disclosure",
+      "type": "PATTERN",
+      "name": "Selective disclosure",
+      "description": "Sharing partial truth to control interpretation.",
+      "what_it_is": "Sharing partial truth to control interpretation.",
+      "how_it_works": "Key context is withheld while plausible fragments are shown.",
+      "how_to_recognize": "Notice missing timeline links or unexplained omissions.",
+      "examples": [
+        "A third party is mentioned to increase pressure without direct ownership."
+      ],
+      "tags": [
+        "pattern_core",
+        "selective_disclosure"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:scarcity_pressure",
+      "type": "PATTERN",
+      "name": "Scarcity pressure",
+      "description": "Urgency created by limited time, access, or approval.",
+      "what_it_is": "Urgency created by limited time, access, or approval.",
+      "how_it_works": "Fear of missing out suppresses reflection.",
+      "how_to_recognize": "Look for countdown language and forced decisions.",
+      "examples": [
+        "Praise is used early to speed up closeness and soften caution."
+      ],
+      "tags": [
+        "pattern_core",
+        "scarcity_pressure"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:moral_framing",
+      "type": "PATTERN",
+      "name": "Moral framing",
+      "description": "Turning preference or control into a moral obligation.",
+      "what_it_is": "Turning preference or control into a moral obligation.",
+      "how_it_works": "The speaker claims virtue as leverage.",
+      "how_to_recognize": "Look for language about good, bad, decent, or selfish.",
+      "examples": [
+        "A boundary is restated, but the same request returns in softer words."
+      ],
+      "tags": [
+        "pattern_core",
+        "moral_framing"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:conflict_escalation",
+      "type": "PATTERN",
+      "name": "Conflict escalation",
+      "description": "Moving tension upward instead of resolving the issue.",
+      "what_it_is": "Moving tension upward instead of resolving the issue.",
+      "how_it_works": "Heat is used to gain advantage or force retreat.",
+      "how_to_recognize": "Watch for personal attacks replacing the original topic.",
+      "examples": [
+        "After criticism, the speaker says refusal means you do not really care."
+      ],
+      "tags": [
+        "pattern_core",
+        "conflict_escalation"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:repair_attempt",
+      "type": "PATTERN",
+      "name": "Repair attempt",
+      "description": "A move that lowers threat and reopens cooperation.",
+      "what_it_is": "A move that lowers threat and reopens cooperation.",
+      "how_it_works": "Signals willingness to stabilize the interaction.",
+      "how_to_recognize": "Notice apology, clarification, humor, or concrete compromise.",
+      "examples": [
+        "The person delays a clear answer until the other side becomes anxious."
+      ],
+      "tags": [
+        "pattern_core",
+        "repair_attempt"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:curiosity_probe",
+      "type": "PATTERN",
+      "name": "Curiosity probe",
+      "description": "Gentle questioning to gather real context before acting.",
+      "what_it_is": "Gentle questioning to gather real context before acting.",
+      "how_it_works": "Understanding is prioritized over instant judgment.",
+      "how_to_recognize": "Look for open questions and low-pressure exploration.",
+      "examples": [
+        "A third party is mentioned to increase pressure without direct ownership."
+      ],
+      "tags": [
+        "pattern_core",
+        "curiosity_probe"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:identity_hook",
+      "type": "PATTERN",
+      "name": "Identity hook",
+      "description": "Appeal to who a person believes they are.",
+      "what_it_is": "Appeal to who a person believes they are.",
+      "how_it_works": "Action is linked to identity consistency.",
+      "how_to_recognize": "Notice phrases like \"someone like you\" or \"you are the kind of person\".",
+      "examples": [
+        "Praise is used early to speed up closeness and soften caution."
+      ],
+      "tags": [
+        "pattern_core",
+        "identity_hook"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "pattern:learned_helplessness",
+      "type": "PATTERN",
+      "name": "Learned helplessness cue",
+      "description": "A pattern where repeated failure lowers initiative.",
+      "what_it_is": "A pattern where repeated failure lowers initiative.",
+      "how_it_works": "The person expects effort not to matter.",
+      "how_to_recognize": "Notice low agency language and quick surrender.",
+      "examples": [
+        "A boundary is restated, but the same request returns in softer words."
+      ],
+      "tags": [
+        "pattern_core",
+        "learned_helplessness"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.78,
+        "emotion_weight": 0.72,
+        "risk_weight": 0.76,
+        "relevance_weight": 0.84
+      }
+    },
+    {
+      "id": "example:graph_brain:01",
+      "type": "EXAMPLE",
+      "name": "Example 01 for Guilt pressure",
+      "description": "After criticism, the speaker says refusal means you do not really care.",
+      "what_it_is": "A concrete dialogue fragment showing guilt pressure.",
+      "how_it_works": "This example shows how guilt pressure appears in ordinary language.",
+      "how_to_recognize": "Watch for emotional debt, moral pressure, and conditional affection.",
+      "examples": [
+        "After criticism, the speaker says refusal means you do not really care."
+      ],
+      "tags": [
+        "example_nodes",
+        "guilt_pressure"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:02",
+      "type": "EXAMPLE",
+      "name": "Example 02 for Double bind",
+      "description": "The person delays a clear answer until the other side becomes anxious.",
+      "what_it_is": "A concrete dialogue fragment showing double bind.",
+      "how_it_works": "This example shows how double bind appears in ordinary language.",
+      "how_to_recognize": "Look for contradictory demands and blame in both outcomes.",
+      "examples": [
+        "The person delays a clear answer until the other side becomes anxious."
+      ],
+      "tags": [
+        "example_nodes",
+        "double_bind"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:03",
+      "type": "EXAMPLE",
+      "name": "Example 03 for Status testing",
+      "description": "A third party is mentioned to increase pressure without direct ownership.",
+      "what_it_is": "A concrete dialogue fragment showing status testing.",
+      "how_it_works": "This example shows how status testing appears in ordinary language.",
+      "how_to_recognize": "Notice teasing, dismissal, or public correction.",
+      "examples": [
+        "A third party is mentioned to increase pressure without direct ownership."
+      ],
+      "tags": [
+        "example_nodes",
+        "status_testing"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:04",
+      "type": "EXAMPLE",
+      "name": "Example 04 for Strategic silence",
+      "description": "Praise is used early to speed up closeness and soften caution.",
+      "what_it_is": "A concrete dialogue fragment showing strategic silence.",
+      "how_it_works": "This example shows how strategic silence appears in ordinary language.",
+      "how_to_recognize": "Watch for delayed answers after key emotional moments.",
+      "examples": [
+        "Praise is used early to speed up closeness and soften caution."
+      ],
+      "tags": [
+        "example_nodes",
+        "strategic_silence"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:05",
+      "type": "EXAMPLE",
+      "name": "Example 05 for Boundary push",
+      "description": "A boundary is restated, but the same request returns in softer words.",
+      "what_it_is": "A concrete dialogue fragment showing boundary push.",
+      "how_it_works": "This example shows how boundary push appears in ordinary language.",
+      "how_to_recognize": "Look for repeated requests after clear refusal.",
+      "examples": [
+        "A boundary is restated, but the same request returns in softer words."
+      ],
+      "tags": [
+        "example_nodes",
+        "boundary_push"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:06",
+      "type": "EXAMPLE",
+      "name": "Example 06 for Mirroring",
+      "description": "After criticism, the speaker says refusal means you do not really care.",
+      "what_it_is": "A concrete dialogue fragment showing mirroring.",
+      "how_it_works": "This example shows how mirroring appears in ordinary language.",
+      "how_to_recognize": "Notice repeated phrasing, posture matching, or tone copying.",
+      "examples": [
+        "After criticism, the speaker says refusal means you do not really care."
+      ],
+      "tags": [
+        "example_nodes",
+        "mirroring"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:07",
+      "type": "EXAMPLE",
+      "name": "Example 07 for Gaslighting",
+      "description": "The person delays a clear answer until the other side becomes anxious.",
+      "what_it_is": "A concrete dialogue fragment showing gaslighting.",
+      "how_it_works": "This example shows how gaslighting appears in ordinary language.",
+      "how_to_recognize": "Look for denial of obvious events and confident reversal.",
+      "examples": [
+        "The person delays a clear answer until the other side becomes anxious."
+      ],
+      "tags": [
+        "example_nodes",
+        "gaslighting"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:08",
+      "type": "EXAMPLE",
+      "name": "Example 08 for Love bombing",
+      "description": "A third party is mentioned to increase pressure without direct ownership.",
+      "what_it_is": "A concrete dialogue fragment showing love bombing.",
+      "how_it_works": "This example shows how love bombing appears in ordinary language.",
+      "how_to_recognize": "Notice grand praise early in unstable relationships.",
+      "examples": [
+        "A third party is mentioned to increase pressure without direct ownership."
+      ],
+      "tags": [
+        "example_nodes",
+        "love_bombing"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:09",
+      "type": "EXAMPLE",
+      "name": "Example 09 for Triangulation",
+      "description": "Praise is used early to speed up closeness and soften caution.",
+      "what_it_is": "A concrete dialogue fragment showing triangulation.",
+      "how_it_works": "This example shows how triangulation appears in ordinary language.",
+      "how_to_recognize": "Look for references to what others think or do.",
+      "examples": [
+        "Praise is used early to speed up closeness and soften caution."
+      ],
+      "tags": [
+        "example_nodes",
+        "triangulation"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:10",
+      "type": "EXAMPLE",
+      "name": "Example 10 for Avoidant delay",
+      "description": "A boundary is restated, but the same request returns in softer words.",
+      "what_it_is": "A concrete dialogue fragment showing avoidant delay.",
+      "how_it_works": "This example shows how avoidant delay appears in ordinary language.",
+      "how_to_recognize": "Notice vague postponement without concrete next steps.",
+      "examples": [
+        "A boundary is restated, but the same request returns in softer words."
+      ],
+      "tags": [
+        "example_nodes",
+        "avoidant_delay"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:11",
+      "type": "EXAMPLE",
+      "name": "Example 11 for Reassurance loop",
+      "description": "After criticism, the speaker says refusal means you do not really care.",
+      "what_it_is": "A concrete dialogue fragment showing reassurance loop.",
+      "how_it_works": "This example shows how reassurance loop appears in ordinary language.",
+      "how_to_recognize": "Watch for repeated \"are you sure\" cycles.",
+      "examples": [
+        "After criticism, the speaker says refusal means you do not really care."
+      ],
+      "tags": [
+        "example_nodes",
+        "reassurance_loop"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:12",
+      "type": "EXAMPLE",
+      "name": "Example 12 for Projection",
+      "description": "The person delays a clear answer until the other side becomes anxious.",
+      "what_it_is": "A concrete dialogue fragment showing projection.",
+      "how_it_works": "This example shows how projection appears in ordinary language.",
+      "how_to_recognize": "Look for claims that fit the speaker better than the target.",
+      "examples": [
+        "The person delays a clear answer until the other side becomes anxious."
+      ],
+      "tags": [
+        "example_nodes",
+        "projection"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:13",
+      "type": "EXAMPLE",
+      "name": "Example 13 for Selective disclosure",
+      "description": "A third party is mentioned to increase pressure without direct ownership.",
+      "what_it_is": "A concrete dialogue fragment showing selective disclosure.",
+      "how_it_works": "This example shows how selective disclosure appears in ordinary language.",
+      "how_to_recognize": "Notice missing timeline links or unexplained omissions.",
+      "examples": [
+        "A third party is mentioned to increase pressure without direct ownership."
+      ],
+      "tags": [
+        "example_nodes",
+        "selective_disclosure"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:14",
+      "type": "EXAMPLE",
+      "name": "Example 14 for Scarcity pressure",
+      "description": "Praise is used early to speed up closeness and soften caution.",
+      "what_it_is": "A concrete dialogue fragment showing scarcity pressure.",
+      "how_it_works": "This example shows how scarcity pressure appears in ordinary language.",
+      "how_to_recognize": "Look for countdown language and forced decisions.",
+      "examples": [
+        "Praise is used early to speed up closeness and soften caution."
+      ],
+      "tags": [
+        "example_nodes",
+        "scarcity_pressure"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:15",
+      "type": "EXAMPLE",
+      "name": "Example 15 for Moral framing",
+      "description": "A boundary is restated, but the same request returns in softer words.",
+      "what_it_is": "A concrete dialogue fragment showing moral framing.",
+      "how_it_works": "This example shows how moral framing appears in ordinary language.",
+      "how_to_recognize": "Look for language about good, bad, decent, or selfish.",
+      "examples": [
+        "A boundary is restated, but the same request returns in softer words."
+      ],
+      "tags": [
+        "example_nodes",
+        "moral_framing"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:16",
+      "type": "EXAMPLE",
+      "name": "Example 16 for Conflict escalation",
+      "description": "After criticism, the speaker says refusal means you do not really care.",
+      "what_it_is": "A concrete dialogue fragment showing conflict escalation.",
+      "how_it_works": "This example shows how conflict escalation appears in ordinary language.",
+      "how_to_recognize": "Watch for personal attacks replacing the original topic.",
+      "examples": [
+        "After criticism, the speaker says refusal means you do not really care."
+      ],
+      "tags": [
+        "example_nodes",
+        "conflict_escalation"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:17",
+      "type": "EXAMPLE",
+      "name": "Example 17 for Repair attempt",
+      "description": "The person delays a clear answer until the other side becomes anxious.",
+      "what_it_is": "A concrete dialogue fragment showing repair attempt.",
+      "how_it_works": "This example shows how repair attempt appears in ordinary language.",
+      "how_to_recognize": "Notice apology, clarification, humor, or concrete compromise.",
+      "examples": [
+        "The person delays a clear answer until the other side becomes anxious."
+      ],
+      "tags": [
+        "example_nodes",
+        "repair_attempt"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:18",
+      "type": "EXAMPLE",
+      "name": "Example 18 for Curiosity probe",
+      "description": "A third party is mentioned to increase pressure without direct ownership.",
+      "what_it_is": "A concrete dialogue fragment showing curiosity probe.",
+      "how_it_works": "This example shows how curiosity probe appears in ordinary language.",
+      "how_to_recognize": "Look for open questions and low-pressure exploration.",
+      "examples": [
+        "A third party is mentioned to increase pressure without direct ownership."
+      ],
+      "tags": [
+        "example_nodes",
+        "curiosity_probe"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:19",
+      "type": "EXAMPLE",
+      "name": "Example 19 for Identity hook",
+      "description": "Praise is used early to speed up closeness and soften caution.",
+      "what_it_is": "A concrete dialogue fragment showing identity hook.",
+      "how_it_works": "This example shows how identity hook appears in ordinary language.",
+      "how_to_recognize": "Notice phrases like \"someone like you\" or \"you are the kind of person\".",
+      "examples": [
+        "Praise is used early to speed up closeness and soften caution."
+      ],
+      "tags": [
+        "example_nodes",
+        "identity_hook"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:20",
+      "type": "EXAMPLE",
+      "name": "Example 20 for Learned helplessness cue",
+      "description": "A boundary is restated, but the same request returns in softer words.",
+      "what_it_is": "A concrete dialogue fragment showing learned helplessness cue.",
+      "how_it_works": "This example shows how learned helplessness cue appears in ordinary language.",
+      "how_to_recognize": "Notice low agency language and quick surrender.",
+      "examples": [
+        "A boundary is restated, but the same request returns in softer words."
+      ],
+      "tags": [
+        "example_nodes",
+        "learned_helplessness"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:21",
+      "type": "EXAMPLE",
+      "name": "Example 21 for Guilt pressure",
+      "description": "After criticism, the speaker says refusal means you do not really care.",
+      "what_it_is": "A concrete dialogue fragment showing guilt pressure.",
+      "how_it_works": "This example shows how guilt pressure appears in ordinary language.",
+      "how_to_recognize": "Watch for emotional debt, moral pressure, and conditional affection.",
+      "examples": [
+        "After criticism, the speaker says refusal means you do not really care."
+      ],
+      "tags": [
+        "example_nodes",
+        "guilt_pressure"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:22",
+      "type": "EXAMPLE",
+      "name": "Example 22 for Double bind",
+      "description": "The person delays a clear answer until the other side becomes anxious.",
+      "what_it_is": "A concrete dialogue fragment showing double bind.",
+      "how_it_works": "This example shows how double bind appears in ordinary language.",
+      "how_to_recognize": "Look for contradictory demands and blame in both outcomes.",
+      "examples": [
+        "The person delays a clear answer until the other side becomes anxious."
+      ],
+      "tags": [
+        "example_nodes",
+        "double_bind"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:23",
+      "type": "EXAMPLE",
+      "name": "Example 23 for Status testing",
+      "description": "A third party is mentioned to increase pressure without direct ownership.",
+      "what_it_is": "A concrete dialogue fragment showing status testing.",
+      "how_it_works": "This example shows how status testing appears in ordinary language.",
+      "how_to_recognize": "Notice teasing, dismissal, or public correction.",
+      "examples": [
+        "A third party is mentioned to increase pressure without direct ownership."
+      ],
+      "tags": [
+        "example_nodes",
+        "status_testing"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:24",
+      "type": "EXAMPLE",
+      "name": "Example 24 for Strategic silence",
+      "description": "Praise is used early to speed up closeness and soften caution.",
+      "what_it_is": "A concrete dialogue fragment showing strategic silence.",
+      "how_it_works": "This example shows how strategic silence appears in ordinary language.",
+      "how_to_recognize": "Watch for delayed answers after key emotional moments.",
+      "examples": [
+        "Praise is used early to speed up closeness and soften caution."
+      ],
+      "tags": [
+        "example_nodes",
+        "strategic_silence"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:25",
+      "type": "EXAMPLE",
+      "name": "Example 25 for Boundary push",
+      "description": "A boundary is restated, but the same request returns in softer words.",
+      "what_it_is": "A concrete dialogue fragment showing boundary push.",
+      "how_it_works": "This example shows how boundary push appears in ordinary language.",
+      "how_to_recognize": "Look for repeated requests after clear refusal.",
+      "examples": [
+        "A boundary is restated, but the same request returns in softer words."
+      ],
+      "tags": [
+        "example_nodes",
+        "boundary_push"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:26",
+      "type": "EXAMPLE",
+      "name": "Example 26 for Mirroring",
+      "description": "After criticism, the speaker says refusal means you do not really care.",
+      "what_it_is": "A concrete dialogue fragment showing mirroring.",
+      "how_it_works": "This example shows how mirroring appears in ordinary language.",
+      "how_to_recognize": "Notice repeated phrasing, posture matching, or tone copying.",
+      "examples": [
+        "After criticism, the speaker says refusal means you do not really care."
+      ],
+      "tags": [
+        "example_nodes",
+        "mirroring"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:27",
+      "type": "EXAMPLE",
+      "name": "Example 27 for Gaslighting",
+      "description": "The person delays a clear answer until the other side becomes anxious.",
+      "what_it_is": "A concrete dialogue fragment showing gaslighting.",
+      "how_it_works": "This example shows how gaslighting appears in ordinary language.",
+      "how_to_recognize": "Look for denial of obvious events and confident reversal.",
+      "examples": [
+        "The person delays a clear answer until the other side becomes anxious."
+      ],
+      "tags": [
+        "example_nodes",
+        "gaslighting"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:28",
+      "type": "EXAMPLE",
+      "name": "Example 28 for Love bombing",
+      "description": "A third party is mentioned to increase pressure without direct ownership.",
+      "what_it_is": "A concrete dialogue fragment showing love bombing.",
+      "how_it_works": "This example shows how love bombing appears in ordinary language.",
+      "how_to_recognize": "Notice grand praise early in unstable relationships.",
+      "examples": [
+        "A third party is mentioned to increase pressure without direct ownership."
+      ],
+      "tags": [
+        "example_nodes",
+        "love_bombing"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:29",
+      "type": "EXAMPLE",
+      "name": "Example 29 for Triangulation",
+      "description": "Praise is used early to speed up closeness and soften caution.",
+      "what_it_is": "A concrete dialogue fragment showing triangulation.",
+      "how_it_works": "This example shows how triangulation appears in ordinary language.",
+      "how_to_recognize": "Look for references to what others think or do.",
+      "examples": [
+        "Praise is used early to speed up closeness and soften caution."
+      ],
+      "tags": [
+        "example_nodes",
+        "triangulation"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:30",
+      "type": "EXAMPLE",
+      "name": "Example 30 for Avoidant delay",
+      "description": "A boundary is restated, but the same request returns in softer words.",
+      "what_it_is": "A concrete dialogue fragment showing avoidant delay.",
+      "how_it_works": "This example shows how avoidant delay appears in ordinary language.",
+      "how_to_recognize": "Notice vague postponement without concrete next steps.",
+      "examples": [
+        "A boundary is restated, but the same request returns in softer words."
+      ],
+      "tags": [
+        "example_nodes",
+        "avoidant_delay"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:31",
+      "type": "EXAMPLE",
+      "name": "Example 31 for Reassurance loop",
+      "description": "After criticism, the speaker says refusal means you do not really care.",
+      "what_it_is": "A concrete dialogue fragment showing reassurance loop.",
+      "how_it_works": "This example shows how reassurance loop appears in ordinary language.",
+      "how_to_recognize": "Watch for repeated \"are you sure\" cycles.",
+      "examples": [
+        "After criticism, the speaker says refusal means you do not really care."
+      ],
+      "tags": [
+        "example_nodes",
+        "reassurance_loop"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:32",
+      "type": "EXAMPLE",
+      "name": "Example 32 for Projection",
+      "description": "The person delays a clear answer until the other side becomes anxious.",
+      "what_it_is": "A concrete dialogue fragment showing projection.",
+      "how_it_works": "This example shows how projection appears in ordinary language.",
+      "how_to_recognize": "Look for claims that fit the speaker better than the target.",
+      "examples": [
+        "The person delays a clear answer until the other side becomes anxious."
+      ],
+      "tags": [
+        "example_nodes",
+        "projection"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:33",
+      "type": "EXAMPLE",
+      "name": "Example 33 for Selective disclosure",
+      "description": "A third party is mentioned to increase pressure without direct ownership.",
+      "what_it_is": "A concrete dialogue fragment showing selective disclosure.",
+      "how_it_works": "This example shows how selective disclosure appears in ordinary language.",
+      "how_to_recognize": "Notice missing timeline links or unexplained omissions.",
+      "examples": [
+        "A third party is mentioned to increase pressure without direct ownership."
+      ],
+      "tags": [
+        "example_nodes",
+        "selective_disclosure"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:34",
+      "type": "EXAMPLE",
+      "name": "Example 34 for Scarcity pressure",
+      "description": "Praise is used early to speed up closeness and soften caution.",
+      "what_it_is": "A concrete dialogue fragment showing scarcity pressure.",
+      "how_it_works": "This example shows how scarcity pressure appears in ordinary language.",
+      "how_to_recognize": "Look for countdown language and forced decisions.",
+      "examples": [
+        "Praise is used early to speed up closeness and soften caution."
+      ],
+      "tags": [
+        "example_nodes",
+        "scarcity_pressure"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:35",
+      "type": "EXAMPLE",
+      "name": "Example 35 for Moral framing",
+      "description": "A boundary is restated, but the same request returns in softer words.",
+      "what_it_is": "A concrete dialogue fragment showing moral framing.",
+      "how_it_works": "This example shows how moral framing appears in ordinary language.",
+      "how_to_recognize": "Look for language about good, bad, decent, or selfish.",
+      "examples": [
+        "A boundary is restated, but the same request returns in softer words."
+      ],
+      "tags": [
+        "example_nodes",
+        "moral_framing"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:36",
+      "type": "EXAMPLE",
+      "name": "Example 36 for Conflict escalation",
+      "description": "After criticism, the speaker says refusal means you do not really care.",
+      "what_it_is": "A concrete dialogue fragment showing conflict escalation.",
+      "how_it_works": "This example shows how conflict escalation appears in ordinary language.",
+      "how_to_recognize": "Watch for personal attacks replacing the original topic.",
+      "examples": [
+        "After criticism, the speaker says refusal means you do not really care."
+      ],
+      "tags": [
+        "example_nodes",
+        "conflict_escalation"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:37",
+      "type": "EXAMPLE",
+      "name": "Example 37 for Repair attempt",
+      "description": "The person delays a clear answer until the other side becomes anxious.",
+      "what_it_is": "A concrete dialogue fragment showing repair attempt.",
+      "how_it_works": "This example shows how repair attempt appears in ordinary language.",
+      "how_to_recognize": "Notice apology, clarification, humor, or concrete compromise.",
+      "examples": [
+        "The person delays a clear answer until the other side becomes anxious."
+      ],
+      "tags": [
+        "example_nodes",
+        "repair_attempt"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:38",
+      "type": "EXAMPLE",
+      "name": "Example 38 for Curiosity probe",
+      "description": "A third party is mentioned to increase pressure without direct ownership.",
+      "what_it_is": "A concrete dialogue fragment showing curiosity probe.",
+      "how_it_works": "This example shows how curiosity probe appears in ordinary language.",
+      "how_to_recognize": "Look for open questions and low-pressure exploration.",
+      "examples": [
+        "A third party is mentioned to increase pressure without direct ownership."
+      ],
+      "tags": [
+        "example_nodes",
+        "curiosity_probe"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:39",
+      "type": "EXAMPLE",
+      "name": "Example 39 for Identity hook",
+      "description": "Praise is used early to speed up closeness and soften caution.",
+      "what_it_is": "A concrete dialogue fragment showing identity hook.",
+      "how_it_works": "This example shows how identity hook appears in ordinary language.",
+      "how_to_recognize": "Notice phrases like \"someone like you\" or \"you are the kind of person\".",
+      "examples": [
+        "Praise is used early to speed up closeness and soften caution."
+      ],
+      "tags": [
+        "example_nodes",
+        "identity_hook"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:40",
+      "type": "EXAMPLE",
+      "name": "Example 40 for Learned helplessness cue",
+      "description": "A boundary is restated, but the same request returns in softer words.",
+      "what_it_is": "A concrete dialogue fragment showing learned helplessness cue.",
+      "how_it_works": "This example shows how learned helplessness cue appears in ordinary language.",
+      "how_to_recognize": "Notice low agency language and quick surrender.",
+      "examples": [
+        "A boundary is restated, but the same request returns in softer words."
+      ],
+      "tags": [
+        "example_nodes",
+        "learned_helplessness"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:41",
+      "type": "EXAMPLE",
+      "name": "Example 41 for Guilt pressure",
+      "description": "After criticism, the speaker says refusal means you do not really care.",
+      "what_it_is": "A concrete dialogue fragment showing guilt pressure.",
+      "how_it_works": "This example shows how guilt pressure appears in ordinary language.",
+      "how_to_recognize": "Watch for emotional debt, moral pressure, and conditional affection.",
+      "examples": [
+        "After criticism, the speaker says refusal means you do not really care."
+      ],
+      "tags": [
+        "example_nodes",
+        "guilt_pressure"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:42",
+      "type": "EXAMPLE",
+      "name": "Example 42 for Double bind",
+      "description": "The person delays a clear answer until the other side becomes anxious.",
+      "what_it_is": "A concrete dialogue fragment showing double bind.",
+      "how_it_works": "This example shows how double bind appears in ordinary language.",
+      "how_to_recognize": "Look for contradictory demands and blame in both outcomes.",
+      "examples": [
+        "The person delays a clear answer until the other side becomes anxious."
+      ],
+      "tags": [
+        "example_nodes",
+        "double_bind"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:43",
+      "type": "EXAMPLE",
+      "name": "Example 43 for Status testing",
+      "description": "A third party is mentioned to increase pressure without direct ownership.",
+      "what_it_is": "A concrete dialogue fragment showing status testing.",
+      "how_it_works": "This example shows how status testing appears in ordinary language.",
+      "how_to_recognize": "Notice teasing, dismissal, or public correction.",
+      "examples": [
+        "A third party is mentioned to increase pressure without direct ownership."
+      ],
+      "tags": [
+        "example_nodes",
+        "status_testing"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:44",
+      "type": "EXAMPLE",
+      "name": "Example 44 for Strategic silence",
+      "description": "Praise is used early to speed up closeness and soften caution.",
+      "what_it_is": "A concrete dialogue fragment showing strategic silence.",
+      "how_it_works": "This example shows how strategic silence appears in ordinary language.",
+      "how_to_recognize": "Watch for delayed answers after key emotional moments.",
+      "examples": [
+        "Praise is used early to speed up closeness and soften caution."
+      ],
+      "tags": [
+        "example_nodes",
+        "strategic_silence"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:45",
+      "type": "EXAMPLE",
+      "name": "Example 45 for Boundary push",
+      "description": "A boundary is restated, but the same request returns in softer words.",
+      "what_it_is": "A concrete dialogue fragment showing boundary push.",
+      "how_it_works": "This example shows how boundary push appears in ordinary language.",
+      "how_to_recognize": "Look for repeated requests after clear refusal.",
+      "examples": [
+        "A boundary is restated, but the same request returns in softer words."
+      ],
+      "tags": [
+        "example_nodes",
+        "boundary_push"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:46",
+      "type": "EXAMPLE",
+      "name": "Example 46 for Mirroring",
+      "description": "After criticism, the speaker says refusal means you do not really care.",
+      "what_it_is": "A concrete dialogue fragment showing mirroring.",
+      "how_it_works": "This example shows how mirroring appears in ordinary language.",
+      "how_to_recognize": "Notice repeated phrasing, posture matching, or tone copying.",
+      "examples": [
+        "After criticism, the speaker says refusal means you do not really care."
+      ],
+      "tags": [
+        "example_nodes",
+        "mirroring"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:47",
+      "type": "EXAMPLE",
+      "name": "Example 47 for Gaslighting",
+      "description": "The person delays a clear answer until the other side becomes anxious.",
+      "what_it_is": "A concrete dialogue fragment showing gaslighting.",
+      "how_it_works": "This example shows how gaslighting appears in ordinary language.",
+      "how_to_recognize": "Look for denial of obvious events and confident reversal.",
+      "examples": [
+        "The person delays a clear answer until the other side becomes anxious."
+      ],
+      "tags": [
+        "example_nodes",
+        "gaslighting"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:48",
+      "type": "EXAMPLE",
+      "name": "Example 48 for Love bombing",
+      "description": "A third party is mentioned to increase pressure without direct ownership.",
+      "what_it_is": "A concrete dialogue fragment showing love bombing.",
+      "how_it_works": "This example shows how love bombing appears in ordinary language.",
+      "how_to_recognize": "Notice grand praise early in unstable relationships.",
+      "examples": [
+        "A third party is mentioned to increase pressure without direct ownership."
+      ],
+      "tags": [
+        "example_nodes",
+        "love_bombing"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:49",
+      "type": "EXAMPLE",
+      "name": "Example 49 for Triangulation",
+      "description": "Praise is used early to speed up closeness and soften caution.",
+      "what_it_is": "A concrete dialogue fragment showing triangulation.",
+      "how_it_works": "This example shows how triangulation appears in ordinary language.",
+      "how_to_recognize": "Look for references to what others think or do.",
+      "examples": [
+        "Praise is used early to speed up closeness and soften caution."
+      ],
+      "tags": [
+        "example_nodes",
+        "triangulation"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    },
+    {
+      "id": "example:graph_brain:50",
+      "type": "EXAMPLE",
+      "name": "Example 50 for Avoidant delay",
+      "description": "A boundary is restated, but the same request returns in softer words.",
+      "what_it_is": "A concrete dialogue fragment showing avoidant delay.",
+      "how_it_works": "This example shows how avoidant delay appears in ordinary language.",
+      "how_to_recognize": "Notice vague postponement without concrete next steps.",
+      "examples": [
+        "A boundary is restated, but the same request returns in softer words."
+      ],
+      "tags": [
+        "example_nodes",
+        "avoidant_delay"
+      ],
+      "importance_vector": {
+        "logic_weight": 0.58,
+        "emotion_weight": 0.69,
+        "risk_weight": 0.63,
+        "relevance_weight": 0.74
+      }
+    }
+  ],
+  "edges": [
+    {
+      "src_id": "root:graph_brain",
+      "dst_id": "domain:behavior",
+      "type": "IS_PART_OF",
+      "weight": 1.0,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "root:graph_brain",
+      "dst_id": "domain:communication",
+      "type": "IS_PART_OF",
+      "weight": 1.0,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "root:graph_brain",
+      "dst_id": "domain:reasoning",
+      "type": "IS_PART_OF",
+      "weight": 1.0,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "domain:behavior",
+      "dst_id": "concept:attention",
+      "type": "IS_PART_OF",
+      "weight": 0.96,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "domain:communication",
+      "dst_id": "concept:memory",
+      "type": "IS_PART_OF",
+      "weight": 0.96,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "domain:reasoning",
+      "dst_id": "concept:trust",
+      "type": "IS_PART_OF",
+      "weight": 0.96,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "domain:behavior",
+      "dst_id": "concept:boundary",
+      "type": "IS_PART_OF",
+      "weight": 0.96,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "domain:communication",
+      "dst_id": "concept:conflict",
+      "type": "IS_PART_OF",
+      "weight": 0.96,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "domain:reasoning",
+      "dst_id": "concept:motivation",
+      "type": "IS_PART_OF",
+      "weight": 0.96,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "domain:behavior",
+      "dst_id": "concept:decision",
+      "type": "IS_PART_OF",
+      "weight": 0.96,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "domain:communication",
+      "dst_id": "concept:communication",
+      "type": "IS_PART_OF",
+      "weight": 0.96,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "domain:reasoning",
+      "dst_id": "concept:self_image",
+      "type": "IS_PART_OF",
+      "weight": 0.96,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "domain:behavior",
+      "dst_id": "concept:social_pressure",
+      "type": "IS_PART_OF",
+      "weight": 0.96,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:attention",
+      "dst_id": "pattern:guilt_pressure",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:memory",
+      "dst_id": "pattern:double_bind",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:trust",
+      "dst_id": "pattern:status_testing",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:boundary",
+      "dst_id": "pattern:strategic_silence",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:conflict",
+      "dst_id": "pattern:boundary_push",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:motivation",
+      "dst_id": "pattern:mirroring",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:decision",
+      "dst_id": "pattern:gaslighting",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:communication",
+      "dst_id": "pattern:love_bombing",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:self_image",
+      "dst_id": "pattern:triangulation",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:social_pressure",
+      "dst_id": "pattern:avoidant_delay",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:attention",
+      "dst_id": "pattern:reassurance_loop",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:memory",
+      "dst_id": "pattern:projection",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:trust",
+      "dst_id": "pattern:selective_disclosure",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:boundary",
+      "dst_id": "pattern:scarcity_pressure",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:conflict",
+      "dst_id": "pattern:moral_framing",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:motivation",
+      "dst_id": "pattern:conflict_escalation",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:decision",
+      "dst_id": "pattern:repair_attempt",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:communication",
+      "dst_id": "pattern:curiosity_probe",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:self_image",
+      "dst_id": "pattern:identity_hook",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "concept:social_pressure",
+      "dst_id": "pattern:learned_helplessness",
+      "type": "IS_PART_OF",
+      "weight": 0.9,
+      "confidence": 0.88,
+      "metadata": {
+        "layer_link": true
+      }
+    },
+    {
+      "src_id": "pattern:guilt_pressure",
+      "dst_id": "example:graph_brain:01",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:double_bind",
+      "dst_id": "example:graph_brain:02",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:status_testing",
+      "dst_id": "example:graph_brain:03",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:strategic_silence",
+      "dst_id": "example:graph_brain:04",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:boundary_push",
+      "dst_id": "example:graph_brain:05",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:mirroring",
+      "dst_id": "example:graph_brain:06",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:gaslighting",
+      "dst_id": "example:graph_brain:07",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:love_bombing",
+      "dst_id": "example:graph_brain:08",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:triangulation",
+      "dst_id": "example:graph_brain:09",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:avoidant_delay",
+      "dst_id": "example:graph_brain:10",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:reassurance_loop",
+      "dst_id": "example:graph_brain:11",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:projection",
+      "dst_id": "example:graph_brain:12",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:selective_disclosure",
+      "dst_id": "example:graph_brain:13",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:scarcity_pressure",
+      "dst_id": "example:graph_brain:14",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:moral_framing",
+      "dst_id": "example:graph_brain:15",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:conflict_escalation",
+      "dst_id": "example:graph_brain:16",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:repair_attempt",
+      "dst_id": "example:graph_brain:17",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:curiosity_probe",
+      "dst_id": "example:graph_brain:18",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:identity_hook",
+      "dst_id": "example:graph_brain:19",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:learned_helplessness",
+      "dst_id": "example:graph_brain:20",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:guilt_pressure",
+      "dst_id": "example:graph_brain:21",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:double_bind",
+      "dst_id": "example:graph_brain:22",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:status_testing",
+      "dst_id": "example:graph_brain:23",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:strategic_silence",
+      "dst_id": "example:graph_brain:24",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:boundary_push",
+      "dst_id": "example:graph_brain:25",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:mirroring",
+      "dst_id": "example:graph_brain:26",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:gaslighting",
+      "dst_id": "example:graph_brain:27",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:love_bombing",
+      "dst_id": "example:graph_brain:28",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:triangulation",
+      "dst_id": "example:graph_brain:29",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:avoidant_delay",
+      "dst_id": "example:graph_brain:30",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:reassurance_loop",
+      "dst_id": "example:graph_brain:31",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:projection",
+      "dst_id": "example:graph_brain:32",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:selective_disclosure",
+      "dst_id": "example:graph_brain:33",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:scarcity_pressure",
+      "dst_id": "example:graph_brain:34",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:moral_framing",
+      "dst_id": "example:graph_brain:35",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:conflict_escalation",
+      "dst_id": "example:graph_brain:36",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:repair_attempt",
+      "dst_id": "example:graph_brain:37",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:curiosity_probe",
+      "dst_id": "example:graph_brain:38",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:identity_hook",
+      "dst_id": "example:graph_brain:39",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:learned_helplessness",
+      "dst_id": "example:graph_brain:40",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:guilt_pressure",
+      "dst_id": "example:graph_brain:41",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:double_bind",
+      "dst_id": "example:graph_brain:42",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:status_testing",
+      "dst_id": "example:graph_brain:43",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:strategic_silence",
+      "dst_id": "example:graph_brain:44",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:boundary_push",
+      "dst_id": "example:graph_brain:45",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:mirroring",
+      "dst_id": "example:graph_brain:46",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:gaslighting",
+      "dst_id": "example:graph_brain:47",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:love_bombing",
+      "dst_id": "example:graph_brain:48",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:triangulation",
+      "dst_id": "example:graph_brain:49",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    },
+    {
+      "src_id": "pattern:avoidant_delay",
+      "dst_id": "example:graph_brain:50",
+      "type": "EXAMPLE_OF",
+      "weight": 0.88,
+      "confidence": 0.88,
+      "metadata": {}
+    }
+  ],
+  "evidence": [
+    {
+      "edge_key": "root:graph_brain|IS_PART_OF|domain:behavior",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Behavior is part of the graph brain root.",
+      "offset_start": 0,
+      "offset_end": 41
+    },
+    {
+      "edge_key": "root:graph_brain|IS_PART_OF|domain:communication",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Communication is part of the graph brain root.",
+      "offset_start": 0,
+      "offset_end": 46
+    },
+    {
+      "edge_key": "root:graph_brain|IS_PART_OF|domain:reasoning",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Reasoning is part of the graph brain root.",
+      "offset_start": 0,
+      "offset_end": 42
+    },
+    {
+      "edge_key": "domain:behavior|IS_PART_OF|concept:attention",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Attention belongs to domain:behavior.",
+      "offset_start": 0,
+      "offset_end": 37
+    },
+    {
+      "edge_key": "domain:communication|IS_PART_OF|concept:memory",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Memory belongs to domain:communication.",
+      "offset_start": 0,
+      "offset_end": 39
+    },
+    {
+      "edge_key": "domain:reasoning|IS_PART_OF|concept:trust",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Trust belongs to domain:reasoning.",
+      "offset_start": 0,
+      "offset_end": 34
+    },
+    {
+      "edge_key": "domain:behavior|IS_PART_OF|concept:boundary",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Boundary belongs to domain:behavior.",
+      "offset_start": 0,
+      "offset_end": 36
+    },
+    {
+      "edge_key": "domain:communication|IS_PART_OF|concept:conflict",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Conflict belongs to domain:communication.",
+      "offset_start": 0,
+      "offset_end": 41
+    },
+    {
+      "edge_key": "domain:reasoning|IS_PART_OF|concept:motivation",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Motivation belongs to domain:reasoning.",
+      "offset_start": 0,
+      "offset_end": 39
+    },
+    {
+      "edge_key": "domain:behavior|IS_PART_OF|concept:decision",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Decision belongs to domain:behavior.",
+      "offset_start": 0,
+      "offset_end": 36
+    },
+    {
+      "edge_key": "domain:communication|IS_PART_OF|concept:communication",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Communication belongs to domain:communication.",
+      "offset_start": 0,
+      "offset_end": 46
+    },
+    {
+      "edge_key": "domain:reasoning|IS_PART_OF|concept:self_image",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Self-image belongs to domain:reasoning.",
+      "offset_start": 0,
+      "offset_end": 39
+    },
+    {
+      "edge_key": "domain:behavior|IS_PART_OF|concept:social_pressure",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Social pressure belongs to domain:behavior.",
+      "offset_start": 0,
+      "offset_end": 43
+    },
+    {
+      "edge_key": "concept:attention|IS_PART_OF|pattern:guilt_pressure",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Guilt pressure is one operative pattern under concept:attention.",
+      "offset_start": 0,
+      "offset_end": 64
+    },
+    {
+      "edge_key": "concept:memory|IS_PART_OF|pattern:double_bind",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Double bind is one operative pattern under concept:memory.",
+      "offset_start": 0,
+      "offset_end": 58
+    },
+    {
+      "edge_key": "concept:trust|IS_PART_OF|pattern:status_testing",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Status testing is one operative pattern under concept:trust.",
+      "offset_start": 0,
+      "offset_end": 60
+    },
+    {
+      "edge_key": "concept:boundary|IS_PART_OF|pattern:strategic_silence",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Strategic silence is one operative pattern under concept:boundary.",
+      "offset_start": 0,
+      "offset_end": 66
+    },
+    {
+      "edge_key": "concept:conflict|IS_PART_OF|pattern:boundary_push",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Boundary push is one operative pattern under concept:conflict.",
+      "offset_start": 0,
+      "offset_end": 62
+    },
+    {
+      "edge_key": "concept:motivation|IS_PART_OF|pattern:mirroring",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Mirroring is one operative pattern under concept:motivation.",
+      "offset_start": 0,
+      "offset_end": 60
+    },
+    {
+      "edge_key": "concept:decision|IS_PART_OF|pattern:gaslighting",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Gaslighting is one operative pattern under concept:decision.",
+      "offset_start": 0,
+      "offset_end": 60
+    },
+    {
+      "edge_key": "concept:communication|IS_PART_OF|pattern:love_bombing",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Love bombing is one operative pattern under concept:communication.",
+      "offset_start": 0,
+      "offset_end": 66
+    },
+    {
+      "edge_key": "concept:self_image|IS_PART_OF|pattern:triangulation",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Triangulation is one operative pattern under concept:self_image.",
+      "offset_start": 0,
+      "offset_end": 64
+    },
+    {
+      "edge_key": "concept:social_pressure|IS_PART_OF|pattern:avoidant_delay",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Avoidant delay is one operative pattern under concept:social_pressure.",
+      "offset_start": 0,
+      "offset_end": 70
+    },
+    {
+      "edge_key": "concept:attention|IS_PART_OF|pattern:reassurance_loop",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Reassurance loop is one operative pattern under concept:attention.",
+      "offset_start": 0,
+      "offset_end": 66
+    },
+    {
+      "edge_key": "concept:memory|IS_PART_OF|pattern:projection",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Projection is one operative pattern under concept:memory.",
+      "offset_start": 0,
+      "offset_end": 57
+    },
+    {
+      "edge_key": "concept:trust|IS_PART_OF|pattern:selective_disclosure",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Selective disclosure is one operative pattern under concept:trust.",
+      "offset_start": 0,
+      "offset_end": 66
+    },
+    {
+      "edge_key": "concept:boundary|IS_PART_OF|pattern:scarcity_pressure",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Scarcity pressure is one operative pattern under concept:boundary.",
+      "offset_start": 0,
+      "offset_end": 66
+    },
+    {
+      "edge_key": "concept:conflict|IS_PART_OF|pattern:moral_framing",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Moral framing is one operative pattern under concept:conflict.",
+      "offset_start": 0,
+      "offset_end": 62
+    },
+    {
+      "edge_key": "concept:motivation|IS_PART_OF|pattern:conflict_escalation",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Conflict escalation is one operative pattern under concept:motivation.",
+      "offset_start": 0,
+      "offset_end": 70
+    },
+    {
+      "edge_key": "concept:decision|IS_PART_OF|pattern:repair_attempt",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Repair attempt is one operative pattern under concept:decision.",
+      "offset_start": 0,
+      "offset_end": 63
+    },
+    {
+      "edge_key": "concept:communication|IS_PART_OF|pattern:curiosity_probe",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Curiosity probe is one operative pattern under concept:communication.",
+      "offset_start": 0,
+      "offset_end": 69
+    },
+    {
+      "edge_key": "concept:self_image|IS_PART_OF|pattern:identity_hook",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Identity hook is one operative pattern under concept:self_image.",
+      "offset_start": 0,
+      "offset_end": 64
+    },
+    {
+      "edge_key": "concept:social_pressure|IS_PART_OF|pattern:learned_helplessness",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Learned helplessness cue is one operative pattern under concept:social_pressure.",
+      "offset_start": 0,
+      "offset_end": 80
+    },
+    {
+      "edge_key": "pattern:guilt_pressure|EXAMPLE_OF|example:graph_brain:01",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "After criticism, the speaker says refusal means you do not really care.",
+      "offset_start": 0,
+      "offset_end": 71
+    },
+    {
+      "edge_key": "pattern:double_bind|EXAMPLE_OF|example:graph_brain:02",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "The person delays a clear answer until the other side becomes anxious.",
+      "offset_start": 0,
+      "offset_end": 70
+    },
+    {
+      "edge_key": "pattern:status_testing|EXAMPLE_OF|example:graph_brain:03",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A third party is mentioned to increase pressure without direct ownership.",
+      "offset_start": 0,
+      "offset_end": 73
+    },
+    {
+      "edge_key": "pattern:strategic_silence|EXAMPLE_OF|example:graph_brain:04",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Praise is used early to speed up closeness and soften caution.",
+      "offset_start": 0,
+      "offset_end": 62
+    },
+    {
+      "edge_key": "pattern:boundary_push|EXAMPLE_OF|example:graph_brain:05",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A boundary is restated, but the same request returns in softer words.",
+      "offset_start": 0,
+      "offset_end": 69
+    },
+    {
+      "edge_key": "pattern:mirroring|EXAMPLE_OF|example:graph_brain:06",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "After criticism, the speaker says refusal means you do not really care.",
+      "offset_start": 0,
+      "offset_end": 71
+    },
+    {
+      "edge_key": "pattern:gaslighting|EXAMPLE_OF|example:graph_brain:07",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "The person delays a clear answer until the other side becomes anxious.",
+      "offset_start": 0,
+      "offset_end": 70
+    },
+    {
+      "edge_key": "pattern:love_bombing|EXAMPLE_OF|example:graph_brain:08",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A third party is mentioned to increase pressure without direct ownership.",
+      "offset_start": 0,
+      "offset_end": 73
+    },
+    {
+      "edge_key": "pattern:triangulation|EXAMPLE_OF|example:graph_brain:09",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Praise is used early to speed up closeness and soften caution.",
+      "offset_start": 0,
+      "offset_end": 62
+    },
+    {
+      "edge_key": "pattern:avoidant_delay|EXAMPLE_OF|example:graph_brain:10",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A boundary is restated, but the same request returns in softer words.",
+      "offset_start": 0,
+      "offset_end": 69
+    },
+    {
+      "edge_key": "pattern:reassurance_loop|EXAMPLE_OF|example:graph_brain:11",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "After criticism, the speaker says refusal means you do not really care.",
+      "offset_start": 0,
+      "offset_end": 71
+    },
+    {
+      "edge_key": "pattern:projection|EXAMPLE_OF|example:graph_brain:12",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "The person delays a clear answer until the other side becomes anxious.",
+      "offset_start": 0,
+      "offset_end": 70
+    },
+    {
+      "edge_key": "pattern:selective_disclosure|EXAMPLE_OF|example:graph_brain:13",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A third party is mentioned to increase pressure without direct ownership.",
+      "offset_start": 0,
+      "offset_end": 73
+    },
+    {
+      "edge_key": "pattern:scarcity_pressure|EXAMPLE_OF|example:graph_brain:14",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Praise is used early to speed up closeness and soften caution.",
+      "offset_start": 0,
+      "offset_end": 62
+    },
+    {
+      "edge_key": "pattern:moral_framing|EXAMPLE_OF|example:graph_brain:15",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A boundary is restated, but the same request returns in softer words.",
+      "offset_start": 0,
+      "offset_end": 69
+    },
+    {
+      "edge_key": "pattern:conflict_escalation|EXAMPLE_OF|example:graph_brain:16",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "After criticism, the speaker says refusal means you do not really care.",
+      "offset_start": 0,
+      "offset_end": 71
+    },
+    {
+      "edge_key": "pattern:repair_attempt|EXAMPLE_OF|example:graph_brain:17",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "The person delays a clear answer until the other side becomes anxious.",
+      "offset_start": 0,
+      "offset_end": 70
+    },
+    {
+      "edge_key": "pattern:curiosity_probe|EXAMPLE_OF|example:graph_brain:18",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A third party is mentioned to increase pressure without direct ownership.",
+      "offset_start": 0,
+      "offset_end": 73
+    },
+    {
+      "edge_key": "pattern:identity_hook|EXAMPLE_OF|example:graph_brain:19",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Praise is used early to speed up closeness and soften caution.",
+      "offset_start": 0,
+      "offset_end": 62
+    },
+    {
+      "edge_key": "pattern:learned_helplessness|EXAMPLE_OF|example:graph_brain:20",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A boundary is restated, but the same request returns in softer words.",
+      "offset_start": 0,
+      "offset_end": 69
+    },
+    {
+      "edge_key": "pattern:guilt_pressure|EXAMPLE_OF|example:graph_brain:21",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "After criticism, the speaker says refusal means you do not really care.",
+      "offset_start": 0,
+      "offset_end": 71
+    },
+    {
+      "edge_key": "pattern:double_bind|EXAMPLE_OF|example:graph_brain:22",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "The person delays a clear answer until the other side becomes anxious.",
+      "offset_start": 0,
+      "offset_end": 70
+    },
+    {
+      "edge_key": "pattern:status_testing|EXAMPLE_OF|example:graph_brain:23",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A third party is mentioned to increase pressure without direct ownership.",
+      "offset_start": 0,
+      "offset_end": 73
+    },
+    {
+      "edge_key": "pattern:strategic_silence|EXAMPLE_OF|example:graph_brain:24",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Praise is used early to speed up closeness and soften caution.",
+      "offset_start": 0,
+      "offset_end": 62
+    },
+    {
+      "edge_key": "pattern:boundary_push|EXAMPLE_OF|example:graph_brain:25",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A boundary is restated, but the same request returns in softer words.",
+      "offset_start": 0,
+      "offset_end": 69
+    },
+    {
+      "edge_key": "pattern:mirroring|EXAMPLE_OF|example:graph_brain:26",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "After criticism, the speaker says refusal means you do not really care.",
+      "offset_start": 0,
+      "offset_end": 71
+    },
+    {
+      "edge_key": "pattern:gaslighting|EXAMPLE_OF|example:graph_brain:27",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "The person delays a clear answer until the other side becomes anxious.",
+      "offset_start": 0,
+      "offset_end": 70
+    },
+    {
+      "edge_key": "pattern:love_bombing|EXAMPLE_OF|example:graph_brain:28",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A third party is mentioned to increase pressure without direct ownership.",
+      "offset_start": 0,
+      "offset_end": 73
+    },
+    {
+      "edge_key": "pattern:triangulation|EXAMPLE_OF|example:graph_brain:29",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Praise is used early to speed up closeness and soften caution.",
+      "offset_start": 0,
+      "offset_end": 62
+    },
+    {
+      "edge_key": "pattern:avoidant_delay|EXAMPLE_OF|example:graph_brain:30",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A boundary is restated, but the same request returns in softer words.",
+      "offset_start": 0,
+      "offset_end": 69
+    },
+    {
+      "edge_key": "pattern:reassurance_loop|EXAMPLE_OF|example:graph_brain:31",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "After criticism, the speaker says refusal means you do not really care.",
+      "offset_start": 0,
+      "offset_end": 71
+    },
+    {
+      "edge_key": "pattern:projection|EXAMPLE_OF|example:graph_brain:32",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "The person delays a clear answer until the other side becomes anxious.",
+      "offset_start": 0,
+      "offset_end": 70
+    },
+    {
+      "edge_key": "pattern:selective_disclosure|EXAMPLE_OF|example:graph_brain:33",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A third party is mentioned to increase pressure without direct ownership.",
+      "offset_start": 0,
+      "offset_end": 73
+    },
+    {
+      "edge_key": "pattern:scarcity_pressure|EXAMPLE_OF|example:graph_brain:34",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Praise is used early to speed up closeness and soften caution.",
+      "offset_start": 0,
+      "offset_end": 62
+    },
+    {
+      "edge_key": "pattern:moral_framing|EXAMPLE_OF|example:graph_brain:35",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A boundary is restated, but the same request returns in softer words.",
+      "offset_start": 0,
+      "offset_end": 69
+    },
+    {
+      "edge_key": "pattern:conflict_escalation|EXAMPLE_OF|example:graph_brain:36",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "After criticism, the speaker says refusal means you do not really care.",
+      "offset_start": 0,
+      "offset_end": 71
+    },
+    {
+      "edge_key": "pattern:repair_attempt|EXAMPLE_OF|example:graph_brain:37",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "The person delays a clear answer until the other side becomes anxious.",
+      "offset_start": 0,
+      "offset_end": 70
+    },
+    {
+      "edge_key": "pattern:curiosity_probe|EXAMPLE_OF|example:graph_brain:38",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A third party is mentioned to increase pressure without direct ownership.",
+      "offset_start": 0,
+      "offset_end": 73
+    },
+    {
+      "edge_key": "pattern:identity_hook|EXAMPLE_OF|example:graph_brain:39",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Praise is used early to speed up closeness and soften caution.",
+      "offset_start": 0,
+      "offset_end": 62
+    },
+    {
+      "edge_key": "pattern:learned_helplessness|EXAMPLE_OF|example:graph_brain:40",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A boundary is restated, but the same request returns in softer words.",
+      "offset_start": 0,
+      "offset_end": 69
+    },
+    {
+      "edge_key": "pattern:guilt_pressure|EXAMPLE_OF|example:graph_brain:41",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "After criticism, the speaker says refusal means you do not really care.",
+      "offset_start": 0,
+      "offset_end": 71
+    },
+    {
+      "edge_key": "pattern:double_bind|EXAMPLE_OF|example:graph_brain:42",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "The person delays a clear answer until the other side becomes anxious.",
+      "offset_start": 0,
+      "offset_end": 70
+    },
+    {
+      "edge_key": "pattern:status_testing|EXAMPLE_OF|example:graph_brain:43",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A third party is mentioned to increase pressure without direct ownership.",
+      "offset_start": 0,
+      "offset_end": 73
+    },
+    {
+      "edge_key": "pattern:strategic_silence|EXAMPLE_OF|example:graph_brain:44",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Praise is used early to speed up closeness and soften caution.",
+      "offset_start": 0,
+      "offset_end": 62
+    },
+    {
+      "edge_key": "pattern:boundary_push|EXAMPLE_OF|example:graph_brain:45",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A boundary is restated, but the same request returns in softer words.",
+      "offset_start": 0,
+      "offset_end": 69
+    },
+    {
+      "edge_key": "pattern:mirroring|EXAMPLE_OF|example:graph_brain:46",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "After criticism, the speaker says refusal means you do not really care.",
+      "offset_start": 0,
+      "offset_end": 71
+    },
+    {
+      "edge_key": "pattern:gaslighting|EXAMPLE_OF|example:graph_brain:47",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "The person delays a clear answer until the other side becomes anxious.",
+      "offset_start": 0,
+      "offset_end": 70
+    },
+    {
+      "edge_key": "pattern:love_bombing|EXAMPLE_OF|example:graph_brain:48",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A third party is mentioned to increase pressure without direct ownership.",
+      "offset_start": 0,
+      "offset_end": 73
+    },
+    {
+      "edge_key": "pattern:triangulation|EXAMPLE_OF|example:graph_brain:49",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "Praise is used early to speed up closeness and soften caution.",
+      "offset_start": 0,
+      "offset_end": 62
+    },
+    {
+      "edge_key": "pattern:avoidant_delay|EXAMPLE_OF|example:graph_brain:50",
+      "source_id": "seed:foundation:graph_brain_demo",
+      "snippet_text": "A boundary is restated, but the same request returns in softer words.",
+      "offset_start": 0,
+      "offset_end": 69
+    }
+  ]
+}

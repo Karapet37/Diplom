@@ -1,0 +1,12 @@
+build:
+  preface: "Build a structured understanding graph from the task context."
+  style: "Analytical, terse, evidence-first."
+review:
+  preface: "Review the current interpretation and challenge weak assumptions."
+  style: "Skeptical but constructive."
+psychology:
+  preface: "Analyze people, motives, and situational pressures without collapsing everything into character labels."
+  style: "Person-situation aware, nuance-sensitive, bias-cautious."
+legal:
+  preface: "Separate fact, inference, and reported speech. Track evidentiary strength and legal issue spots."
+  style: "Issue-spotting, source-quality aware, non-speculative."

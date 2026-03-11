@@ -1,0 +1,670 @@
+{
+  "kind": "narrative_series",
+  "id": "human_foundations",
+  "series": {
+    "id": "domain:human",
+    "label": "Human",
+    "short_gloss": "A core knowledge graph about humans, cognition, needs, relationships, and norms.",
+    "plain_explanation": "This dataset provides a stable base layer for a personalized reasoning system. It models a person as an embodied, social, goal-directed being who perceives, feels, thinks, acts, and is constrained by norms, roles, and environments.",
+    "examples": [
+      "Understanding why a person acted or failed to act.",
+      "Relating emotions, needs, goals, and social context.",
+      "Connecting risk, rights, obligations, and boundaries."
+    ],
+    "tags": [
+      "human",
+      "foundations",
+      "psychology",
+      "semantics",
+      "relationships"
+    ],
+    "type": "DOMAIN"
+  },
+  "characters": [
+    {
+      "id": "person:human",
+      "type": "PERSON",
+      "label": "Human Person",
+      "short_gloss": "A generic human being with a body, mind, needs, memory, emotions, and social roles.",
+      "plain_explanation": "A human person is an embodied and socially situated agent. Their behavior is shaped by internal state, prior experience, context, relationships, obligations, incentives, and limits.",
+      "examples": [
+        "A person choosing whether to speak or remain silent.",
+        "A person balancing comfort, duty, fear, and curiosity."
+      ],
+      "tags": [
+        "human",
+        "person",
+        "agent",
+        "generic"
+      ]
+    },
+    {
+      "id": "person:observer",
+      "type": "PERSON",
+      "label": "Observer",
+      "short_gloss": "A person trying to interpret another person's motives, actions, or inaction.",
+      "plain_explanation": "The observer often has incomplete evidence and can confuse facts with assumptions. Good reasoning requires distinguishing what is known, inferred, remembered, or feared.",
+      "examples": [
+        "Someone trying to understand why a friend became distant.",
+        "A manager interpreting an employee's delayed response."
+      ],
+      "tags": [
+        "observer",
+        "interpretation",
+        "uncertainty"
+      ]
+    }
+  ],
+  "concepts": [
+    {
+      "id": "concept:body",
+      "label": "Body",
+      "short_gloss": "The physical organism and its limits, states, and signals.",
+      "plain_explanation": "The body affects attention, energy, stress tolerance, sensory load, illness, safety, and the capacity to act.",
+      "examples": [
+        "Fatigue changes judgment.",
+        "Pain can narrow attention."
+      ],
+      "tags": [
+        "physical",
+        "health",
+        "limits"
+      ]
+    },
+    {
+      "id": "concept:mind",
+      "label": "Mind",
+      "short_gloss": "The reflective and interpretive layer of a person.",
+      "plain_explanation": "The mind organizes perception, memory, prediction, language, interpretation, and self-narrative.",
+      "examples": [
+        "A person replays a conversation and updates their interpretation."
+      ],
+      "tags": [
+        "cognition",
+        "interpretation",
+        "reflection"
+      ]
+    },
+    {
+      "id": "concept:needs",
+      "label": "Needs",
+      "short_gloss": "Essential conditions a person seeks to maintain or restore.",
+      "plain_explanation": "Needs include safety, belonging, rest, autonomy, recognition, stability, and meaning. Unmet needs distort reasoning and behavior.",
+      "examples": [
+        "A need for safety can override a wish for novelty."
+      ],
+      "tags": [
+        "needs",
+        "motivation",
+        "stability"
+      ]
+    },
+    {
+      "id": "concept:emotion",
+      "label": "Emotion",
+      "short_gloss": "A fast evaluative state that shapes salience and action readiness.",
+      "plain_explanation": "Emotion is not noise. It marks value, threat, care, loss, excitement, resentment, shame, and many other appraisals that influence attention and decision-making.",
+      "examples": [
+        "Fear increases caution.",
+        "Shame can produce silence or defensiveness."
+      ],
+      "tags": [
+        "affect",
+        "salience",
+        "behavior"
+      ]
+    },
+    {
+      "id": "concept:attention",
+      "label": "Attention",
+      "short_gloss": "What the person is currently able or forced to focus on.",
+      "plain_explanation": "Attention is selective. Stress, novelty, urgency, and desire compete for it. Limited attention causes omissions and misunderstandings.",
+      "examples": [
+        "A person misses tone when overloaded."
+      ],
+      "tags": [
+        "focus",
+        "salience",
+        "limits"
+      ]
+    },
+    {
+      "id": "concept:memory",
+      "label": "Memory",
+      "short_gloss": "Stored traces of prior experience, facts, and emotional associations.",
+      "plain_explanation": "Memory preserves both information and emotional weight. It shapes expectation, trust, suspicion, and the meaning assigned to current events.",
+      "examples": [
+        "A past betrayal changes how a neutral message is read."
+      ],
+      "tags": [
+        "memory",
+        "history",
+        "context"
+      ]
+    },
+    {
+      "id": "concept:goal",
+      "label": "Goal",
+      "short_gloss": "A desired state the person is trying to reach or preserve.",
+      "plain_explanation": "Goals may be explicit or hidden. They can conflict with comfort, morality, relationships, and long-term interests.",
+      "examples": [
+        "Wanting approval can conflict with wanting honesty."
+      ],
+      "tags": [
+        "goal",
+        "desire",
+        "planning"
+      ]
+    },
+    {
+      "id": "concept:action",
+      "label": "Action",
+      "short_gloss": "A visible choice or step taken by a person.",
+      "plain_explanation": "Action reveals something, but not everything. It must be interpreted together with context, constraints, history, and alternatives.",
+      "examples": [
+        "Speaking up in a meeting.",
+        "Avoiding a difficult conversation."
+      ],
+      "tags": [
+        "behavior",
+        "choice",
+        "visible"
+      ]
+    },
+    {
+      "id": "concept:inaction",
+      "label": "Inaction",
+      "short_gloss": "A meaningful absence of action, response, or intervention.",
+      "plain_explanation": "Inaction can come from fear, confusion, overload, indifference, strategy, paralysis, or lack of power. It should not be reduced to a single motive.",
+      "examples": [
+        "Not replying can signal avoidance, exhaustion, or uncertainty."
+      ],
+      "tags": [
+        "silence",
+        "delay",
+        "ambiguity"
+      ]
+    },
+    {
+      "id": "concept:communication",
+      "label": "Communication",
+      "short_gloss": "How meaning is expressed, hidden, distorted, or negotiated.",
+      "plain_explanation": "Communication includes words, tone, timing, omissions, framing, and response patterns. It is shaped by culture, relationship, power, and fear.",
+      "examples": [
+        "A blunt statement may signal honesty, stress, or contempt."
+      ],
+      "tags": [
+        "language",
+        "tone",
+        "interaction"
+      ]
+    },
+    {
+      "id": "concept:relationship",
+      "label": "Relationship",
+      "short_gloss": "An ongoing pattern of connection, expectation, and influence between people.",
+      "plain_explanation": "Relationships carry trust, obligation, resentment, dependence, history, roles, and emotional asymmetry.",
+      "examples": [
+        "The same phrase means something different from a stranger and from a partner."
+      ],
+      "tags": [
+        "social",
+        "trust",
+        "history"
+      ]
+    },
+    {
+      "id": "concept:boundary",
+      "label": "Boundary",
+      "short_gloss": "A limit about access, responsibility, intimacy, or acceptable behavior.",
+      "plain_explanation": "Boundaries define what is permitted, expected, or off-limits. Violated boundaries create risk, resentment, and defensive responses.",
+      "examples": [
+        "Work messages late at night can breach an unstated boundary."
+      ],
+      "tags": [
+        "limit",
+        "consent",
+        "safety"
+      ]
+    },
+    {
+      "id": "concept:trust",
+      "label": "Trust",
+      "short_gloss": "Confidence that another person or system will behave in a dependable way.",
+      "plain_explanation": "Trust grows from repeated evidence, coherence, accountability, and emotional safety. It shrinks under contradiction, neglect, and manipulation.",
+      "examples": [
+        "A single promise matters less than a pattern of follow-through."
+      ],
+      "tags": [
+        "trust",
+        "reliability",
+        "safety"
+      ]
+    },
+    {
+      "id": "concept:conflict",
+      "label": "Conflict",
+      "short_gloss": "A clash of interests, meanings, boundaries, or needs.",
+      "plain_explanation": "Conflict is not always hostility. It often signals misalignment, scarcity, unresolved emotion, or incompatible expectations.",
+      "examples": [
+        "Two people can care for each other and still conflict over pace or responsibility."
+      ],
+      "tags": [
+        "conflict",
+        "misalignment",
+        "tension"
+      ]
+    },
+    {
+      "id": "concept:habit",
+      "label": "Habit",
+      "short_gloss": "A repeated pattern that becomes easier to trigger and maintain.",
+      "plain_explanation": "Habits reduce decision cost but can also preserve avoidance, dependence, and rigidity.",
+      "examples": [
+        "Checking the phone during discomfort can become a habit loop."
+      ],
+      "tags": [
+        "pattern",
+        "automaticity",
+        "routine"
+      ]
+    },
+    {
+      "id": "concept:environment",
+      "label": "Environment",
+      "short_gloss": "The social and physical conditions around a person.",
+      "plain_explanation": "Noise, crowding, time pressure, hierarchy, safety, and available support all change what a person can perceive and do.",
+      "examples": [
+        "A person may communicate clearly one-on-one but freeze in a crowded room."
+      ],
+      "tags": [
+        "context",
+        "surroundings",
+        "constraints"
+      ]
+    },
+    {
+      "id": "concept:role",
+      "label": "Role",
+      "short_gloss": "A social position with expectations and permissions.",
+      "plain_explanation": "Roles organize behavior by defining duties, power, exposure, and scripts. They can protect or trap a person.",
+      "examples": [
+        "A manager, parent, friend, and witness all carry different obligations."
+      ],
+      "tags": [
+        "role",
+        "expectation",
+        "status"
+      ]
+    },
+    {
+      "id": "concept:right",
+      "label": "Right",
+      "short_gloss": "A protected claim, freedom, or entitlement recognized by norms or law.",
+      "plain_explanation": "Rights mark what should not be casually overridden. They matter when evaluating fairness, coercion, access, and harm.",
+      "examples": [
+        "A person may have a right to refuse, to know, or to be safe."
+      ],
+      "tags": [
+        "rights",
+        "protection",
+        "law"
+      ]
+    },
+    {
+      "id": "concept:obligation",
+      "label": "Obligation",
+      "short_gloss": "A duty owed because of role, promise, law, or relationship.",
+      "plain_explanation": "Obligations constrain action and inaction. They are central when evaluating responsibility and failure to act.",
+      "examples": [
+        "A caregiver, employer, or partner may have distinct obligations."
+      ],
+      "tags": [
+        "duty",
+        "responsibility",
+        "norm"
+      ]
+    },
+    {
+      "id": "concept:law",
+      "label": "Law",
+      "short_gloss": "Formal rules and procedures that govern permitted and prohibited behavior.",
+      "plain_explanation": "Law structures rights, duties, procedure, evidence, accountability, and remedies. It does not erase context but imposes formal consequences.",
+      "examples": [
+        "An action can be socially tolerated and still legally risky."
+      ],
+      "tags": [
+        "law",
+        "rules",
+        "procedure"
+      ]
+    },
+    {
+      "id": "concept:risk",
+      "label": "Risk",
+      "short_gloss": "The chance that an action or inaction leads to harm, loss, or instability.",
+      "plain_explanation": "Risk depends on probability, impact, vulnerability, and timing. It includes emotional, social, legal, and physical dimensions.",
+      "examples": [
+        "Silence may reduce immediate conflict but increase later legal or relational risk."
+      ],
+      "tags": [
+        "risk",
+        "harm",
+        "uncertainty"
+      ]
+    },
+    {
+      "id": "concept:meaning",
+      "label": "Meaning",
+      "short_gloss": "The significance a person assigns to events, words, or relationships.",
+      "plain_explanation": "Meaning is constructed from memory, culture, identity, timing, and context. The same event can mean different things to different people.",
+      "examples": [
+        "A delayed reply can feel normal, insulting, or alarming depending on context."
+      ],
+      "tags": [
+        "meaning",
+        "interpretation",
+        "context"
+      ]
+    }
+  ],
+  "styles": [
+    {
+      "id": "style:analytical",
+      "label": "Analytical Reasoning",
+      "short_gloss": "Evidence-first, structure-aware reasoning.",
+      "plain_explanation": "Analytical reasoning separates facts, assumptions, and alternatives before choosing a conclusion.",
+      "tags": [
+        "analysis",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "style:empathetic",
+      "label": "Empathetic Reasoning",
+      "short_gloss": "State-aware reasoning that considers emotion, vulnerability, and impact.",
+      "plain_explanation": "Empathetic reasoning asks what the other person may feel, fear, need, or misunderstand.",
+      "tags": [
+        "empathy",
+        "relationships"
+      ]
+    },
+    {
+      "id": "style:pragmatic",
+      "label": "Pragmatic Reasoning",
+      "short_gloss": "Outcome-aware reasoning focused on workable next actions.",
+      "plain_explanation": "Pragmatic reasoning evaluates what can actually be done under the current constraints.",
+      "tags": [
+        "action",
+        "planning"
+      ]
+    }
+  ],
+  "style_links": [
+    {
+      "src_id": "person:human",
+      "dst_id": "style:analytical",
+      "weight": 0.64,
+      "evidence": "Humans use analytical reasoning when distinguishing fact from assumption."
+    },
+    {
+      "src_id": "person:human",
+      "dst_id": "style:empathetic",
+      "weight": 0.66,
+      "evidence": "Humans interpret others through emotion, care, fear, and belonging."
+    },
+    {
+      "src_id": "person:human",
+      "dst_id": "style:pragmatic",
+      "weight": 0.68,
+      "evidence": "Humans often need workable actions, not abstract conclusions."
+    },
+    {
+      "src_id": "person:observer",
+      "dst_id": "style:analytical",
+      "weight": 0.73,
+      "evidence": "The observer needs structure to avoid overclaiming motives."
+    }
+  ],
+  "links": [
+    {
+      "src_id": "person:human",
+      "dst_id": "concept:body",
+      "type": "HAS_DIMENSION",
+      "weight": 0.98,
+      "evidence": "A person is embodied and physically constrained."
+    },
+    {
+      "src_id": "person:human",
+      "dst_id": "concept:mind",
+      "type": "HAS_DIMENSION",
+      "weight": 0.98,
+      "evidence": "A person interprets, remembers, predicts, and reflects."
+    },
+    {
+      "src_id": "person:human",
+      "dst_id": "concept:needs",
+      "type": "HAS_NEED",
+      "weight": 0.95,
+      "evidence": "Human action is shaped by unmet and met needs."
+    },
+    {
+      "src_id": "person:human",
+      "dst_id": "concept:emotion",
+      "type": "EXPERIENCES",
+      "weight": 0.94,
+      "evidence": "Emotion changes salience and readiness to act."
+    },
+    {
+      "src_id": "person:human",
+      "dst_id": "concept:memory",
+      "type": "USES",
+      "weight": 0.91,
+      "evidence": "Memory grounds expectation and interpretation."
+    },
+    {
+      "src_id": "person:human",
+      "dst_id": "concept:relationship",
+      "type": "EMBEDDED_IN",
+      "weight": 0.92,
+      "evidence": "A person exists inside relationships and roles."
+    },
+    {
+      "src_id": "person:human",
+      "dst_id": "concept:environment",
+      "type": "AFFECTED_BY",
+      "weight": 0.9,
+      "evidence": "Environment changes what a person can handle and express."
+    },
+    {
+      "src_id": "person:observer",
+      "dst_id": "concept:meaning",
+      "type": "SEEKS",
+      "weight": 0.84,
+      "evidence": "An observer tries to infer meaning from incomplete evidence."
+    },
+    {
+      "src_id": "concept:body",
+      "dst_id": "concept:attention",
+      "type": "MODULATES",
+      "weight": 0.86,
+      "evidence": "Fatigue, pain, and stress shift attention."
+    },
+    {
+      "src_id": "concept:mind",
+      "dst_id": "concept:meaning",
+      "type": "CONSTRUCTS",
+      "weight": 0.92,
+      "evidence": "The mind assigns meaning to events and words."
+    },
+    {
+      "src_id": "concept:needs",
+      "dst_id": "concept:goal",
+      "type": "SHAPES",
+      "weight": 0.88,
+      "evidence": "Needs influence which goals feel urgent."
+    },
+    {
+      "src_id": "concept:emotion",
+      "dst_id": "concept:attention",
+      "type": "DIRECTS",
+      "weight": 0.87,
+      "evidence": "Emotion marks what feels important now."
+    },
+    {
+      "src_id": "concept:memory",
+      "dst_id": "concept:meaning",
+      "type": "COLORS",
+      "weight": 0.9,
+      "evidence": "Prior memory affects present interpretation."
+    },
+    {
+      "src_id": "concept:goal",
+      "dst_id": "concept:action",
+      "type": "DRIVES",
+      "weight": 0.88,
+      "evidence": "Goals motivate action selection."
+    },
+    {
+      "src_id": "concept:goal",
+      "dst_id": "concept:inaction",
+      "type": "CAN_REQUIRE",
+      "weight": 0.61,
+      "evidence": "A goal may sometimes require waiting, withholding, or restraint."
+    },
+    {
+      "src_id": "concept:communication",
+      "dst_id": "concept:relationship",
+      "type": "SHAPES",
+      "weight": 0.89,
+      "evidence": "Communication patterns change trust and closeness."
+    },
+    {
+      "src_id": "concept:relationship",
+      "dst_id": "concept:trust",
+      "type": "BUILDS",
+      "weight": 0.87,
+      "evidence": "Repeated relational experience forms trust."
+    },
+    {
+      "src_id": "concept:boundary",
+      "dst_id": "concept:trust",
+      "type": "PROTECTS",
+      "weight": 0.82,
+      "evidence": "Clear boundaries support stable trust."
+    },
+    {
+      "src_id": "concept:trust",
+      "dst_id": "concept:conflict",
+      "type": "BUFFERS",
+      "weight": 0.62,
+      "evidence": "Trust can absorb disagreement without collapse."
+    },
+    {
+      "src_id": "concept:conflict",
+      "dst_id": "concept:communication",
+      "type": "STRESSES",
+      "weight": 0.84,
+      "evidence": "Conflict often distorts communication and interpretation."
+    },
+    {
+      "src_id": "concept:habit",
+      "dst_id": "concept:action",
+      "type": "AUTOMATES",
+      "weight": 0.81,
+      "evidence": "Habits make certain actions easier to repeat."
+    },
+    {
+      "src_id": "concept:environment",
+      "dst_id": "concept:communication",
+      "type": "CONSTRAINS",
+      "weight": 0.83,
+      "evidence": "Noise, audience, and pressure change how people speak."
+    },
+    {
+      "src_id": "concept:environment",
+      "dst_id": "concept:attention",
+      "type": "LOADS",
+      "weight": 0.79,
+      "evidence": "Busy or unsafe environments reduce available attention."
+    },
+    {
+      "src_id": "concept:role",
+      "dst_id": "concept:obligation",
+      "type": "GENERATES",
+      "weight": 0.92,
+      "evidence": "Roles create duties and expectations."
+    },
+    {
+      "src_id": "concept:role",
+      "dst_id": "concept:right",
+      "type": "INTERACTS_WITH",
+      "weight": 0.67,
+      "evidence": "Roles change how rights are exercised or challenged."
+    },
+    {
+      "src_id": "concept:obligation",
+      "dst_id": "concept:action",
+      "type": "REQUIRES",
+      "weight": 0.85,
+      "evidence": "Obligations often require timely action."
+    },
+    {
+      "src_id": "concept:obligation",
+      "dst_id": "concept:inaction",
+      "type": "EVALUATES",
+      "weight": 0.8,
+      "evidence": "Failure to act is often judged against obligation."
+    },
+    {
+      "src_id": "concept:law",
+      "dst_id": "concept:right",
+      "type": "PROTECTS",
+      "weight": 0.91,
+      "evidence": "Law defines and protects many rights."
+    },
+    {
+      "src_id": "concept:law",
+      "dst_id": "concept:obligation",
+      "type": "IMPOSES",
+      "weight": 0.92,
+      "evidence": "Law creates duties and consequences."
+    },
+    {
+      "src_id": "concept:law",
+      "dst_id": "concept:risk",
+      "type": "STRUCTURES",
+      "weight": 0.85,
+      "evidence": "Legal frameworks shape what risks matter."
+    },
+    {
+      "src_id": "concept:risk",
+      "dst_id": "concept:action",
+      "type": "INFORMS",
+      "weight": 0.78,
+      "evidence": "Perceived risk affects what action seems acceptable."
+    },
+    {
+      "src_id": "concept:risk",
+      "dst_id": "concept:inaction",
+      "type": "CAN_RESULT_FROM",
+      "weight": 0.72,
+      "evidence": "Inaction may be chosen to avoid immediate risk."
+    },
+    {
+      "src_id": "concept:meaning",
+      "dst_id": "concept:communication",
+      "type": "INTERPRETS",
+      "weight": 0.86,
+      "evidence": "Meaning emerges through interpretation of communication."
+    },
+    {
+      "src_id": "concept:meaning",
+      "dst_id": "concept:conflict",
+      "type": "CAN_TRIGGER",
+      "weight": 0.69,
+      "evidence": "Different meanings assigned to one event can trigger conflict."
+    }
+  ],
+  "episodes": []
+}

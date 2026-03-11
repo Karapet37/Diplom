@@ -35,6 +35,7 @@ from src.web.security import (
     verify_request_token,
 )
 from src.web.graph_workspace import GraphWorkspaceService
+from src.web.web_context import fetch_random_wikipedia_article, search_wikipedia_articles
 
 
 class NodeCreateRequest(BaseModel):
@@ -124,6 +125,12 @@ class GraphFoundationCreateRequest(BaseModel):
     session_id: str = ""
     model_path: str = ""
     model_role: str = "planner"
+
+
+class WikipediaSearchRequest(BaseModel):
+    query: str
+    language: str = "ru"
+    limit: int = Field(default=5, ge=1, le=8)
 
 
 class NodeDeleteRequest(BaseModel):
@@ -492,6 +499,9 @@ class ProjectWrapperRespondRequest(BaseModel):
     message: str
     role: str = "general"
     model_path: str = ""
+    context: str = ""
+    mode_node_id: int = 0
+    use_mode_policy: bool = True
     use_memory: bool = True
     memory_scope: str = "owned"
     memory_namespace: str = ""
@@ -554,6 +564,8 @@ class ProjectArchiveVerifiedChatRequest(BaseModel):
     context: str = ""
     model_path: str = ""
     model_role: str = "general"
+    mode_node_id: int = 0
+    use_mode_policy: bool = True
     apply_to_graph: bool = True
     verification_mode: str = "strict"
     top_k: int = 3
@@ -563,6 +575,70 @@ class ProjectArchiveVerifiedChatRequest(BaseModel):
     capture_dialect: bool = True
     auto_triage: bool = True
     triage_with_llm: bool = True
+
+
+class ProjectChatGraphRequest(BaseModel):
+    user_id: str = "default_user"
+    session_id: str = ""
+    message: str = ""
+    context: str = ""
+    chat_model_path: str = ""
+    chat_model_role: str = "general"
+    parser_backend: str = "local"
+    parser_model_path: str = ""
+    parser_model_role: str = "analyst"
+    parser_ollama_model: str = ""
+    use_internet: bool = True
+    apply_to_graph: bool = True
+    verification_mode: str = "balanced"
+    top_k: int = 4
+
+
+class ProjectModePolicyResolveRequest(BaseModel):
+    user_id: str = "default_user"
+    session_id: str = ""
+    message: str = ""
+    context: str = ""
+    model_role: str = "general"
+    mode_node_id: int = 0
+    use_mode_policy: bool = True
+
+
+class ProjectContextModeUpsertRequest(BaseModel):
+    user_id: str = "default_user"
+    session_id: str = ""
+    mode_node_id: int = 0
+    name: str = ""
+    domain: str = "general"
+    prompt_guardrails: str = ""
+    protected_memory: str = ""
+    llm_role: str = "analyst"
+    summary: str = ""
+    context_weight: float | None = None
+
+
+class ProjectContextFocusCaptureRequest(BaseModel):
+    user_id: str = "default_user"
+    session_id: str = ""
+    mode_node_id: int
+    name: str = ""
+    summary: str = ""
+    details: str = ""
+    subject: str = ""
+    source: str = "context_mode"
+    manual_capture: bool = True
+    weight: float | None = None
+
+
+class ProjectContextModeFeedbackRequest(BaseModel):
+    user_id: str = "default_user"
+    session_id: str = ""
+    mode_node_id: int
+    target_focus_node_id: int = 0
+    decision: str = "good"
+    summary: str = ""
+    details: str = ""
+    message: str = ""
 
 
 class IntegrationLayerInvokeRequest(BaseModel):
@@ -697,7 +773,53 @@ class GraphEventHub:
             return
 
 
-def create_app() -> FastAPI:
+def attach_frontend_routes(app: FastAPI) -> None:
+    dist_dir = Path("webapp/dist")
+    index_path = dist_dir / "index.html"
+
+    def _frontend_not_built() -> HTMLResponse:
+        return HTMLResponse(
+            content=(
+                "<html><body style='font-family: sans-serif; padding: 18px;'>"
+                "<h3>React frontend is not built yet.</h3>"
+                "<p>Run <code>cd webapp && npm install && npm run build</code> "
+                "then restart backend.</p>"
+                "</body></html>"
+            ),
+            status_code=503,
+        )
+
+    def _serve_index() -> FileResponse:
+        return FileResponse(
+            index_path,
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
+
+    @app.get("/")
+    def root() -> Any:
+        if not index_path.exists():
+            return _frontend_not_built()
+        return _serve_index()
+
+    @app.get("/{full_path:path}")
+    def spa_fallback(full_path: str) -> Any:
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        if not dist_dir.exists() or not index_path.exists():
+            return _frontend_not_built()
+
+        target = dist_dir / full_path
+        if target.exists() and target.is_file():
+            return FileResponse(target)
+
+        path_obj = Path(full_path)
+        if full_path.startswith("assets/") or path_obj.suffix:
+            raise HTTPException(status_code=404, detail="Asset not found")
+
+        return _serve_index()
+
+
+def create_app(*, include_frontend_routes: bool = True) -> FastAPI:
     graph = GraphWorkspaceService(use_env_adapter=True)
     security = SecuritySettings.from_env()
     control_plane = RuntimeControlPlane.from_env()
@@ -1117,6 +1239,100 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.post("/api/project/chat-graph")
+    def project_chat_graph(payload: ProjectChatGraphRequest) -> dict[str, Any]:
+        try:
+            cognitive_actor = getattr(app.state, "cognitive_actor", None)
+            graph_task_queue = getattr(app.state, "graph_task_queue", None)
+            if cognitive_actor is not None and graph_task_queue is not None:
+                from runtime.api.chat_api import execute_fast_chat_turn
+
+                return execute_fast_chat_turn(
+                    actor=cognitive_actor,
+                    task_queue=graph_task_queue,
+                    payload={
+                        "message": payload.message,
+                        "context": payload.context,
+                        "language": "en",
+                        "chat_model_role": payload.chat_model_role,
+                        "llm_role": payload.chat_model_role,
+                        "save_to_graph": payload.apply_to_graph,
+                        "apply_to_graph": payload.apply_to_graph,
+                        "use_internet": payload.use_internet,
+                        "source_id": "",
+                    },
+                )
+            if cognitive_actor is not None:
+                try:
+                    return cognitive_actor.ask(
+                        "chat_graph",
+                        {
+                            "message": payload.message,
+                            "context": payload.context,
+                            "language": "en",
+                            "chat_model_role": payload.chat_model_role,
+                            "llm_role": payload.chat_model_role,
+                            "save_to_graph": payload.apply_to_graph,
+                            "apply_to_graph": payload.apply_to_graph,
+                            "use_internet": payload.use_internet,
+                            "source_id": "",
+                        },
+                        timeout=120.0,
+                    )
+                except TimeoutError as exc:
+                    raise HTTPException(status_code=504, detail=str(exc)) from exc
+            return graph.project_chat_graph(payload.model_dump())
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/project/wiki/random")
+    def project_wikipedia_random(language: str = Query(default="ru")) -> dict[str, Any]:
+        try:
+            return fetch_random_wikipedia_article(language=language)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/project/wiki/search")
+    def project_wikipedia_search(
+        query: str = Query(default=""),
+        language: str = Query(default="ru"),
+        limit: int = Query(default=5, ge=1, le=8),
+    ) -> dict[str, Any]:
+        try:
+            return search_wikipedia_articles(query, language=language, limit=limit)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/mode-policy/resolve")
+    def project_mode_policy_resolve(payload: ProjectModePolicyResolveRequest) -> dict[str, Any]:
+        try:
+            return graph.project_mode_policy_resolve(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/mode/save")
+    def project_context_mode_save(payload: ProjectContextModeUpsertRequest) -> dict[str, Any]:
+        try:
+            return graph.project_context_mode_upsert(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/mode/focus")
+    def project_context_mode_focus(payload: ProjectContextFocusCaptureRequest) -> dict[str, Any]:
+        try:
+            return graph.project_context_mode_capture_focus(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/mode/feedback")
+    def project_context_mode_feedback(payload: ProjectContextModeFeedbackRequest) -> dict[str, Any]:
+        try:
+            return graph.project_context_mode_feedback(payload.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/api/project/archive/review")
     def project_archive_review(payload: ProjectArchiveReviewApplyRequest) -> dict[str, Any]:
         try:
@@ -1508,50 +1724,8 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    dist_dir = Path("webapp/dist")
-    index_path = dist_dir / "index.html"
-
-    def _frontend_not_built() -> HTMLResponse:
-        return HTMLResponse(
-            content=(
-                "<html><body style='font-family: sans-serif; padding: 18px;'>"
-                "<h3>React frontend is not built yet.</h3>"
-                "<p>Run <code>cd webapp && npm install && npm run build</code> "
-                "then restart backend.</p>"
-                "</body></html>"
-            ),
-            status_code=503,
-        )
-
-    def _serve_index() -> FileResponse:
-        return FileResponse(
-            index_path,
-            headers={"Cache-Control": "no-store, max-age=0"},
-        )
-
-    @app.get("/")
-    def root() -> Any:
-        if not index_path.exists():
-            return _frontend_not_built()
-        return _serve_index()
-
-    @app.get("/{full_path:path}")
-    def spa_fallback(full_path: str) -> Any:
-        if full_path.startswith("api/"):
-            raise HTTPException(status_code=404, detail="Not found")
-        if not dist_dir.exists() or not index_path.exists():
-            return _frontend_not_built()
-
-        target = dist_dir / full_path
-        if target.exists() and target.is_file():
-            return FileResponse(target)
-
-        # Never return index.html for static asset requests.
-        path_obj = Path(full_path)
-        if full_path.startswith("assets/") or path_obj.suffix:
-            raise HTTPException(status_code=404, detail="Asset not found")
-
-        return _serve_index()
+    if include_frontend_routes:
+        attach_frontend_routes(app)
 
     return app
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import re
+import sys
 from typing import Any, Callable
 
 try:
@@ -30,6 +31,7 @@ _ROLE_ERRORS_WARNED: set[str] = set()
 _LLM_LOCK = Lock()
 
 ROLE_GENERAL = "general"
+ROLE_UNCENSORED = "uncensored"
 ROLE_TRANSLATOR = "translator"
 ROLE_ANALYST = "analyst"
 ROLE_CREATIVE = "creative"
@@ -41,6 +43,7 @@ ROLE_CODER_DEBUG = "coder_debug"
 
 ADVISOR_ROLES: tuple[str, ...] = (
     ROLE_GENERAL,
+    ROLE_UNCENSORED,
     ROLE_ANALYST,
     ROLE_CREATIVE,
     ROLE_PLANNER,
@@ -53,6 +56,7 @@ ADVISOR_ROLES: tuple[str, ...] = (
 
 _ROLE_ENV_MAP: dict[str, str] = {
     ROLE_GENERAL: "LOCAL_GGUF_MODEL",
+    ROLE_UNCENSORED: "LOCAL_UNCENSORED_GGUF_MODEL",
     ROLE_TRANSLATOR: "LOCAL_TRANSLATOR_GGUF_MODEL",
     ROLE_ANALYST: "LOCAL_ANALYST_GGUF_MODEL",
     ROLE_CREATIVE: "LOCAL_CREATIVE_GGUF_MODEL",
@@ -61,6 +65,19 @@ _ROLE_ENV_MAP: dict[str, str] = {
     ROLE_CODER_REVIEWER: "LOCAL_CODER_REVIEWER_GGUF_MODEL",
     ROLE_CODER_REFACTOR: "LOCAL_CODER_REFACTOR_GGUF_MODEL",
     ROLE_CODER_DEBUG: "LOCAL_CODER_DEBUG_GGUF_MODEL",
+}
+
+_ROLE_N_CTX_ENV_MAP: dict[str, str] = {
+    ROLE_GENERAL: "LOCAL_GGUF_N_CTX",
+    ROLE_UNCENSORED: "LOCAL_UNCENSORED_N_CTX",
+    ROLE_TRANSLATOR: "LOCAL_TRANSLATOR_N_CTX",
+    ROLE_ANALYST: "LOCAL_ANALYST_N_CTX",
+    ROLE_CREATIVE: "LOCAL_CREATIVE_N_CTX",
+    ROLE_PLANNER: "LOCAL_PLANNER_N_CTX",
+    ROLE_CODER_ARCHITECT: "LOCAL_CODER_ARCHITECT_N_CTX",
+    ROLE_CODER_REVIEWER: "LOCAL_CODER_REVIEWER_N_CTX",
+    ROLE_CODER_REFACTOR: "LOCAL_CODER_REFACTOR_N_CTX",
+    ROLE_CODER_DEBUG: "LOCAL_CODER_DEBUG_N_CTX",
 }
 
 _CODER_HINTS: tuple[str, ...] = (
@@ -91,18 +108,31 @@ _IGNORED_GGUF_HINTS: tuple[str, ...] = (
     "/llama.cpp/",
     "ggml-vocab",
 )
+_FAST_MODEL_HINTS: tuple[str, ...] = (
+    "nanbeige4.1-3b.q3_k_m.gguf",
+    "nanbeige4.1-3b",
+)
+_UNCENSORED_MODEL_HINTS: tuple[str, ...] = (
+    "mistral-nemo-2407-12b-thinking-claude-gemini-gpt5.2-uncensored-heretic_q3_k_m.gguf",
+    "uncensored-heretic",
+    "mistral-nemo-2407-12b",
+)
 
 
 def _warn(message: str) -> None:
     silent = str(os.getenv("LOCAL_LLM_SILENT_ERRORS", "0")).strip().lower()
     if silent in {"1", "true", "yes", "on"}:
         return
-    print(message)
+    print(message, file=sys.stderr)
 
 
 def _normalize_role(role: str) -> str:
     token = re.sub(r"[^a-z0-9_]+", "_", str(role or "").strip().lower())
-    return token or ROLE_GENERAL
+    aliases = {
+        "analysis": ROLE_ANALYST,
+        "reasoning": ROLE_GENERAL,
+    }
+    return aliases.get(token, token or ROLE_GENERAL)
 
 
 def _contains_any(token: str, hints: tuple[str, ...]) -> bool:
@@ -211,6 +241,26 @@ def _score_general(path: Path) -> float:
     return score
 
 
+def _score_analyst(path: Path) -> float:
+    token = _path_token(path)
+    score = _score_general(path)
+    if _contains_any(token, _FAST_MODEL_HINTS):
+        score += 8.0
+    if _contains_any(token, ("nanbeige", "3b", "fast")):
+        score += 2.5
+    return score
+
+
+def _score_uncensored(path: Path) -> float:
+    token = _path_token(path)
+    score = _score_general(path)
+    if _contains_any(token, _UNCENSORED_MODEL_HINTS):
+        score += 9.0
+    if _contains_any(token, ("uncensored", "nemo", "heretic")):
+        score += 3.0
+    return score
+
+
 def _select_best(paths: list[Path], scorer: Callable[[Path], float]) -> Path | None:
     if not paths:
         return None
@@ -306,9 +356,13 @@ def _resolve_model_role_paths() -> dict[str, str]:
             role_map[role] = str(default_coder)
 
     if ROLE_ANALYST not in role_map:
-        pick = _select_best(analyst_candidates, scorer=_score_general)
+        pick = _select_best(analyst_candidates or general_candidates, scorer=_score_analyst)
         if pick is not None:
             role_map[ROLE_ANALYST] = str(pick)
+    if ROLE_UNCENSORED not in role_map:
+        pick = _select_best(general_candidates, scorer=_score_uncensored)
+        if pick is not None:
+            role_map[ROLE_UNCENSORED] = str(pick)
     if ROLE_CREATIVE not in role_map:
         pick = _select_best(creative_candidates, scorer=_score_general)
         if pick is not None:
@@ -355,24 +409,49 @@ def _get_model_path() -> str | None:
     return role_map.get(ROLE_GENERAL)
 
 
-def _build_llm_for_path(model_path: str) -> "Llama" | None:
+def _llm_cache_key(model_path: str, *, n_ctx: int, max_tokens: int) -> str:
+    return f"{model_path}::ctx={int(n_ctx)}::max={int(max_tokens)}"
+
+
+def _resolve_n_ctx(role: str | None = None, explicit_n_ctx: int | None = None) -> int:
+    if explicit_n_ctx is not None:
+        return int(explicit_n_ctx)
+    role_key = _normalize_role(role or ROLE_GENERAL)
+    role_env = _ROLE_N_CTX_ENV_MAP.get(role_key, "LOCAL_GGUF_N_CTX")
+    value = os.getenv(role_env)
+    if value is None or str(value).strip() == "":
+        fallback = os.getenv("LOCAL_GGUF_N_CTX")
+        value = fallback if fallback is not None and str(fallback).strip() != "" else "2048"
+    return int(value)
+
+
+def _is_model_loaded(model_path: str) -> bool:
+    prefix = f"{model_path}::"
+    return any(key == model_path or key.startswith(prefix) for key in _PATH_LLM_FN)
+
+
+def _build_llm_for_path(model_path: str, *, n_ctx: int | None = None) -> "Llama" | None:
     if Llama is None:
         return None
+    resolved_n_ctx = _resolve_n_ctx(explicit_n_ctx=n_ctx)
     return Llama(
         model_path=str(model_path),
-        n_ctx=int(os.getenv("LOCAL_GGUF_N_CTX", "8192")),
+        n_ctx=resolved_n_ctx,
         temperature=float(os.getenv("LOCAL_GGUF_TEMPERATURE", "0.15")),
         verbose=False,
     )
 
 
-def _make_llm_fn(llm: "Llama") -> Callable[[str], str]:
+def _make_llm_fn(llm: "Llama", *, max_tokens: int | None = None) -> Callable[[str], str]:
+    resolved_max_tokens = int(max_tokens if max_tokens is not None else int(os.getenv("LOCAL_GGUF_MAX_TOKENS", "2048")))
+
     def llm_fn(prompt: str) -> str:
+        messages = [{"role": "user", "content": str(prompt or "")}]
         try:
             response = llm.create_chat_completion(
-                messages=[{"role": "system", "content": prompt}],
+                messages=messages,
                 response_format={"type": "json_object"},
-                max_tokens=int(os.getenv("LOCAL_GGUF_MAX_TOKENS", "2048")),
+                max_tokens=resolved_max_tokens,
                 temperature=float(os.getenv("LOCAL_GGUF_TEMPERATURE", "0.15")),
                 top_p=float(os.getenv("LOCAL_GGUF_TOP_P", "0.9")),
             )
@@ -380,8 +459,8 @@ def _make_llm_fn(llm: "Llama") -> Callable[[str], str]:
         except Exception:
             try:
                 out = llm.create_chat_completion(
-                    messages=[{"role": "system", "content": prompt}],
-                    max_tokens=int(os.getenv("LOCAL_GGUF_MAX_TOKENS", "2048")),
+                    messages=messages,
+                    max_tokens=resolved_max_tokens,
                     temperature=float(os.getenv("LOCAL_GGUF_TEMPERATURE", "0.15")),
                     top_p=float(os.getenv("LOCAL_GGUF_TOP_P", "0.9")),
                 )
@@ -394,13 +473,18 @@ def _make_llm_fn(llm: "Llama") -> Callable[[str], str]:
     return llm_fn
 
 
-def build_role_llm_fn(role: str = ROLE_GENERAL) -> Callable[[str], str] | None:
+def build_role_llm_fn(
+    role: str = ROLE_GENERAL,
+    *,
+    n_ctx: int | None = None,
+    max_tokens: int | None = None,
+) -> Callable[[str], str] | None:
     role_key = _normalize_role(role)
     if role_key not in ADVISOR_ROLES:
         role_key = ROLE_GENERAL
 
     with _LLM_LOCK:
-        if role_key in _ROLE_LLM_FN:
+        if role_key in _ROLE_LLM_FN and n_ctx is None and max_tokens is None:
             return _ROLE_LLM_FN[role_key]
 
         role_map = _resolve_model_role_paths()
@@ -420,10 +504,21 @@ def build_role_llm_fn(role: str = ROLE_GENERAL) -> Callable[[str], str] | None:
                     _warn(f"[local_llm_provider] WARN: model for role '{role_key}' not found in models/gguf.")
                 _ROLE_ERRORS_WARNED.add(role_key)
             return None
+        if not Path(model_path).exists():
+            warned_key = f"missing_path:{role_key}"
+            if warned_key not in _ROLE_ERRORS_WARNED:
+                _warn(f"[local_llm_provider] WARN: configured model for role '{role_key}' does not exist: {model_path}")
+                _ROLE_ERRORS_WARNED.add(warned_key)
+            return None
 
-        if model_path in _PATH_LLM_FN:
-            fn = _PATH_LLM_FN[model_path]
-            _ROLE_LLM_FN[role_key] = fn
+        resolved_n_ctx = _resolve_n_ctx(role_key, n_ctx)
+        resolved_max_tokens = int(max_tokens if max_tokens is not None else int(os.getenv("LOCAL_GGUF_MAX_TOKENS", "2048")))
+        cache_key = _llm_cache_key(model_path, n_ctx=resolved_n_ctx, max_tokens=resolved_max_tokens)
+
+        if cache_key in _PATH_LLM_FN:
+            fn = _PATH_LLM_FN[cache_key]
+            if n_ctx is None and max_tokens is None:
+                _ROLE_LLM_FN[role_key] = fn
             return fn
 
         if Llama is None:
@@ -433,18 +528,19 @@ def build_role_llm_fn(role: str = ROLE_GENERAL) -> Callable[[str], str] | None:
             return None
 
         try:
-            llm = _build_llm_for_path(model_path)
+            llm = _build_llm_for_path(model_path, n_ctx=resolved_n_ctx)
             if llm is None:
                 return None
-            fn = _make_llm_fn(llm)
+            fn = _make_llm_fn(llm, max_tokens=resolved_max_tokens)
         except Exception as exc:
             _warn(f"[local_llm_provider] WARN: Failed to initialize role '{role_key}' model: {exc}")
             _ROLE_ERRORS_WARNED.add(f"init:{role_key}")
             return None
 
-        _PATH_LLM_INSTANCE[model_path] = llm
-        _PATH_LLM_FN[model_path] = fn
-        _ROLE_LLM_FN[role_key] = fn
+        _PATH_LLM_INSTANCE[cache_key] = llm
+        _PATH_LLM_FN[cache_key] = fn
+        if n_ctx is None and max_tokens is None:
+            _ROLE_LLM_FN[role_key] = fn
 
         if role_key == ROLE_GENERAL:
             global _LLM_INSTANCE, _LLM_FN, _LLM_UNAVAILABLE, _LAST_ERROR
@@ -455,7 +551,12 @@ def build_role_llm_fn(role: str = ROLE_GENERAL) -> Callable[[str], str] | None:
         return fn
 
 
-def build_model_llm_fn(model_path: str) -> Callable[[str], str] | None:
+def build_model_llm_fn(
+    model_path: str,
+    *,
+    n_ctx: int | None = None,
+    max_tokens: int | None = None,
+) -> Callable[[str], str] | None:
     """
     Build or reuse an LLM callable for an explicit GGUF model path.
 
@@ -480,8 +581,11 @@ def build_model_llm_fn(model_path: str) -> Callable[[str], str] | None:
 
     normalized_path = str(normalized)
     with _LLM_LOCK:
-        if normalized_path in _PATH_LLM_FN:
-            return _PATH_LLM_FN[normalized_path]
+        resolved_n_ctx = _resolve_n_ctx(explicit_n_ctx=n_ctx)
+        resolved_max_tokens = int(max_tokens if max_tokens is not None else int(os.getenv("LOCAL_GGUF_MAX_TOKENS", "2048")))
+        cache_key = _llm_cache_key(normalized_path, n_ctx=resolved_n_ctx, max_tokens=resolved_max_tokens)
+        if cache_key in _PATH_LLM_FN:
+            return _PATH_LLM_FN[cache_key]
 
         if Llama is None:
             if "missing_llama_cpp" not in _ROLE_ERRORS_WARNED:
@@ -490,17 +594,17 @@ def build_model_llm_fn(model_path: str) -> Callable[[str], str] | None:
             return None
 
         try:
-            llm = _build_llm_for_path(normalized_path)
+            llm = _build_llm_for_path(normalized_path, n_ctx=resolved_n_ctx)
             if llm is None:
                 return None
-            fn = _make_llm_fn(llm)
+            fn = _make_llm_fn(llm, max_tokens=resolved_max_tokens)
         except Exception as exc:
             _warn(f"[local_llm_provider] WARN: Failed to initialize explicit model '{normalized_path}': {exc}")
             _ROLE_ERRORS_WARNED.add(f"init:path:{normalized_path}")
             return None
 
-        _PATH_LLM_INSTANCE[normalized_path] = llm
-        _PATH_LLM_FN[normalized_path] = fn
+        _PATH_LLM_INSTANCE[cache_key] = llm
+        _PATH_LLM_FN[cache_key] = fn
         return fn
 
 
@@ -515,15 +619,17 @@ def list_model_advisors() -> dict[str, Any]:
                 "role": role,
                 "model_path": path,
                 "available": bool(path),
-                "loaded": bool(path and path in _PATH_LLM_FN),
+                "loaded": bool(path and _is_model_loaded(path)),
             }
         )
     return {
         "models_dir": str(os.getenv("LOCAL_MODELS_DIR", "models/gguf") or "models/gguf"),
         "detected_models": models,
         "advisors": advisors,
-        "translator_policy": "translator_gguf_only",
+        "translator_policy": "optional_if_available",
         "translator_priority": "madlad400",
+        "fast_model_priority": "nanbeige4.1-3b.q3_k_m.gguf",
+        "uncensored_model_priority": "mistral-nemo-2407-12b-thinking-claude-gemini-gpt5.2-uncensored-heretic_q3_k_m.gguf",
     }
 
 
@@ -559,9 +665,14 @@ def build_local_llm_fn() -> Callable[[str], str] | None:
             _LLM_UNAVAILABLE = True
             return None
 
-        if model_path in _PATH_LLM_FN:
-            _LLM_FN = _PATH_LLM_FN[model_path]
-            _LLM_INSTANCE = _PATH_LLM_INSTANCE.get(model_path)
+        default_cache_key = _llm_cache_key(
+            model_path,
+            n_ctx=_resolve_n_ctx(),
+            max_tokens=int(os.getenv("LOCAL_GGUF_MAX_TOKENS", "2048")),
+        )
+        if default_cache_key in _PATH_LLM_FN:
+            _LLM_FN = _PATH_LLM_FN[default_cache_key]
+            _LLM_INSTANCE = _PATH_LLM_INSTANCE.get(default_cache_key)
             _ROLE_LLM_FN.setdefault(ROLE_GENERAL, _LLM_FN)
             _ROLE_MODEL_MAP.setdefault(ROLE_GENERAL, model_path)
             _LLM_UNAVAILABLE = False
@@ -582,8 +693,8 @@ def build_local_llm_fn() -> Callable[[str], str] | None:
 
         _LLM_INSTANCE = llm
         _LLM_FN = llm_fn
-        _PATH_LLM_INSTANCE[model_path] = llm
-        _PATH_LLM_FN[model_path] = llm_fn
+        _PATH_LLM_INSTANCE[default_cache_key] = llm
+        _PATH_LLM_FN[default_cache_key] = llm_fn
         _ROLE_LLM_FN[ROLE_GENERAL] = llm_fn
         _ROLE_MODEL_MAP[ROLE_GENERAL] = model_path
         _LLM_UNAVAILABLE = False

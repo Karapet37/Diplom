@@ -15,6 +15,7 @@ import zlib
 from src.autonomous_graph.api import GraphAPI, build_graph_engine_from_env
 from src.living_system.core_engine import LivingSystemEngine
 from src.web.client_introspection import build_client_profile
+from src.web.web_context import collect_web_context
 
 
 @dataclass(frozen=True)
@@ -166,6 +167,7 @@ _USER_DIMENSION_BINDINGS: dict[str, dict[str, str]] = {
 
 _DEFAULT_STRUCTURED_INPUT_MODEL_PATH = "models/gguf/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
 _DEFAULT_GRAPH_MONITOR_MODEL_PATH = "models/gguf/textGen/mistral-7b-instruct-v0.3-q4_k_m.gguf"
+_DEFAULT_CHAT_PARSER_OLLAMA_MODEL = "qwen2.5:7b-instruct"
 
 _PROFILE_ALIAS_PATTERNS: list[tuple[str, str, re.Pattern[str]]] = []
 for _canonical_key, _aliases in _PROFILE_KEY_ALIASES.items():
@@ -582,6 +584,78 @@ _FOUNDATIONAL_DOMAIN_GRAPH: dict[str, tuple[str, ...]] = {
     "Arts": ("Music", "Film", "Painting", "Poetry", "Theater"),
 }
 
+_FOUNDATIONAL_DOMAIN_LOCALIZED_LABELS: dict[str, dict[str, str]] = {
+    "Mathematics": {"en": "Mathematics", "ru": "Математика", "hy": "Մաթեմատիկա"},
+    "Physics": {"en": "Physics", "ru": "Физика", "hy": "Ֆիզիկա"},
+    "Biology": {"en": "Biology", "ru": "Биология", "hy": "Կենսաբանություն"},
+    "Computer Science": {"en": "Computer Science", "ru": "Информатика", "hy": "Համակարգչային գիտություն"},
+    "Philosophy": {"en": "Philosophy", "ru": "Философия", "hy": "Փիլիսոփայություն"},
+    "Psychology": {"en": "Psychology", "ru": "Психология", "hy": "Հոգեբանություն"},
+    "Sociology": {"en": "Sociology", "ru": "Социология", "hy": "Սոցիոլոգիա"},
+    "Theology": {"en": "Theology", "ru": "Теология", "hy": "Աստվածաբանություն"},
+    "Economics": {"en": "Economics", "ru": "Экономика", "hy": "Տնտեսագիտություն"},
+    "Linguistics": {"en": "Linguistics", "ru": "Лингвистика", "hy": "Լեզվաբանություն"},
+    "Arts": {"en": "Arts", "ru": "Искусство", "hy": "Արվեստ"},
+}
+
+_FOUNDATIONAL_CONCEPT_LOCALIZED_LABELS: dict[str, dict[str, str]] = {
+    "Algebra": {"en": "Algebra", "ru": "Алгебра", "hy": "Հանրահաշիվ"},
+    "Calculus": {"en": "Calculus", "ru": "Математический анализ", "hy": "Մաթեմատիկական անալիզ"},
+    "Geometry": {"en": "Geometry", "ru": "Геометрия", "hy": "Երկրաչափություն"},
+    "Probability": {"en": "Probability", "ru": "Вероятность", "hy": "Հավանականություն"},
+    "Logic": {"en": "Logic", "ru": "Логика", "hy": "Տրամաբանություն"},
+    "Mechanics": {"en": "Mechanics", "ru": "Механика", "hy": "Մեխանիկա"},
+    "Energy": {"en": "Energy", "ru": "Энергия", "hy": "Էներգիա"},
+    "Thermodynamics": {"en": "Thermodynamics", "ru": "Термодинамика", "hy": "Թերմոդինամիկա"},
+    "Relativity": {"en": "Relativity", "ru": "Теория относительности", "hy": "Հարաբերականության տեսություն"},
+    "Quantum Mechanics": {"en": "Quantum Mechanics", "ru": "Квантовая механика", "hy": "Քվանտային մեխանիկա"},
+    "Cell": {"en": "Cell", "ru": "Клетка", "hy": "Բջիջ"},
+    "Genetics": {"en": "Genetics", "ru": "Генетика", "hy": "Գենետիկա"},
+    "Evolution": {"en": "Evolution", "ru": "Эволюция", "hy": "Էվոլյուցիա"},
+    "Ecology": {"en": "Ecology", "ru": "Экология", "hy": "Էկոլոգիա"},
+    "Physiology": {"en": "Physiology", "ru": "Физиология", "hy": "Ֆիզիոլոգիա"},
+    "Algorithms": {"en": "Algorithms", "ru": "Алгоритмы", "hy": "Ալգորիթմներ"},
+    "Data Structures": {"en": "Data Structures", "ru": "Структуры данных", "hy": "Տվյալների կառուցվածքներ"},
+    "Databases": {"en": "Databases", "ru": "Базы данных", "hy": "Տվյալների բազաներ"},
+    "Networks": {"en": "Networks", "ru": "Сети", "hy": "Ցանցեր"},
+    "Machine Learning": {"en": "Machine Learning", "ru": "Машинное обучение", "hy": "Մեքենայական ուսուցում"},
+    "Ethics": {"en": "Ethics", "ru": "Этика", "hy": "Էթիկա"},
+    "Epistemology": {"en": "Epistemology", "ru": "Эпистемология", "hy": "Իմացաբանություն"},
+    "Metaphysics": {"en": "Metaphysics", "ru": "Метафизика", "hy": "Մետաֆիզիկա"},
+    "Ontology": {"en": "Ontology", "ru": "Онтология", "hy": "Օնտոլոգիա"},
+    "Reason": {"en": "Reason", "ru": "Разум", "hy": "Բանականություն"},
+    "Cognition": {"en": "Cognition", "ru": "Познание", "hy": "Ճանաչողություն"},
+    "Memory": {"en": "Memory", "ru": "Память", "hy": "Հիշողություն"},
+    "Emotion": {"en": "Emotion", "ru": "Эмоция", "hy": "Զգացմունք"},
+    "Behavior": {"en": "Behavior", "ru": "Поведение", "hy": "Վարքագիծ"},
+    "Motivation": {"en": "Motivation", "ru": "Мотивация", "hy": "Մոտիվացիա"},
+    "Society": {"en": "Society", "ru": "Общество", "hy": "Հասարակություն"},
+    "Culture": {"en": "Culture", "ru": "Культура", "hy": "Մշակույթ"},
+    "Institutions": {"en": "Institutions", "ru": "Институты", "hy": "Ինստիտուտներ"},
+    "Norms": {"en": "Norms", "ru": "Нормы", "hy": "Նորմեր"},
+    "Social Structure": {"en": "Social Structure", "ru": "Социальная структура", "hy": "Սոցիալական կառուցվածք"},
+    "Faith": {"en": "Faith", "ru": "Вера", "hy": "Հավատ"},
+    "Doctrine": {"en": "Doctrine", "ru": "Доктрина", "hy": "Դավանանք"},
+    "Hermeneutics": {"en": "Hermeneutics", "ru": "Герменевтика", "hy": "Հերմենևտիկա"},
+    "Comparative Religion": {"en": "Comparative Religion", "ru": "Сравнительное религиоведение", "hy": "Համեմատական կրոնագիտություն"},
+    "Theodicy": {"en": "Theodicy", "ru": "Теодицея", "hy": "Թեոդիցիա"},
+    "Market": {"en": "Market", "ru": "Рынок", "hy": "Շուկա"},
+    "Demand": {"en": "Demand", "ru": "Спрос", "hy": "Պահանջարկ"},
+    "Supply": {"en": "Supply", "ru": "Предложение", "hy": "Առաջարկ"},
+    "Capital": {"en": "Capital", "ru": "Капитал", "hy": "Կապիտալ"},
+    "Trade": {"en": "Trade", "ru": "Торговля", "hy": "Առևտուր"},
+    "Phonology": {"en": "Phonology", "ru": "Фонология", "hy": "Հնչյունաբանություն"},
+    "Morphology": {"en": "Morphology", "ru": "Морфология", "hy": "Ձևաբանություն"},
+    "Syntax": {"en": "Syntax", "ru": "Синтаксис", "hy": "Շարահյուսություն"},
+    "Semantics": {"en": "Semantics", "ru": "Семантика", "hy": "Իմաստաբանություն"},
+    "Pragmatics": {"en": "Pragmatics", "ru": "Прагматика", "hy": "Գործածաբանություն"},
+    "Music": {"en": "Music", "ru": "Музыка", "hy": "Երաժշտություն"},
+    "Film": {"en": "Film", "ru": "Кино", "hy": "Կինո"},
+    "Painting": {"en": "Painting", "ru": "Живопись", "hy": "Նկարչություն"},
+    "Poetry": {"en": "Poetry", "ru": "Поэзия", "hy": "Պոեզիա"},
+    "Theater": {"en": "Theater", "ru": "Театр", "hy": "Թատրոն"},
+}
+
 _FOUNDATIONAL_DOMAIN_RELATIONS: tuple[tuple[str, str, str, float], ...] = (
     ("Mathematics", "Computer Science", "enables", 0.95),
     ("Mathematics", "Physics", "supports", 0.9),
@@ -712,6 +786,7 @@ _FOUNDATIONAL_DOMAIN_DETAILS: dict[str, dict[str, Any]] = {
             "Scientific methodology critique",
             "AI alignment and responsible design",
         ],
+        "aliases": ["Философия", "Փիլիսոփայություն"],
     },
     "Psychology": {
         "description": (
@@ -1025,6 +1100,14 @@ class GraphWorkspaceService:
             "allow_apply_for_actions": [],
             "updated_at": time.time(),
         }
+        self._context_mode_policy: dict[str, Any] = {
+            "enabled": True,
+            "context_strategy": "weighted_top_k",
+            "focus_top_k": 4,
+            "fallback_strategy": "session_then_context",
+            "protect_threshold": 0.72,
+            "updated_at": time.time(),
+        }
         self._bootstrap_runtime_graph()
 
     @staticmethod
@@ -1053,6 +1136,17 @@ class GraphWorkspaceService:
         except Exception:
             return None
         return build_model_llm_fn
+
+    @staticmethod
+    def _build_ollama_llm(model_name: str) -> Callable[[str], str] | None:
+        try:
+            from src.utils.ollama_provider import build_ollama_llm_fn
+        except Exception:
+            return None
+        try:
+            return build_ollama_llm_fn(model_name)
+        except Exception:
+            return None
 
     @staticmethod
     def _env_flag(name: str, default: bool = True) -> bool:
@@ -1720,6 +1814,388 @@ class GraphWorkspaceService:
         return chunk
 
     @staticmethod
+    def _foundation_kind_hint(*parts: Any) -> str:
+        source = " ".join(" ".join(str(part or "").split()) for part in parts if str(part or "").strip()).casefold()
+        if not source:
+            return "general"
+        if any(token in source for token in ("coffee", "espresso", "arabica", "robusta", "brew", "roast", "latte", "cappuccino", "кофе", "սուրճ")):
+            return "coffee"
+        if any(token in source for token in ("philosophy", "philosoph", "ethic", "ontology", "metaphysics", "logic", "filosof", "философ", "փիլիսոփ")):
+            return "philosophy"
+        if any(token in source for token in ("law", "legal", "juris", "contract", "regulation", "statute", "закон", "прав", "իրավ")):
+            return "law"
+        if any(token in source for token in ("psych", "therapy", "emotion", "stress", "anxiety", "behavior", "повед", "эмоц", "հոգեբ")):
+            return "psychology"
+        if any(token in source for token in ("plan", "roadmap", "career", "goal", "milestone", "strategy", "project", "task", "карьер", "план", "նպատակ")):
+            return "planning"
+        if any(token in source for token in ("system", "software", "architecture", "engineer", "api", "model", "code", "infra", "tech", "архит", "код")):
+            return "technology"
+        return "general"
+
+    @staticmethod
+    def _foundation_allowed_link_types() -> tuple[str, ...]:
+        return (
+            "clarifies",
+            "organizes",
+            "depends_on",
+            "constrains",
+            "enables",
+            "creates_risk",
+            "requires_action",
+            "reveals_pattern",
+            "guides_action",
+            "measures_progress",
+            "raises_questions",
+            "applies_to",
+        )
+
+    @staticmethod
+    def _foundation_frame_plan(kind: str, topic: str) -> list[dict[str, str]]:
+        safe_topic = GraphWorkspaceService._to_title(topic, fallback="the topic", limit=72)
+        templates: dict[str, list[dict[str, str]]] = {
+            "coffee": [
+                {
+                    "key": "definition",
+                    "label": "Definition",
+                    "fallback_name": "What Coffee Is",
+                    "fallback_summary": "Define coffee as a plant, bean, beverage, and sensory domain.",
+                    "child_name": "Coffee Basics",
+                    "child_summary": "The minimum concepts needed to understand coffee clearly.",
+                    "default_link_to_next": "organizes",
+                },
+                {
+                    "key": "history",
+                    "label": "History",
+                    "fallback_name": "History of Coffee",
+                    "fallback_summary": "Cover the origin, spread, and cultural history of coffee as a beverage.",
+                    "child_name": "Key Historical Step",
+                    "child_summary": "A historical shift that changed coffee culture or trade.",
+                    "default_link_to_next": "clarifies",
+                },
+                {
+                    "key": "varieties",
+                    "label": "Varieties",
+                    "fallback_name": "Coffee Varieties And Origins",
+                    "fallback_summary": "Separate arabica, robusta, and other notable varieties with origin logic and flavor differences.",
+                    "child_name": "Variety Profile",
+                    "child_summary": "A variety or origin profile and how it changes flavor.",
+                    "default_link_to_next": "depends_on",
+                },
+                {
+                    "key": "processing",
+                    "label": "Processing",
+                    "fallback_name": "Processing And Roasting",
+                    "fallback_summary": "Explain washed, natural, honey, fermentation, and roast levels as transformations that change taste.",
+                    "child_name": "Processing Method",
+                    "child_summary": "A processing or roast method and its sensory effect.",
+                    "default_link_to_next": "enables",
+                },
+                {
+                    "key": "brewing",
+                    "label": "Brewing",
+                    "fallback_name": "Brewing Methods",
+                    "fallback_summary": "Show how espresso, pourover, immersion, moka, and other brewing methods change extraction and flavor.",
+                    "child_name": "Brewing Method",
+                    "child_summary": "A brewing method with the main control variables and taste impact.",
+                    "default_link_to_next": "guides_action",
+                },
+                {
+                    "key": "preferences",
+                    "label": "Preferences",
+                    "fallback_name": "Taste Preferences",
+                    "fallback_summary": "Map user taste preferences to bean choice, roast level, and brewing method.",
+                    "child_name": "Preference Match",
+                    "child_summary": "A taste preference and the preparation choices that match it.",
+                    "default_link_to_next": "clarifies",
+                },
+            ],
+            "philosophy": [
+                {
+                    "key": "definition",
+                    "label": "Definition",
+                    "fallback_name": f"Definition of {safe_topic}",
+                    "fallback_summary": f"State what {safe_topic} means, what it studies, and where its boundaries are.",
+                    "child_name": "Key Terms And Distinctions",
+                    "child_summary": f"Core terms needed to discuss {safe_topic} precisely.",
+                    "default_link_to_next": "organizes",
+                },
+                {
+                    "key": "branches",
+                    "label": "Branches",
+                    "fallback_name": f"Main Branches of {safe_topic}",
+                    "fallback_summary": f"Break {safe_topic} into its major schools, branches, or subfields.",
+                    "child_name": "Representative Branch",
+                    "child_summary": f"A concrete branch or school inside {safe_topic}.",
+                    "default_link_to_next": "raises_questions",
+                },
+                {
+                    "key": "questions",
+                    "label": "Questions",
+                    "fallback_name": f"Central Questions in {safe_topic}",
+                    "fallback_summary": f"Capture the recurring questions that drive work in {safe_topic}.",
+                    "child_name": "Example Question",
+                    "child_summary": f"A concrete question explored inside {safe_topic}.",
+                    "default_link_to_next": "guides_action",
+                },
+                {
+                    "key": "methods",
+                    "label": "Methods",
+                    "fallback_name": f"Methods of Inquiry for {safe_topic}",
+                    "fallback_summary": f"Describe how people reason, test, compare, or debate inside {safe_topic}.",
+                    "child_name": "Reasoning Method",
+                    "child_summary": f"A method used to examine claims inside {safe_topic}.",
+                    "default_link_to_next": "applies_to",
+                },
+                {
+                    "key": "applications",
+                    "label": "Applications",
+                    "fallback_name": f"Practical Use of {safe_topic}",
+                    "fallback_summary": f"Show how {safe_topic} changes judgment, action, or real-world decisions.",
+                    "child_name": "Practical Example",
+                    "child_summary": f"A concrete situation where {safe_topic} changes outcomes.",
+                    "default_link_to_next": "clarifies",
+                },
+            ],
+            "law": [
+                {
+                    "key": "subject",
+                    "label": "Subject",
+                    "fallback_name": f"Legal Subject of {safe_topic}",
+                    "fallback_summary": f"Define what legal matter {safe_topic} covers and what the scope is.",
+                    "child_name": "Scope Boundary",
+                    "child_summary": f"A boundary or jurisdictional limit for {safe_topic}.",
+                    "default_link_to_next": "organizes",
+                },
+                {
+                    "key": "actors",
+                    "label": "Actors",
+                    "fallback_name": f"Actors And Roles in {safe_topic}",
+                    "fallback_summary": f"List the parties, institutions, or roles involved in {safe_topic}.",
+                    "child_name": "Key Actor",
+                    "child_summary": f"A participant that matters for {safe_topic}.",
+                    "default_link_to_next": "depends_on",
+                },
+                {
+                    "key": "rules",
+                    "label": "Rules",
+                    "fallback_name": f"Rules And Duties for {safe_topic}",
+                    "fallback_summary": f"Capture duties, rights, deadlines, and rules that govern {safe_topic}.",
+                    "child_name": "Key Duty",
+                    "child_summary": f"A concrete duty, right, or document requirement in {safe_topic}.",
+                    "default_link_to_next": "creates_risk",
+                },
+                {
+                    "key": "risks",
+                    "label": "Risks",
+                    "fallback_name": f"Legal Risks in {safe_topic}",
+                    "fallback_summary": f"Identify penalties, conflict points, or failure cases in {safe_topic}.",
+                    "child_name": "Risk Trigger",
+                    "child_summary": f"A concrete trigger that creates legal exposure in {safe_topic}.",
+                    "default_link_to_next": "requires_action",
+                },
+                {
+                    "key": "actions",
+                    "label": "Actions",
+                    "fallback_name": f"Safe Next Actions for {safe_topic}",
+                    "fallback_summary": f"List the safest next actions, checks, or documents needed for {safe_topic}.",
+                    "child_name": "Immediate Action",
+                    "child_summary": f"A next action that reduces uncertainty or exposure in {safe_topic}.",
+                    "default_link_to_next": "clarifies",
+                },
+            ],
+            "psychology": [
+                {
+                    "key": "state",
+                    "label": "State",
+                    "fallback_name": f"Current State of {safe_topic}",
+                    "fallback_summary": f"Describe the current emotional, behavioral, or mental state around {safe_topic}.",
+                    "child_name": "State Marker",
+                    "child_summary": f"A concrete signal that shows the present state around {safe_topic}.",
+                    "default_link_to_next": "clarifies",
+                },
+                {
+                    "key": "triggers",
+                    "label": "Triggers",
+                    "fallback_name": f"Triggers Around {safe_topic}",
+                    "fallback_summary": f"List the situations, thoughts, or stimuli that trigger changes around {safe_topic}.",
+                    "child_name": "Trigger Example",
+                    "child_summary": f"A concrete trigger tied to {safe_topic}.",
+                    "default_link_to_next": "reveals_pattern",
+                },
+                {
+                    "key": "patterns",
+                    "label": "Patterns",
+                    "fallback_name": f"Patterns in {safe_topic}",
+                    "fallback_summary": f"Capture recurring loops, habits, or patterns that sustain {safe_topic}.",
+                    "child_name": "Recurring Pattern",
+                    "child_summary": f"A repeated pattern that shapes {safe_topic}.",
+                    "default_link_to_next": "guides_action",
+                },
+                {
+                    "key": "interventions",
+                    "label": "Interventions",
+                    "fallback_name": f"Interventions for {safe_topic}",
+                    "fallback_summary": f"List interventions, coping actions, or support strategies for {safe_topic}.",
+                    "child_name": "Support Action",
+                    "child_summary": f"A concrete intervention that helps with {safe_topic}.",
+                    "default_link_to_next": "measures_progress",
+                },
+                {
+                    "key": "signals",
+                    "label": "Signals",
+                    "fallback_name": f"Progress Signals for {safe_topic}",
+                    "fallback_summary": f"Describe what improvement, relapse, or stability looks like for {safe_topic}.",
+                    "child_name": "Progress Signal",
+                    "child_summary": f"A measurable sign of movement in {safe_topic}.",
+                    "default_link_to_next": "clarifies",
+                },
+            ],
+            "planning": [
+                {
+                    "key": "goal",
+                    "label": "Goal",
+                    "fallback_name": f"Goal for {safe_topic}",
+                    "fallback_summary": f"State the concrete outcome that {safe_topic} is trying to reach.",
+                    "child_name": "Success Target",
+                    "child_summary": f"A concrete success target for {safe_topic}.",
+                    "default_link_to_next": "clarifies",
+                },
+                {
+                    "key": "constraints",
+                    "label": "Constraints",
+                    "fallback_name": f"Constraints on {safe_topic}",
+                    "fallback_summary": f"List time, money, skill, legal, or energy limits affecting {safe_topic}.",
+                    "child_name": "Primary Constraint",
+                    "child_summary": f"A concrete limit that shapes {safe_topic}.",
+                    "default_link_to_next": "depends_on",
+                },
+                {
+                    "key": "resources",
+                    "label": "Resources",
+                    "fallback_name": f"Resources for {safe_topic}",
+                    "fallback_summary": f"Capture available assets, skills, support, and leverage points for {safe_topic}.",
+                    "child_name": "Available Resource",
+                    "child_summary": f"A resource that can move {safe_topic} forward.",
+                    "default_link_to_next": "enables",
+                },
+                {
+                    "key": "steps",
+                    "label": "Steps",
+                    "fallback_name": f"Execution Steps for {safe_topic}",
+                    "fallback_summary": f"Break {safe_topic} into ordered next steps, milestones, or experiments.",
+                    "child_name": "Immediate Step",
+                    "child_summary": f"A next action that advances {safe_topic}.",
+                    "default_link_to_next": "creates_risk",
+                },
+                {
+                    "key": "risks",
+                    "label": "Risks",
+                    "fallback_name": f"Risks And Mitigations for {safe_topic}",
+                    "fallback_summary": f"Identify what could derail {safe_topic} and what reduces that risk.",
+                    "child_name": "Risk Mitigation",
+                    "child_summary": f"A concrete mitigation that protects progress in {safe_topic}.",
+                    "default_link_to_next": "clarifies",
+                },
+            ],
+            "technology": [
+                {
+                    "key": "purpose",
+                    "label": "Purpose",
+                    "fallback_name": f"Purpose of {safe_topic}",
+                    "fallback_summary": f"Define what {safe_topic} is for and what problem it solves.",
+                    "child_name": "Primary Outcome",
+                    "child_summary": f"The main outcome that {safe_topic} should deliver.",
+                    "default_link_to_next": "organizes",
+                },
+                {
+                    "key": "components",
+                    "label": "Components",
+                    "fallback_name": f"Core Components of {safe_topic}",
+                    "fallback_summary": f"Break {safe_topic} into the main modules, parts, or layers.",
+                    "child_name": "Critical Component",
+                    "child_summary": f"A component that is essential inside {safe_topic}.",
+                    "default_link_to_next": "depends_on",
+                },
+                {
+                    "key": "dependencies",
+                    "label": "Dependencies",
+                    "fallback_name": f"Dependencies of {safe_topic}",
+                    "fallback_summary": f"Identify upstream services, assumptions, or prerequisites for {safe_topic}.",
+                    "child_name": "Dependency",
+                    "child_summary": f"A dependency that {safe_topic} relies on.",
+                    "default_link_to_next": "creates_risk",
+                },
+                {
+                    "key": "failure_modes",
+                    "label": "Failure Modes",
+                    "fallback_name": f"Failure Modes in {safe_topic}",
+                    "fallback_summary": f"List the most important failure cases, degradations, or operational risks in {safe_topic}.",
+                    "child_name": "Failure Signal",
+                    "child_summary": f"A sign that {safe_topic} is failing or degrading.",
+                    "default_link_to_next": "measures_progress",
+                },
+                {
+                    "key": "metrics",
+                    "label": "Metrics",
+                    "fallback_name": f"Success Metrics for {safe_topic}",
+                    "fallback_summary": f"Define what must be measured to know whether {safe_topic} is working.",
+                    "child_name": "Primary Metric",
+                    "child_summary": f"A metric that validates whether {safe_topic} is healthy.",
+                    "default_link_to_next": "clarifies",
+                },
+            ],
+            "general": [
+                {
+                    "key": "definition",
+                    "label": "Definition",
+                    "fallback_name": f"Definition of {safe_topic}",
+                    "fallback_summary": f"State what {safe_topic} is and what its scope includes.",
+                    "child_name": "Key Term",
+                    "child_summary": f"A key term or distinction inside {safe_topic}.",
+                    "default_link_to_next": "organizes",
+                },
+                {
+                    "key": "structure",
+                    "label": "Structure",
+                    "fallback_name": f"Structure of {safe_topic}",
+                    "fallback_summary": f"Break {safe_topic} into its main parts, layers, or sections.",
+                    "child_name": "Core Part",
+                    "child_summary": f"A major part inside {safe_topic}.",
+                    "default_link_to_next": "depends_on",
+                },
+                {
+                    "key": "dependencies",
+                    "label": "Dependencies",
+                    "fallback_name": f"Dependencies of {safe_topic}",
+                    "fallback_summary": f"Identify what {safe_topic} depends on to function or make sense.",
+                    "child_name": "Required Dependency",
+                    "child_summary": f"A dependency or precondition for {safe_topic}.",
+                    "default_link_to_next": "enables",
+                },
+                {
+                    "key": "actions",
+                    "label": "Actions",
+                    "fallback_name": f"Actions for {safe_topic}",
+                    "fallback_summary": f"List concrete actions, uses, or next moves related to {safe_topic}.",
+                    "child_name": "Next Action",
+                    "child_summary": f"A concrete action tied to {safe_topic}.",
+                    "default_link_to_next": "creates_risk",
+                },
+                {
+                    "key": "risks",
+                    "label": "Risks",
+                    "fallback_name": f"Risks Around {safe_topic}",
+                    "fallback_summary": f"Show what can go wrong, stay unclear, or block progress around {safe_topic}.",
+                    "child_name": "Main Risk",
+                    "child_summary": f"A concrete risk or uncertainty related to {safe_topic}.",
+                    "default_link_to_next": "clarifies",
+                },
+            ],
+        }
+        selected = templates.get(str(kind or "general").strip().lower(), templates["general"])
+        return [dict(item) for item in selected]
+
+    @staticmethod
     def _pick_allowed_token(value: Any, *, allowed: tuple[str, ...], default: str) -> str:
         token = re.sub(r"[^a-z0-9_]+", "_", str(value or "").strip().lower()).strip("_")
         if token in allowed:
@@ -1767,6 +2243,359 @@ class GraphWorkspaceService:
         if not owner:
             return False
         return owner == str(user_id or "").strip()
+
+    def _context_mode_policy_snapshot(self) -> dict[str, Any]:
+        return {
+            "enabled": self._to_bool(self._context_mode_policy.get("enabled", True)),
+            "context_strategy": str(
+                self._context_mode_policy.get("context_strategy", "weighted_top_k") or "weighted_top_k"
+            ).strip()
+            or "weighted_top_k",
+            "focus_top_k": max(1, min(8, self._to_int(self._context_mode_policy.get("focus_top_k", 4), 4))),
+            "fallback_strategy": str(
+                self._context_mode_policy.get("fallback_strategy", "session_then_context") or "session_then_context"
+            ).strip()
+            or "session_then_context",
+            "protect_threshold": round(
+                self._confidence(self._context_mode_policy.get("protect_threshold", 0.72), 0.72),
+                4,
+            ),
+            "updated_at": float(self._context_mode_policy.get("updated_at", time.time()) or time.time()),
+        }
+
+    @staticmethod
+    def _context_feedback_ratio(*, helpful: int, corrections: int) -> float:
+        helped = max(0, int(helpful or 0))
+        fixed = max(0, int(corrections or 0))
+        total = helped + fixed
+        if total <= 0:
+            return 0.5
+        return max(0.0, min(1.0, (helped + 1.0) / (total + 2.0)))
+
+    def _context_mode_rank(self, node: Any, *, session_id: str = "") -> tuple[float, float]:
+        attrs = self._as_mapping(getattr(node, "attributes", {}))
+        state = self._as_mapping(getattr(node, "state", {}))
+        base_weight = self._to_float(state.get("context_weight", 1.0), 1.0)
+        helpful = self._to_int(state.get("helpful_count", 0), 0)
+        corrections = self._to_int(state.get("correction_count", 0), 0)
+        learning = self._context_feedback_ratio(helpful=helpful, corrections=corrections)
+        updated_at = self._to_float(attrs.get("updated_at", 0.0), 0.0)
+        last_session = str(attrs.get("last_session_id", "") or "").strip()
+        session_boost = 0.08 if session_id and last_session == str(session_id or "").strip() else 0.0
+        learned_boost = (learning - 0.5) * 0.45
+        score = base_weight + learned_boost + session_boost
+        return (round(score, 6), updated_at)
+
+    def _context_focus_rank(
+        self,
+        *,
+        edge: Any,
+        target: Any,
+        mode_state: Mapping[str, Any] | None = None,
+    ) -> float:
+        edge_weight = self._to_float(getattr(edge, "weight", 0.0), 0.0)
+        edge_metadata = self._as_mapping(getattr(edge, "metadata", {}))
+        target_attrs = self._as_mapping(getattr(target, "attributes", {}))
+        target_state = self._as_mapping(getattr(target, "state", {}))
+        mode_root = self._as_mapping(mode_state)
+
+        focus_helpful = max(
+            self._to_int(target_state.get("helpful_count", 0), 0),
+            self._to_int(edge_metadata.get("helpful_count", 0), 0),
+        )
+        focus_corrections = max(
+            self._to_int(target_state.get("correction_count", 0), 0),
+            self._to_int(edge_metadata.get("correction_count", 0), 0),
+        )
+        focus_learning = self._context_feedback_ratio(
+            helpful=focus_helpful,
+            corrections=focus_corrections,
+        )
+        mode_learning = self._context_feedback_ratio(
+            helpful=self._to_int(mode_root.get("helpful_count", 0), 0),
+            corrections=self._to_int(mode_root.get("correction_count", 0), 0),
+        )
+        importance = max(
+            self._to_float(target_state.get("importance", 0.0), 0.0),
+            self._to_float(target_state.get("learned_priority", 0.0), 0.0),
+        )
+        protected_boost = 0.08 if self._to_bool(target_attrs.get("protected", False)) else 0.0
+        score = (
+            (edge_weight * 0.58)
+            + (importance * 0.14)
+            + (focus_learning * 0.2)
+            + (mode_learning * 0.08)
+            + protected_boost
+        )
+        return round(max(0.0, score), 6)
+
+    def _find_context_mode_node(self, *, mode_node_id: Any, user_id: str = "") -> Any | None:
+        target_id = self._to_int(mode_node_id, 0)
+        if target_id <= 0:
+            return None
+        node = self.api.engine.store.nodes.get(target_id)
+        if node is None:
+            return None
+        if str(getattr(node, "type", "") or "").strip() != "context_mode":
+            return None
+        if user_id:
+            attrs = self._as_mapping(getattr(node, "attributes", {}))
+            owner = str(attrs.get("user_id", "") or "").strip()
+            if owner and owner != str(user_id or "").strip():
+                return None
+        return node
+
+    def _find_context_focus_edge(self, *, mode_node_id: Any, focus_node_id: Any = 0) -> Any | None:
+        mode_id = self._to_int(mode_node_id, 0)
+        target_focus_id = self._to_int(focus_node_id, 0)
+        if mode_id <= 0:
+            return None
+        for edge in self.api.engine.store.edges:
+            if self._to_int(getattr(edge, "from_node", 0), 0) != mode_id:
+                continue
+            if str(getattr(edge, "relation_type", "") or "").strip() != "mode_focus":
+                continue
+            if target_focus_id > 0 and self._to_int(getattr(edge, "to_node", 0), 0) != target_focus_id:
+                continue
+            return edge
+        return None
+
+    def _resolve_context_mode_policy(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        message: str,
+        context: str,
+        requested_role: str,
+        mode_node_id: Any = 0,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        policy = self._context_mode_policy_snapshot()
+        if not enabled or not policy.get("enabled", True):
+            clean_context = " ".join(str(context or "").split()).strip()
+            role = self._debate_role(requested_role, fallback="general")
+            return {
+                "enabled": False,
+                "policy": policy,
+                "selected": False,
+                "mode_node_id": 0,
+                "mode_name": "",
+                "mode_domain": "",
+                "requested_role": role,
+                "resolved_role": role,
+                "selection_reason": "disabled",
+                "fallback_used": False,
+                "fallback_reason": "disabled",
+                "prompt_guardrails": "",
+                "protected_memory": "",
+                "memory_items": [],
+                "context_lines": [clean_context] if clean_context else [],
+                "effective_context": clean_context,
+            }
+
+        user_token = str(user_id or "").strip()
+        requested_mode_id = self._to_int(mode_node_id, 0)
+        all_modes: list[Any] = []
+        owned_modes: list[Any] = []
+        global_modes: list[Any] = []
+        for node in self.api.engine.store.nodes.values():
+            if str(getattr(node, "type", "") or "").strip() != "context_mode":
+                continue
+            all_modes.append(node)
+            attrs = self._as_mapping(getattr(node, "attributes", {}))
+            owner = str(attrs.get("user_id", "") or "").strip()
+            if owner and owner == user_token:
+                owned_modes.append(node)
+            elif not owner:
+                global_modes.append(node)
+
+        selected_mode = None
+        selection_reason = "no_mode"
+        if requested_mode_id > 0:
+            selected_mode = next(
+                (node for node in all_modes if self._to_int(getattr(node, "id", 0), 0) == requested_mode_id),
+                None,
+            )
+            if selected_mode is not None:
+                selection_reason = "explicit_mode_node"
+        if selected_mode is None and owned_modes:
+            selected_mode = sorted(
+                owned_modes,
+                key=lambda row: self._context_mode_rank(row, session_id=session_id),
+                reverse=True,
+            )[0]
+            selection_reason = "user_weighted"
+        if selected_mode is None and global_modes:
+            selected_mode = sorted(
+                global_modes,
+                key=lambda row: self._context_mode_rank(row, session_id=session_id),
+                reverse=True,
+            )[0]
+            selection_reason = "global_weighted"
+
+        requested_role_token = self._debate_role(requested_role, fallback="general")
+        clean_context = " ".join(str(context or "").split()).strip()
+        clean_message = " ".join(str(message or "").split()).strip()
+        if selected_mode is None:
+            fallback_lines: list[str] = []
+            if clean_context:
+                fallback_lines.append(clean_context)
+            if clean_message:
+                fallback_lines.append(f"Session fallback: {clean_message[:320]}")
+            return {
+                "enabled": True,
+                "policy": policy,
+                "selected": False,
+                "mode_node_id": 0,
+                "mode_name": "",
+                "mode_domain": "",
+                "requested_role": requested_role_token,
+                "resolved_role": requested_role_token,
+                "selection_reason": selection_reason,
+                "fallback_used": bool(fallback_lines),
+                "fallback_reason": "session_context_only" if fallback_lines else "empty_context",
+                "prompt_guardrails": "",
+                "protected_memory": "",
+                "memory_items": [],
+                "context_lines": fallback_lines,
+                "effective_context": "\n".join(fallback_lines).strip(),
+            }
+
+        mode_attrs = self._as_mapping(getattr(selected_mode, "attributes", {}))
+        mode_state = self._as_mapping(getattr(selected_mode, "state", {}))
+        mode_id = self._to_int(getattr(selected_mode, "id", 0), 0)
+        mode_name = " ".join(
+            str(
+                mode_attrs.get("name")
+                or mode_attrs.get("title")
+                or mode_attrs.get("summary")
+                or f"Mode {mode_id}"
+            ).split()
+        ).strip() or f"Mode {mode_id}"
+        mode_domain = " ".join(str(mode_attrs.get("domain", "") or "").split()).strip()
+        prompt_guardrails = " ".join(str(mode_attrs.get("prompt_guardrails", "") or "").split()).strip()
+        protected_memory = " ".join(str(mode_attrs.get("protected_memory", "") or "").split()).strip()
+        resolved_role = self._debate_role(mode_attrs.get("llm_role", requested_role_token), fallback=requested_role_token)
+
+        memory_items: list[dict[str, Any]] = []
+        focus_top_k = self._to_int(policy.get("focus_top_k", 4), 4)
+        candidate_edges: list[tuple[float, Any, Any]] = []
+        for edge in self.api.engine.store.edges:
+            if self._to_int(getattr(edge, "from_node", 0), 0) != mode_id:
+                continue
+            if str(getattr(edge, "relation_type", "") or "").strip() != "mode_focus":
+                continue
+            target_id = self._to_int(getattr(edge, "to_node", 0), 0)
+            if target_id <= 0:
+                continue
+            target = self.api.engine.store.nodes.get(target_id)
+            if target is None:
+                continue
+            candidate_edges.append(
+                (
+                    self._context_focus_rank(edge=edge, target=target, mode_state=mode_state),
+                    edge,
+                    target,
+                )
+            )
+        for learned_score, edge, target in sorted(candidate_edges, key=lambda row: row[0], reverse=True):
+            target_id = self._to_int(getattr(target, "id", 0), 0)
+            target_attrs = self._as_mapping(getattr(target, "attributes", {}))
+            label = " ".join(
+                str(
+                    target_attrs.get("title")
+                    or target_attrs.get("name")
+                    or target_attrs.get("profile_name")
+                    or target_attrs.get("summary")
+                    or f"Node {target_id}"
+                ).split()
+            ).strip() or f"Node {target_id}"
+            summary = self._node_text_blob(target)
+            if len(summary) > 280:
+                summary = f"{summary[:277].rstrip()}..."
+            weight = round(self._to_float(getattr(edge, "weight", 0.0), 0.0), 4)
+            memory_items.append(
+                {
+                    "node_id": target_id,
+                    "type": str(getattr(target, "type", "generic") or "generic"),
+                    "name": label,
+                    "summary": summary,
+                    "weight": weight,
+                    "learned_score": round(float(learned_score), 4),
+                    "feedback_score": round(
+                        self._context_feedback_ratio(
+                            helpful=max(
+                                self._to_int(self._as_mapping(getattr(edge, "metadata", {})).get("helpful_count", 0), 0),
+                                self._to_int(self._as_mapping(getattr(target, "state", {})).get("helpful_count", 0), 0),
+                            ),
+                            corrections=max(
+                                self._to_int(self._as_mapping(getattr(edge, "metadata", {})).get("correction_count", 0), 0),
+                                self._to_int(self._as_mapping(getattr(target, "state", {})).get("correction_count", 0), 0),
+                            ),
+                        ),
+                        4,
+                    ),
+                    "protected": bool(weight >= self._to_float(policy.get("protect_threshold", 0.72), 0.72)),
+                }
+            )
+            if len(memory_items) >= focus_top_k:
+                break
+
+        context_lines: list[str] = [
+            f"Mode anchor: {mode_name}",
+            f"Mode domain: {mode_domain or 'general'}",
+        ]
+        if prompt_guardrails:
+            context_lines.append(f"Prompt direction: {prompt_guardrails}")
+        if protected_memory:
+            context_lines.append(f"Protected memory: {protected_memory}")
+        if memory_items:
+            context_lines.append("Weighted important context:")
+            for idx, item in enumerate(memory_items, start=1):
+                head = (
+                    f"[{idx}] {item['name']} "
+                    f"(node:{item['node_id']}, weight:{float(item['weight']):.2f}, protected:{str(bool(item['protected'])).lower()})"
+                )
+                context_lines.append(head)
+                if str(item.get("summary", "")).strip():
+                    context_lines.append(f"    {str(item.get('summary', '')).strip()}")
+        effective_parts = ["\n".join(context_lines).strip()]
+        if clean_context:
+            effective_parts.append(f"User context: {clean_context}")
+        if not memory_items and clean_message:
+            effective_parts.append(f"Session fallback: {clean_message[:320]}")
+
+        return {
+            "enabled": True,
+            "policy": policy,
+            "selected": True,
+            "mode_node_id": mode_id,
+            "mode_name": mode_name,
+            "mode_domain": mode_domain,
+            "requested_role": requested_role_token,
+            "resolved_role": resolved_role,
+            "selection_reason": selection_reason,
+            "fallback_used": bool(not memory_items and clean_message),
+            "fallback_reason": "mode_without_weighted_memory" if (not memory_items and clean_message) else "none",
+            "prompt_guardrails": prompt_guardrails,
+            "protected_memory": protected_memory,
+            "memory_items": memory_items,
+            "context_lines": context_lines,
+            "effective_context": "\n\n".join(part for part in effective_parts if part).strip(),
+            "mode_state": {
+                "context_weight": round(self._to_float(mode_state.get("context_weight", 1.0), 1.0), 4),
+                "helpful_count": self._to_int(mode_state.get("helpful_count", 0), 0),
+                "correction_count": self._to_int(mode_state.get("correction_count", 0), 0),
+                "learned_score": round(
+                    float(self._context_feedback_ratio(
+                        helpful=self._to_int(mode_state.get("helpful_count", 0), 0),
+                        corrections=self._to_int(mode_state.get("correction_count", 0), 0),
+                    )),
+                    4,
+                ),
+            },
+        }
 
     def _llm_policy_snapshot(self) -> dict[str, Any]:
         mode = self._pick_allowed_token(
@@ -3211,9 +4040,13 @@ class GraphWorkspaceService:
         message: str,
         personalization: Mapping[str, Any] | None,
         memory_context: list[Mapping[str, Any]],
+        mode_policy: Mapping[str, Any] | None = None,
     ) -> str:
         profile_block = self._personalization_prompt_context(personalization)
         context_lines: list[str] = []
+        mode_root = self._as_mapping(mode_policy)
+        mode_lines = self._to_list_of_strings(mode_root.get("context_lines"))
+        mode_block = "\n".join(mode_lines).strip() or "No active mode policy."
         for idx, row in enumerate(memory_context[:8], start=1):
             title = str(row.get("name", "") or f"Node {row.get('node_id', idx)}")
             summary = str(row.get("summary", "") or "").strip()
@@ -3232,6 +4065,8 @@ class GraphWorkspaceService:
             "- Prioritize actionable next steps.\n"
             "- Use retrieved graph context when relevant.\n"
             f"{profile_block}\n"
+            "Active mode policy:\n"
+            f"{mode_block}\n"
             "Retrieved graph context:\n"
             f"{context_block}\n"
             "User message:\n"
@@ -3244,12 +4079,23 @@ class GraphWorkspaceService:
         *,
         message: str,
         memory_context: list[Mapping[str, Any]],
+        mode_policy: Mapping[str, Any] | None = None,
     ) -> str:
         lead = self._to_title(message, fallback="User request", limit=120)
+        mode_root = self._as_mapping(mode_policy)
+        mode_items = self._as_list(mode_root.get("memory_items"))
         if memory_context:
             hints = ", ".join(str(item.get("name", "")) for item in memory_context[:3] if str(item.get("name", "")).strip())
             if hints:
                 return f"{lead}. Context from your graph: {hints}. Next: refine goal, constraints, and first measurable action."
+        if mode_items:
+            hints = ", ".join(
+                str(self._as_mapping(item).get("name", "")).strip()
+                for item in mode_items[:3]
+                if str(self._as_mapping(item).get("name", "")).strip()
+            )
+            if hints:
+                return f"{lead}. Mode context in force: {hints}. Next: refine goal, constraints, and first measurable action."
         return f"{lead}. Next: define goal, constraints, and first measurable action."
 
     def _apply_wrapper_feedback_to_profile(
@@ -4018,6 +4864,8 @@ class GraphWorkspaceService:
         capture_dialect = self._to_bool(root.get("capture_dialect", True))
         auto_triage = self._to_bool(root.get("auto_triage", True))
         triage_with_llm = self._to_bool(root.get("triage_with_llm", True))
+        mode_node_id = self._to_int(root.get("mode_node_id", 0), 0)
+        use_mode_policy = self._to_bool(root.get("use_mode_policy", True))
         return {
             "message": message[:2400],
             "context": context[:2400],
@@ -4032,6 +4880,8 @@ class GraphWorkspaceService:
             "capture_dialect": capture_dialect,
             "auto_triage": auto_triage,
             "triage_with_llm": triage_with_llm,
+            "mode_node_id": mode_node_id,
+            "use_mode_policy": use_mode_policy,
         }
 
     def _normalize_archive_updates(self, value: Any) -> list[dict[str, Any]]:
@@ -4366,6 +5216,101 @@ class GraphWorkspaceService:
         )
         graph_binding["subject_binding"] = subject_binding
         return graph_binding
+
+    def _build_chat_graph_diff_payload(
+        self,
+        *,
+        snapshot: Mapping[str, Any],
+        graph_binding: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        root = self._as_mapping(snapshot)
+        nodes = self._as_list(root.get("nodes"))
+        edges = self._as_list(root.get("edges"))
+
+        nodes_by_id: dict[int, dict[str, Any]] = {}
+        for row in nodes:
+            item = self._as_mapping(row)
+            node_id = self._to_int(item.get("id", 0), 0)
+            if node_id > 0:
+                nodes_by_id[node_id] = item
+
+        binding = self._as_mapping(graph_binding)
+        subject_binding = self._as_mapping(binding.get("subject_binding"))
+        primary_node_ids: list[int] = []
+        for raw_id in [
+            self._to_int(binding.get("session_node_id", 0), 0),
+            *[self._to_int(item, 0) for item in self._as_list(binding.get("update_node_ids"))],
+            *[self._to_int(item, 0) for item in self._as_list(subject_binding.get("subject_branch_node_ids"))],
+            *[self._to_int(item, 0) for item in self._as_list(subject_binding.get("claim_node_ids"))],
+        ]:
+            if raw_id > 0 and raw_id not in primary_node_ids:
+                primary_node_ids.append(raw_id)
+
+        def _label_for_node(node_id: int) -> str:
+            row = self._as_mapping(nodes_by_id.get(node_id))
+            attrs = self._as_mapping(row.get("attributes"))
+            for key in ("label", "name", "title", "subject_name", "entity"):
+                value = " ".join(str(attrs.get(key, "") or "").split()).strip()
+                if value:
+                    return value
+            claim = " ".join(str(attrs.get("claim", "") or "").split()).strip()
+            if claim:
+                return claim[:96]
+            node_type = str(row.get("type", "node") or "node").strip() or "node"
+            return f"{node_type}:{node_id}"
+
+        diff_nodes: list[dict[str, Any]] = []
+        for node_id in primary_node_ids:
+            row = self._as_mapping(nodes_by_id.get(node_id))
+            if not row:
+                continue
+            diff_nodes.append(
+                {
+                    "id": node_id,
+                    "type": str(row.get("type", "node") or "node").strip() or "node",
+                    "label": _label_for_node(node_id),
+                }
+            )
+
+        primary_set = set(primary_node_ids)
+        diff_edges: list[dict[str, Any]] = []
+        for raw in edges:
+            edge = self._as_mapping(raw)
+            from_id = self._to_int(edge.get("from", 0), 0)
+            to_id = self._to_int(edge.get("to", 0), 0)
+            if from_id <= 0 or to_id <= 0:
+                continue
+            if from_id not in primary_set and to_id not in primary_set:
+                continue
+            relation_type = str(edge.get("relation_type", "") or "").strip()
+            diff_edges.append(
+                {
+                    "src_id": from_id,
+                    "src_label": _label_for_node(from_id),
+                    "dst_id": to_id,
+                    "dst_label": _label_for_node(to_id),
+                    "type": relation_type,
+                    "weight": round(self._to_float(edge.get("weight", 0.0), 0.0), 4),
+                    "direction": str(edge.get("direction", "directed") or "directed"),
+                    "logic_rule": str(edge.get("logic_rule", "explicit") or "explicit"),
+                }
+            )
+
+        diff_nodes.sort(key=lambda row: (str(row.get("type", "")), str(row.get("label", "")), int(row.get("id", 0))))
+        diff_edges.sort(
+            key=lambda row: (
+                str(row.get("type", "")),
+                str(row.get("src_label", "")),
+                str(row.get("dst_label", "")),
+            )
+        )
+        return {
+            "attached": bool(binding.get("attached", False)),
+            "node_count": len(diff_nodes),
+            "edge_count": len(diff_edges),
+            "nodes": diff_nodes,
+            "edges": diff_edges,
+        }
 
     def _build_archive_chat_reply(
         self,
@@ -6074,32 +7019,62 @@ class GraphWorkspaceService:
 
         for domain, concepts in _FOUNDATIONAL_DOMAIN_GRAPH.items():
             domain_details = dict(_FOUNDATIONAL_DOMAIN_DETAILS.get(domain, {}) or {})
+            localized_labels = dict(_FOUNDATIONAL_DOMAIN_LOCALIZED_LABELS.get(domain, {}) or {})
+            aliases = [str(item).strip() for item in list(domain_details.get("aliases", []) or []) if str(item).strip()]
             domain_description = str(
                 domain_details.get("description", f"Foundational domain: {domain}")
             ).strip() or f"Foundational domain: {domain}"
+            history_intro = str(domain_details.get("history_intro", "") or "").strip()
+            connections = list(domain_details.get("connections", []) or [])
+            usage = list(domain_details.get("usage", []) or [])
+            details_lines = [history_intro]
+            if connections:
+                details_lines.append(f"Connected fields: {', '.join(str(item).strip() for item in connections if str(item).strip())}")
+            if usage:
+                details_lines.append(f"Typical use: {', '.join(str(item).strip() for item in usage if str(item).strip())}")
+            domain_details_text = "\n".join(line for line in details_lines if line).strip()
             domain_node, created = self._ensure_shared_node(
                 node_type="domain",
                 identity_key="name",
                 identity_value=domain,
                 attributes={
                     "name": domain,
+                    "summary": domain_description,
+                    "details": domain_details_text,
                     "description": domain_description,
-                    "history_intro": str(domain_details.get("history_intro", "") or "").strip(),
-                    "connections": list(domain_details.get("connections", []) or []),
-                    "usage": list(domain_details.get("usage", []) or []),
+                    "history_intro": history_intro,
+                    "connections": connections,
+                    "usage": usage,
+                    "aliases": aliases,
+                    "localized_labels": localized_labels,
                 },
             )
             if domain_details:
                 # Always refresh enriched editorial fields for known domains in existing graphs.
+                domain_node.attributes["summary"] = domain_description
+                domain_node.attributes["details"] = domain_details_text
                 domain_node.attributes["description"] = domain_description
-                domain_node.attributes["history_intro"] = str(domain_details.get("history_intro", "") or "").strip()
-                domain_node.attributes["connections"] = list(domain_details.get("connections", []) or [])
-                domain_node.attributes["usage"] = list(domain_details.get("usage", []) or [])
+                domain_node.attributes["history_intro"] = history_intro
+                domain_node.attributes["connections"] = connections
+                domain_node.attributes["usage"] = usage
+                domain_node.attributes["aliases"] = aliases
+                domain_node.attributes["localized_labels"] = localized_labels
             domain_ids[domain] = int(domain_node.id)
             if created:
                 created_nodes += 1
 
             for concept_name in concepts:
+                concept_localized_labels = dict(_FOUNDATIONAL_CONCEPT_LOCALIZED_LABELS.get(concept_name, {}) or {})
+                concept_aliases = [
+                    str(value).strip()
+                    for key, value in concept_localized_labels.items()
+                    if key != "en" and str(value).strip()
+                ]
+                concept_summary = f"{concept_name} is a foundational concept within {domain}."
+                concept_details = (
+                    f"Seed concept linked to {domain}. Expand it with definitions, examples, counterexamples "
+                    "and related schools of thought when the user deepens this branch."
+                )
                 concept_node, concept_created = self._ensure_shared_node(
                     node_type="concept",
                     identity_key="name",
@@ -6107,10 +7082,19 @@ class GraphWorkspaceService:
                     attributes={
                         "name": concept_name,
                         "domain": domain,
+                        "summary": concept_summary,
+                        "details": concept_details,
                         "description": f"Core concept in {domain}",
+                        "aliases": concept_aliases,
+                        "localized_labels": concept_localized_labels,
                         "concept_id": self._stable_temp_concept_id(f"{domain}:{concept_name}"),
                     },
                 )
+                concept_node.attributes["summary"] = concept_summary
+                concept_node.attributes["details"] = concept_details
+                concept_node.attributes["description"] = f"Core concept in {domain}"
+                concept_node.attributes["aliases"] = concept_aliases
+                concept_node.attributes["localized_labels"] = concept_localized_labels
                 if concept_created:
                     created_nodes += 1
                 self._connect_nodes(
@@ -8764,6 +9748,405 @@ class GraphWorkspaceService:
             "modes_allowed": list(_LLM_POLICY_MODES_ALLOWED),
         }
 
+    def project_mode_policy_resolve(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        user_id = str(root.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(root.get("session_id", "") or "").strip()
+        message = " ".join(
+            str(root.get("message", root.get("prompt", root.get("text", ""))) or "").split()
+        ).strip()
+        context = " ".join(str(root.get("context", "") or "").split()).strip()
+        requested_role = self._debate_role(root.get("model_role", root.get("role", "general")), fallback="general")
+        mode_node_id = self._to_int(root.get("mode_node_id", 0), 0)
+        use_mode_policy = self._to_bool(root.get("use_mode_policy", True))
+        resolved = self._resolve_context_mode_policy(
+            user_id=user_id,
+            session_id=session_id,
+            message=message,
+            context=context,
+            requested_role=requested_role,
+            mode_node_id=mode_node_id,
+            enabled=use_mode_policy,
+        )
+        return {
+            "user_id": user_id,
+            "session_id": session_id,
+            "input": {
+                "message": message,
+                "context": context,
+                "requested_role": requested_role,
+                "mode_node_id": mode_node_id,
+            },
+            "mode_policy": resolved,
+            "updated_at": float(time.time()),
+        }
+
+    def project_context_mode_upsert(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        user_id = str(root.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(root.get("session_id", "") or "").strip()
+        existing = self._find_context_mode_node(mode_node_id=root.get("mode_node_id", 0), user_id=user_id)
+        existing_attrs = self._as_mapping(getattr(existing, "attributes", {})) if existing is not None else {}
+        existing_state = self._as_mapping(getattr(existing, "state", {})) if existing is not None else {}
+
+        name = " ".join(
+            str(root.get("name", existing_attrs.get("name", existing_attrs.get("title", ""))) or "").split()
+        ).strip()
+        if not name:
+            name = f"Mode {max(1, len([node for node in self.api.engine.store.nodes.values() if str(getattr(node, 'type', '') or '').strip() == 'context_mode']) + (0 if existing else 1))}"
+        domain = " ".join(
+            str(root.get("domain", existing_attrs.get("domain", "general")) or "general").split()
+        ).strip() or "general"
+        prompt_guardrails = " ".join(
+            str(
+                root.get(
+                    "prompt_guardrails",
+                    root.get("prompt", existing_attrs.get("prompt_guardrails", "")),
+                )
+                or ""
+            ).split()
+        ).strip()
+        protected_memory = " ".join(
+            str(root.get("protected_memory", existing_attrs.get("protected_memory", "")) or "").split()
+        ).strip()
+        llm_role = self._debate_role(root.get("llm_role", existing_attrs.get("llm_role", "analyst")), fallback="analyst")
+        summary = " ".join(
+            str(root.get("summary", existing_attrs.get("summary", f"Persistent context mode for {domain}.")) or "").split()
+        ).strip() or f"Persistent context mode for {domain}."
+
+        now_ts = time.time()
+        if existing is None:
+            node = self.api.engine.create_node(
+                "context_mode",
+                attributes={
+                    "user_id": user_id,
+                    "last_session_id": session_id,
+                    "name": name,
+                    "title": name,
+                    "summary": summary,
+                    "domain": domain,
+                    "prompt_guardrails": prompt_guardrails,
+                    "protected_memory": protected_memory,
+                    "llm_role": llm_role,
+                    "memory_strategy": "weighted_top_k",
+                    "created_at": now_ts,
+                    "updated_at": now_ts,
+                },
+                state={
+                    "context_weight": max(0.25, self._to_float(root.get("context_weight", 1.0), 1.0)),
+                    "helpful_count": 0,
+                    "correction_count": 0,
+                },
+            )
+            action = "created"
+        else:
+            node = existing
+            node.attributes["user_id"] = str(existing_attrs.get("user_id", user_id) or user_id).strip() or user_id
+            node.attributes["last_session_id"] = session_id
+            node.attributes["name"] = name
+            node.attributes["title"] = name
+            node.attributes["summary"] = summary
+            node.attributes["domain"] = domain
+            node.attributes["prompt_guardrails"] = prompt_guardrails
+            node.attributes["protected_memory"] = protected_memory
+            node.attributes["llm_role"] = llm_role
+            node.attributes["memory_strategy"] = "weighted_top_k"
+            node.attributes["updated_at"] = now_ts
+            node.state["context_weight"] = max(
+                0.25,
+                self._to_float(root.get("context_weight", existing_state.get("context_weight", 1.0)), 1.0),
+            )
+            node.state["helpful_count"] = self._to_int(existing_state.get("helpful_count", 0), 0)
+            node.state["correction_count"] = self._to_int(existing_state.get("correction_count", 0), 0)
+            action = "updated"
+
+        persisted = self._auto_persist_after_write()
+        resolved = self._resolve_context_mode_policy(
+            user_id=user_id,
+            session_id=session_id,
+            message="",
+            context="",
+            requested_role=llm_role,
+            mode_node_id=int(node.id),
+            enabled=True,
+        )
+        self.api.engine._record_event(  # noqa: SLF001
+            "context_mode_saved",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "mode_node_id": int(node.id),
+                "action": action,
+                "domain": domain,
+                "llm_role": llm_role,
+            },
+        )
+        return {
+            "ok": True,
+            "action": action,
+            "persisted": bool(persisted),
+            "mode": {
+                "mode_node_id": int(node.id),
+                "name": name,
+                "domain": domain,
+                "llm_role": llm_role,
+            },
+            "mode_policy": resolved,
+            **self.snapshot_payload(),
+        }
+
+    def project_context_mode_capture_focus(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        user_id = str(root.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(root.get("session_id", "") or "").strip()
+        mode_node = self._find_context_mode_node(mode_node_id=root.get("mode_node_id", 0), user_id=user_id)
+        if mode_node is None:
+            raise ValueError("mode_node_id is required")
+
+        attrs = self._as_mapping(getattr(mode_node, "attributes", {}))
+        manual_capture = self._to_bool(root.get("manual_capture", True))
+        default_weight = 0.92 if manual_capture else 0.58
+        weight = max(0.05, min(1.5, self._to_float(root.get("weight", default_weight), default_weight)))
+        name = " ".join(str(root.get("name", "") or "").split()).strip()
+        summary = " ".join(str(root.get("summary", "") or "").split()).strip()
+        details = " ".join(str(root.get("details", "") or root.get("note", "") or "").split()).strip()
+        subject = " ".join(str(root.get("subject", "") or "").split()).strip()
+        if not name:
+            name = subject or self._to_title(summary or details, fallback="Important Context", limit=120)
+        if not summary and not details:
+            raise ValueError("summary or details is required")
+
+        focus_node = self.api.engine.create_node(
+            "context_focus",
+            attributes={
+                "user_id": user_id,
+                "session_id": session_id,
+                "name": name,
+                "title": name,
+                "summary": summary or details[:280],
+                "details": details,
+                "subject": subject,
+                "source": str(root.get("source", "context_mode") or "context_mode").strip() or "context_mode",
+                "domain": str(attrs.get("domain", "") or "").strip(),
+                "protected": bool(manual_capture),
+                "created_at": time.time(),
+                "updated_at": time.time(),
+            },
+            state={
+                "importance": weight,
+                "protected": bool(manual_capture),
+                "helpful_count": 0,
+                "correction_count": 0,
+                "learned_priority": weight,
+            },
+        )
+        self._connect_nodes(
+            from_node=int(mode_node.id),
+            to_node=int(focus_node.id),
+            relation_type="mode_focus",
+            weight=weight,
+            logic_rule="context_mode_manual_focus" if manual_capture else "context_mode_auto_focus",
+            metadata={
+                "source": str(root.get("source", "context_mode") or "context_mode").strip() or "context_mode",
+                "manual_capture": bool(manual_capture),
+                "mode_name": str(attrs.get("name", "") or "").strip(),
+                "helpful_count": 0,
+                "correction_count": 0,
+                "learned_score": round(weight, 4),
+            },
+        )
+        persisted = self._auto_persist_after_write()
+        resolved = self._resolve_context_mode_policy(
+            user_id=user_id,
+            session_id=session_id,
+            message=summary or details,
+            context="",
+            requested_role=str(attrs.get("llm_role", "analyst") or "analyst"),
+            mode_node_id=int(mode_node.id),
+            enabled=True,
+        )
+        self.api.engine._record_event(  # noqa: SLF001
+            "context_focus_captured",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "mode_node_id": int(mode_node.id),
+                "focus_node_id": int(focus_node.id),
+                "manual_capture": bool(manual_capture),
+                "weight": round(weight, 4),
+            },
+        )
+        return {
+            "ok": True,
+            "persisted": bool(persisted),
+            "focus": {
+                "focus_node_id": int(focus_node.id),
+                "mode_node_id": int(mode_node.id),
+                "name": name,
+                "weight": round(weight, 4),
+                "manual_capture": bool(manual_capture),
+            },
+            "mode_policy": resolved,
+            **self.snapshot_payload(),
+        }
+
+    def project_context_mode_feedback(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        user_id = str(root.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(root.get("session_id", "") or "").strip()
+        mode_node = self._find_context_mode_node(mode_node_id=root.get("mode_node_id", 0), user_id=user_id)
+        if mode_node is None:
+            raise ValueError("mode_node_id is required")
+
+        decision = "bad" if str(root.get("decision", root.get("kind", "good")) or "").strip().lower() == "bad" else "good"
+        mode_attrs = self._as_mapping(getattr(mode_node, "attributes", {}))
+        mode_state = self._as_mapping(getattr(mode_node, "state", {}))
+        helpful = self._to_int(mode_state.get("helpful_count", 0), 0) + (1 if decision == "good" else 0)
+        corrections = self._to_int(mode_state.get("correction_count", 0), 0) + (1 if decision == "bad" else 0)
+        current_weight = self._to_float(mode_state.get("context_weight", 1.0), 1.0)
+        next_context_weight = max(0.25, min(2.25, current_weight + (0.08 if decision == "good" else -0.08)))
+
+        mode_node.state["helpful_count"] = helpful
+        mode_node.state["correction_count"] = corrections
+        mode_node.state["context_weight"] = next_context_weight
+        mode_node.state["last_feedback"] = decision
+        mode_node.state["last_feedback_at"] = time.time()
+        mode_node.attributes["last_feedback_summary"] = " ".join(
+            str(root.get("summary", root.get("message", "")) or "").split()
+        ).strip()[:600]
+        mode_node.attributes["updated_at"] = time.time()
+
+        target_focus_id = self._to_int(root.get("target_focus_node_id", 0), 0)
+        target_edge = self._find_context_focus_edge(mode_node_id=int(mode_node.id), focus_node_id=target_focus_id)
+        if target_edge is None and target_focus_id <= 0:
+            ranked_focus_edges: list[tuple[float, Any, Any]] = []
+            for edge in self.api.engine.store.edges:
+                if self._to_int(getattr(edge, "from_node", 0), 0) != int(mode_node.id):
+                    continue
+                if str(getattr(edge, "relation_type", "") or "").strip() != "mode_focus":
+                    continue
+                target = self.api.engine.store.nodes.get(self._to_int(getattr(edge, "to_node", 0), 0))
+                if target is None:
+                    continue
+                ranked_focus_edges.append(
+                    (
+                        self._context_focus_rank(edge=edge, target=target, mode_state=mode_node.state),
+                        edge,
+                        target,
+                    )
+                )
+            if ranked_focus_edges:
+                ranked_focus_edges.sort(key=lambda row: row[0], reverse=True)
+                target_edge = ranked_focus_edges[0][1]
+
+        target_focus_node = None
+        if target_edge is not None:
+            target_focus_node = self.api.engine.store.nodes.get(self._to_int(getattr(target_edge, "to_node", 0), 0))
+            if target_focus_node is not None:
+                target_state = self._as_mapping(getattr(target_focus_node, "state", {}))
+                target_attrs = self._as_mapping(getattr(target_focus_node, "attributes", {}))
+                focus_helpful = self._to_int(target_state.get("helpful_count", 0), 0) + (1 if decision == "good" else 0)
+                focus_corrections = self._to_int(target_state.get("correction_count", 0), 0) + (1 if decision == "bad" else 0)
+                target_focus_node.state["helpful_count"] = focus_helpful
+                target_focus_node.state["correction_count"] = focus_corrections
+                target_focus_node.state["last_feedback"] = decision
+                target_focus_node.state["learned_priority"] = round(
+                    self._context_feedback_ratio(helpful=focus_helpful, corrections=focus_corrections),
+                    4,
+                )
+                target_focus_node.attributes["updated_at"] = time.time()
+                target_focus_node.attributes["last_feedback_summary"] = " ".join(
+                    str(root.get("summary", root.get("message", "")) or "").split()
+                ).strip()[:600]
+                edge_metadata = self._as_mapping(getattr(target_edge, "metadata", {}))
+                edge_helpful = self._to_int(edge_metadata.get("helpful_count", 0), 0) + (1 if decision == "good" else 0)
+                edge_corrections = self._to_int(edge_metadata.get("correction_count", 0), 0) + (1 if decision == "bad" else 0)
+                target_edge.weight = max(
+                    0.05,
+                    min(
+                        1.5,
+                        self._to_float(getattr(target_edge, "weight", 0.58), 0.58)
+                        + (0.08 if decision == "good" else -0.12),
+                    ),
+                )
+                target_edge.logic_rule = str(getattr(target_edge, "logic_rule", "") or "context_mode_feedback").strip() or "context_mode_feedback"
+                target_edge.metadata = {
+                    **edge_metadata,
+                    "helpful_count": edge_helpful,
+                    "correction_count": edge_corrections,
+                    "last_feedback": decision,
+                    "learned_score": round(
+                        self._context_feedback_ratio(helpful=edge_helpful, corrections=edge_corrections),
+                        4,
+                    ),
+                }
+
+                feedback_node = self.api.engine.create_node(
+                    "context_feedback",
+                    attributes={
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "name": "helped" if decision == "good" else "needs_correction",
+                        "summary": " ".join(
+                            str(root.get("summary", root.get("message", "")) or "").split()
+                        ).strip()[:320]
+                        or ("The mode helped." if decision == "good" else "The mode needs correction."),
+                        "details": " ".join(str(root.get("details", "") or "").split()).strip()[:1200],
+                        "feedback_type": decision,
+                        "source": "context_mode_feedback",
+                        "created_at": time.time(),
+                    },
+                    state={"signal": 0.85 if decision == "good" else 0.25},
+                )
+                self._connect_nodes(
+                    from_node=int(mode_node.id),
+                    to_node=int(feedback_node.id),
+                    relation_type="mode_feedback",
+                    weight=0.84 if decision == "good" else 0.46,
+                    logic_rule="context_mode_feedback",
+                    metadata={"feedback": decision},
+                )
+                self._connect_nodes(
+                    from_node=int(feedback_node.id),
+                    to_node=int(target_focus_node.id),
+                    relation_type="feedbacks_focus",
+                    weight=0.8 if decision == "good" else 0.42,
+                    logic_rule="context_mode_feedback",
+                    metadata={"feedback": decision},
+                )
+
+        persisted = self._auto_persist_after_write()
+        resolved = self._resolve_context_mode_policy(
+            user_id=user_id,
+            session_id=session_id,
+            message=str(root.get("summary", root.get("message", "")) or ""),
+            context="",
+            requested_role=str(mode_attrs.get("llm_role", "analyst") or "analyst"),
+            mode_node_id=int(mode_node.id),
+            enabled=True,
+        )
+        self.api.engine._record_event(  # noqa: SLF001
+            "context_mode_feedback_saved",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "mode_node_id": int(mode_node.id),
+                "target_focus_node_id": int(getattr(target_focus_node, "id", 0) or 0),
+                "decision": decision,
+            },
+        )
+        return {
+            "ok": True,
+            "persisted": bool(persisted),
+            "feedback": {
+                "decision": decision,
+                "mode_node_id": int(mode_node.id),
+                "target_focus_node_id": int(getattr(target_focus_node, "id", 0) or 0),
+            },
+            "mode_policy": resolved,
+            **self.snapshot_payload(),
+        }
+
     def project_llm_policy_update(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         root = self._as_mapping(payload)
         merge_lists = self._to_bool(root.get("merge_lists", True))
@@ -9257,6 +10640,9 @@ class GraphWorkspaceService:
         requested_role = root.get("role", root.get("model_role", preferred_role))
         role = self._debate_role(requested_role, fallback=preferred_role or "general")
         model_path = str(root.get("model_path", profile.get("preferred_model_path", "")) or "").strip()
+        raw_context = " ".join(str(root.get("context", "") or "").split()).strip()
+        mode_node_id = self._to_int(root.get("mode_node_id", 0), 0)
+        use_mode_policy = self._to_bool(root.get("use_mode_policy", True))
         use_memory = self._to_bool(root.get("use_memory", True))
         memory_scope = self._pick_allowed_token(
             root.get("memory_scope", profile.get("memory_scope", "owned")),
@@ -9282,6 +10668,16 @@ class GraphWorkspaceService:
             if use_memory
             else []
         )
+        mode_policy = self._resolve_context_mode_policy(
+            user_id=user_id,
+            session_id=session_id,
+            message=message,
+            context=raw_context,
+            requested_role=role,
+            mode_node_id=mode_node_id,
+            enabled=use_mode_policy,
+        )
+        role = self._debate_role(mode_policy.get("resolved_role", role), fallback=role)
 
         llm_fn, resolution = self._resolve_role_or_model_llm(
             role=role,
@@ -9291,6 +10687,7 @@ class GraphWorkspaceService:
             message=message,
             personalization=personalization,
             memory_context=memory_context,
+            mode_policy=mode_policy,
         )
         raw_output = ""
         reply = ""
@@ -9306,6 +10703,7 @@ class GraphWorkspaceService:
             reply = self._wrapper_fallback_reply(
                 message=message,
                 memory_context=memory_context,
+                mode_policy=mode_policy,
             )
 
         apply_profile_update = self._to_bool(root.get("apply_profile_update", True))
@@ -9429,6 +10827,8 @@ class GraphWorkspaceService:
                 "llm_available": llm_fn is not None,
                 "used_fallback": bool(used_fallback),
                 "context_nodes": len(memory_context),
+                "mode_policy_node_id": self._to_int(mode_policy.get("mode_node_id", 0), 0),
+                "mode_policy_fallback": bool(mode_policy.get("fallback_used", False)),
                 "session_node_id": int(session_node_id),
                 "gossip_detected": bool(subject_binding.get("gossip_detected", False)),
                 "subject_branch_attached": bool(subject_binding.get("attached", False)),
@@ -9473,6 +10873,7 @@ class GraphWorkspaceService:
                 "top_k": memory_top_k,
                 "context": memory_context,
             },
+            "mode_policy": mode_policy,
             "profile": self._wrapper_profile_payload(profile_node),
             "feedback": feedback_summary,
             "subject_binding": subject_binding,
@@ -10122,6 +11523,8 @@ class GraphWorkspaceService:
                 "task_risk_board": True,
                 "timeline_replay": True,
                 "llm_policy_layer": True,
+                "mode_policy_layer": True,
+                "context_mode_manager": True,
                 "quality_harness": True,
                 "backup_restore": True,
                 "audit_logs": True,
@@ -10137,7 +11540,7 @@ class GraphWorkspaceService:
                 "models_dir": str(os.getenv("LOCAL_MODELS_DIR", "models/gguf") or "models/gguf"),
                 "detected_models": [],
                 "advisors": [],
-                "translator_policy": "translator_gguf_only",
+                "translator_policy": "optional_if_available",
                 "translator_priority": "madlad400",
                 "error": str(exc),
             }
@@ -10318,7 +11721,7 @@ class GraphWorkspaceService:
 
         context = str(sanitized.get("context", "") or "").strip()
         model_path = str(sanitized.get("model_path", "") or "").strip()
-        model_role = str(sanitized.get("model_role", "general") or "general").strip() or "general"
+        requested_model_role = str(sanitized.get("model_role", "general") or "general").strip() or "general"
         top_k = max(1, min(8, self._to_int(sanitized.get("top_k", 3), 3)))
         verification_mode = str(sanitized.get("verification_mode", "strict") or "strict").strip() or "strict"
         apply_to_graph = self._to_bool(sanitized.get("apply_to_graph", True))
@@ -10328,10 +11731,27 @@ class GraphWorkspaceService:
         capture_dialect = self._to_bool(sanitized.get("capture_dialect", True))
         auto_triage = self._to_bool(sanitized.get("auto_triage", True))
         triage_with_llm = self._to_bool(sanitized.get("triage_with_llm", True))
+        mode_node_id = self._to_int(sanitized.get("mode_node_id", 0), 0)
+        use_mode_policy = self._to_bool(sanitized.get("use_mode_policy", True))
+
+        mode_policy = self._resolve_context_mode_policy(
+            user_id=user_id,
+            session_id=session_id,
+            message=message,
+            context=context,
+            requested_role=requested_model_role,
+            mode_node_id=mode_node_id,
+            enabled=use_mode_policy,
+        )
+        effective_context = str(mode_policy.get("effective_context", "") or "").strip() or context
+        effective_model_role = self._debate_role(
+            mode_policy.get("resolved_role", requested_model_role),
+            fallback=requested_model_role,
+        )
 
         llm_fn, selected_model_path, resolution_mode = self._resolve_archive_chat_llm(
             model_path=model_path,
-            model_role=model_role,
+            model_role=effective_model_role,
         )
         if llm_fn is None:
             raise ValueError("archive chat model is unavailable; configure LOCAL_GGUF_MODEL or provide valid model_path")
@@ -10364,7 +11784,7 @@ class GraphWorkspaceService:
             "- Keep updates concise and practical.\n"
             f"Verification mode: {verification_mode}\n"
             f"User message: {message}\n"
-            f"Context: {context}\n"
+            f"Context: {effective_context}\n"
             "Return JSON with this schema:\n"
             f"{update_schema}"
         )
@@ -10399,11 +11819,11 @@ class GraphWorkspaceService:
             user_id=user_id,
             session_id=session_id,
             message=message,
-            context=context,
+            context=effective_context,
             summary=summary,
             updates=updates,
             verification=verification,
-            model_role=model_role,
+            model_role=effective_model_role,
             model_path=selected_path,
             resolution_mode=resolution_mode,
             raw_output=raw_output,
@@ -10438,7 +11858,7 @@ class GraphWorkspaceService:
             updates=updates,
             auto_triage=auto_triage,
             triage_with_llm=triage_with_llm,
-            model_role=model_role,
+            model_role=effective_model_role,
             model_path=selected_path,
             attach_to_graph=bool(apply_to_graph),
             related_node_id=self._to_int(graph_binding.get("session_node_id", 0), 0),
@@ -10447,7 +11867,8 @@ class GraphWorkspaceService:
                 "mode": resolution_mode,
                 "selected_model_path": selected_path,
                 "requested_model_path": model_path,
-                "requested_role": model_role,
+                "requested_role": requested_model_role,
+                "effective_role": effective_model_role,
             },
         )
         graph_monitor = self._run_graph_monitor(
@@ -10474,13 +11895,15 @@ class GraphWorkspaceService:
             {
                 "user_id": user_id,
                 "session_id": session_id,
-                "model_role": model_role,
+                "model_role": effective_model_role,
                 "model_path": selected_path,
                 "resolution_mode": resolution_mode,
                 "verified": bool(verification.get("verified", False)),
                 "updates_count": len(updates),
                 "hallucination_guard_hits": int(verification.get("hallucination_guard_hits", 0) or 0),
                 "verification_mode": verification_mode,
+                "mode_policy_node_id": self._to_int(mode_policy.get("mode_node_id", 0), 0),
+                "mode_policy_fallback": bool(mode_policy.get("fallback_used", False)),
                 "attached_to_graph": bool(graph_binding.get("attached", False)),
                 "gossip_detected": bool(
                     self._as_mapping(graph_binding.get("subject_binding")).get("gossip_detected", False)
@@ -10504,9 +11927,11 @@ class GraphWorkspaceService:
                 "model": {
                     "requested_model_path": model_path,
                     "selected_model_path": selected_path,
-                    "requested_role": model_role,
+                    "requested_role": requested_model_role,
+                    "effective_role": effective_model_role,
                     "used_fallback": bool(resolution_mode != "model"),
                 },
+                "mode_policy": mode_policy,
             },
             graph_monitor=graph_monitor,
             extra={
@@ -10521,17 +11946,20 @@ class GraphWorkspaceService:
             "model": {
                 "requested_model_path": model_path,
                 "selected_model_path": selected_path,
-                "model_role": model_role,
+                "requested_model_role": requested_model_role,
+                "effective_model_role": effective_model_role,
                 "resolution_mode": resolution_mode,
             },
             "input": {
                 "message": message,
                 "context": context,
+                "effective_context": effective_context,
             },
             "assistant_reply": assistant_reply,
             "summary": summary,
             "archive_updates": updates,
             "verification": verification,
+            "mode_policy": mode_policy,
             "graph_binding": graph_binding,
             "subject_binding": self._as_mapping(graph_binding.get("subject_binding")),
             "gossip_detected": bool(
@@ -10550,6 +11978,250 @@ class GraphWorkspaceService:
             },
             "raw_output": raw_output[:6000],
             **self.snapshot_payload(),
+        }
+
+    def project_chat_graph(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        root = self._as_mapping(payload)
+        user_id = str(root.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(root.get("session_id", "") or "").strip()
+        message = " ".join(str(root.get("message", "") or "").split()).strip()
+        if not message:
+            raise ValueError("message is required")
+
+        context = " ".join(str(root.get("context", "") or "").split()).strip()
+        chat_model_path = str(root.get("chat_model_path", "") or "").strip() or _DEFAULT_GRAPH_MONITOR_MODEL_PATH
+        chat_model_role = self._debate_role(root.get("chat_model_role", "general"), fallback="general")
+        parser_backend = self._pick_allowed_token(
+            root.get("parser_backend", "local"),
+            allowed=("local", "ollama"),
+            default="local",
+        )
+        parser_model_path = str(root.get("parser_model_path", "") or "").strip() or _DEFAULT_STRUCTURED_INPUT_MODEL_PATH
+        parser_model_role = self._debate_role(root.get("parser_model_role", "analyst"), fallback="analyst")
+        parser_ollama_model = str(root.get("parser_ollama_model", "") or "").strip() or _DEFAULT_CHAT_PARSER_OLLAMA_MODEL
+        apply_to_graph = self._to_bool(root.get("apply_to_graph", True))
+        use_internet = self._to_bool(root.get("use_internet", True))
+        top_k = max(1, min(8, self._to_int(root.get("top_k", 4), 4)))
+        verification_mode = self._pick_allowed_token(
+            root.get("verification_mode", "balanced"),
+            allowed=_ARCHIVE_VERIFICATION_MODES_ALLOWED,
+            default="balanced",
+        )
+
+        web_context = {"enabled": bool(use_internet), "terms": [], "snippets": [], "warning": ""}
+        if use_internet:
+            web_context = collect_web_context(message, limit=3)
+
+        snapshot = self.snapshot_payload().get("snapshot", {})
+        graph_nodes = [self._as_mapping(row) for row in self._as_list(self._as_mapping(snapshot).get("nodes"))]
+        focus_lines: list[str] = []
+        for row in graph_nodes[:10]:
+            attrs = self._as_mapping(row.get("attributes"))
+            label = " ".join(
+                str(attrs.get("title") or attrs.get("name") or attrs.get("profile_name") or row.get("type") or "").split()
+            ).strip()
+            summary = " ".join(
+                str(
+                    attrs.get("summary")
+                    or attrs.get("description")
+                    or attrs.get("details")
+                    or attrs.get("notes")
+                    or ""
+                ).split()
+            ).strip()
+            if label or summary:
+                focus_lines.append(f"- {label or row.get('type', 'node')}: {summary[:180]}")
+        graph_context = "\n".join(focus_lines[:8]).strip()
+
+        chat_llm, chat_resolution = self._resolve_role_or_model_llm(
+            role=chat_model_role,
+            model_path=chat_model_path,
+        )
+        if chat_llm is None:
+            raise ValueError("chat model is unavailable; configure LOCAL_GGUF_MODEL or provide a valid Mistral path")
+
+        web_lines = [
+            f"- {item.get('title', 'source')}: {item.get('snippet', '')}"
+            for item in self._as_list(web_context.get("snippets"))
+            if str(self._as_mapping(item).get("snippet", "")).strip()
+        ]
+        chat_prompt_parts = [
+            "You are a practical conversational assistant inside a graph workspace.",
+            "Answer like a capable interlocutor, not a dry reference manual.",
+            "Use graph context and web snippets when relevant, but say when evidence is thin.",
+            "Keep the reply structured, direct, and readable.",
+            f"User message: {message}",
+        ]
+        if context:
+            chat_prompt_parts.append(f"Extra context: {context}")
+        if graph_context:
+            chat_prompt_parts.append(f"Graph context:\n{graph_context}")
+        if web_lines:
+            chat_prompt_parts.append("Internet snippets:\n" + "\n".join(web_lines[:3]))
+        assistant_reply = "I could not generate a grounded reply."
+        chat_raw = ""
+        try:
+            chat_raw = str(chat_llm("\n".join(chat_prompt_parts)) or "").strip()
+        except Exception:
+            chat_raw = ""
+        if chat_raw:
+            assistant_reply = " ".join(chat_raw.split()).strip() or assistant_reply
+
+        parser_llm = None
+        parser_resolution = {
+            "mode": "unavailable",
+            "requested_model_path": parser_model_path,
+            "selected_model_path": parser_model_path if parser_backend == "local" else "",
+            "requested_role": parser_model_role,
+            "backend": parser_backend,
+            "ollama_model": parser_ollama_model,
+        }
+        if parser_backend == "ollama":
+            parser_llm = self._build_ollama_llm(parser_ollama_model)
+            if parser_llm is not None:
+                parser_resolution["mode"] = "ollama"
+        else:
+            parser_llm, base_resolution = self._resolve_role_or_model_llm(
+                role=parser_model_role,
+                model_path=parser_model_path,
+            )
+            parser_resolution.update(dict(base_resolution))
+            parser_resolution["backend"] = "local"
+            parser_resolution["ollama_model"] = ""
+        if parser_llm is None:
+            raise ValueError("parser model is unavailable; configure local Qwen path or OLLAMA parser model")
+
+        update_schema = (
+            "{\n"
+            '  "summary": "short summary",\n'
+            '  "archive_updates": [\n'
+            "    {\n"
+            '      "entity": "string",\n'
+            '      "field": "string",\n'
+            '      "operation": "upsert|append|correct|deprecate",\n'
+            '      "value": "any-json-value",\n'
+            '      "reason": "why this update is needed",\n'
+            '      "source": "verified source or evidence",\n'
+            '      "confidence": 0.0,\n'
+            '      "tags": ["optional"]\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+        )
+        parser_prompt = (
+            "You are a structured JSON parser for graph archive maintenance.\n"
+            "Task: read the user message, assistant reply, graph context, and optional internet snippets.\n"
+            "Output only JSON updates that should be stored in the graph.\n"
+            "Do not write explanations outside JSON.\n"
+            f"User message: {message}\n"
+            f"Assistant reply: {assistant_reply}\n"
+            f"Graph context: {graph_context}\n"
+            f"Internet snippets: {' | '.join(web_lines[:3])}\n"
+            "Return JSON with this schema:\n"
+            f"{update_schema}"
+        )
+        parser_raw = ""
+        try:
+            parser_raw = str(parser_llm(parser_prompt) or "").strip()
+        except Exception:
+            parser_raw = ""
+        parsed_output = self._extract_json_from_llm_output(parser_raw)
+        updates: list[dict[str, Any]] = []
+        summary = ""
+        if isinstance(parsed_output, Mapping):
+            summary = " ".join(str(parsed_output.get("summary", "") or "").split()).strip()
+            updates = self._normalize_archive_updates(parsed_output.get("archive_updates", parsed_output.get("updates", [])))
+        elif isinstance(parsed_output, list):
+            updates = self._normalize_archive_updates(parsed_output)
+        if not updates:
+            summary, updates = self._heuristic_input_updates(
+                source="chat_graph",
+                text=f"{message}\n{assistant_reply}",
+                context=context,
+                limit=4,
+            )
+
+        verification = self._verify_archive_updates(
+            user_id=user_id,
+            message=message,
+            updates=updates,
+            verification_mode=verification_mode,
+            top_k=top_k,
+        )
+        effective_context = context
+        if web_lines:
+            effective_context = "\n".join([context, "Internet snippets:", *web_lines[:3]]).strip()
+        graph_binding = self._attach_archive_updates_to_graph(
+            user_id=user_id,
+            session_id=session_id,
+            message=message,
+            context=effective_context,
+            summary=summary,
+            updates=updates,
+            verification=verification,
+            model_role=parser_model_role,
+            model_path=parser_model_path if parser_backend == "local" else parser_ollama_model,
+            resolution_mode=str(parser_resolution.get("mode", parser_backend) or parser_backend),
+            raw_output=parser_raw,
+            verification_mode=verification_mode,
+            apply_to_graph=apply_to_graph,
+        )
+        persisted = self._auto_persist_after_write() if apply_to_graph else False
+        self.api.engine._record_event(  # noqa: SLF001
+            "project_chat_graph_completed",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "chat_model_path": chat_model_path,
+                "parser_backend": parser_backend,
+                "parser_model_path": parser_model_path,
+                "parser_ollama_model": parser_ollama_model,
+                "web_snippets": len(self._as_list(web_context.get("snippets"))),
+                "updates_count": len(updates),
+                "verified": bool(verification.get("verified", False)),
+                "attached_to_graph": bool(graph_binding.get("attached", False)),
+            },
+        )
+        execution = self._execution_status(
+            action="project_chat_graph",
+            persisted=persisted,
+            input_extraction={
+                "enabled": True,
+                "source": "chat_graph",
+                "summary": summary,
+                "updates": updates,
+                "verification": verification,
+                "graph_binding": graph_binding,
+            },
+            extra={"updates_count": len(updates), "web_snippets": len(self._as_list(web_context.get("snippets")))},
+        )
+        snapshot_payload = self.snapshot_payload()
+        graph_diff = self._build_chat_graph_diff_payload(
+            snapshot=self._as_mapping(snapshot_payload.get("snapshot")),
+            graph_binding=graph_binding,
+        )
+        return {
+            "ok": True,
+            "user_id": user_id,
+            "session_id": session_id,
+            "assistant_reply": assistant_reply,
+            "summary": summary,
+            "archive_updates": updates,
+            "verification": verification,
+            "graph_binding": graph_binding,
+            "web_context": web_context,
+            "chat_model": {
+                "requested_model_path": chat_model_path,
+                "requested_role": chat_model_role,
+                "resolution": chat_resolution,
+            },
+            "parser_model": parser_resolution,
+            "execution": execution,
+            "persisted": bool(persisted),
+            "graph_diff": graph_diff,
+            "raw_chat_output": chat_raw[:4000],
+            "raw_parser_output": parser_raw[:4000],
+            **snapshot_payload,
         }
 
     def project_graph_node_assist(self, payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -11036,7 +12708,9 @@ class GraphWorkspaceService:
         clean_topic = " ".join(str(root.get("topic", root.get("message", "")) or "").split()).strip()
         clean_context = " ".join(str(root.get("context", "") or "").split()).strip()
         requested_model_path = str(root.get("model_path", "") or "").strip() or _DEFAULT_GRAPH_MONITOR_MODEL_PATH
-        resolved_role = self._debate_role(root.get("model_role", "planner"), fallback="planner")
+        requested_role = self._debate_role(root.get("model_role", "planner"), fallback="planner")
+        user_id = str(root.get("user_id", "default_user") or "default_user").strip() or "default_user"
+        session_id = str(root.get("session_id", "") or "").strip()
 
         snapshot = self._as_mapping(self.snapshot_payload().get("snapshot"))
         nodes = [self._as_mapping(row) for row in self._as_list(snapshot.get("nodes"))]
@@ -11070,6 +12744,20 @@ class GraphWorkspaceService:
         foundation_topic = clean_topic or target_label
         if not foundation_topic:
             raise ValueError("topic is required or select a node to deepen")
+        mode_policy = self._resolve_context_mode_policy(
+            user_id=user_id,
+            session_id=session_id,
+            message=foundation_topic,
+            context=clean_context,
+            requested_role=requested_role,
+            mode_node_id=self._to_int(root.get("mode_node_id", 0), 0),
+            enabled=self._to_bool(root.get("use_mode_policy", True)),
+        )
+        clean_context = str(mode_policy.get("effective_context", "") or "").strip() or clean_context
+        resolved_role = self._debate_role(mode_policy.get("resolved_role", requested_role), fallback=requested_role)
+        foundation_kind = self._foundation_kind_hint(foundation_topic, clean_context, target_label, target_summary)
+        frame_plan = self._foundation_frame_plan(foundation_kind, foundation_topic)[:concept_limit]
+        allowed_link_types = self._foundation_allowed_link_types()
 
         llm_fn, resolution = self._resolve_role_or_model_llm(
             role=resolved_role,
@@ -11080,14 +12768,27 @@ class GraphWorkspaceService:
         used_fallback = True
         if llm_fn is not None:
             prompt_parts = [
-                "You design a compact knowledge-graph foundation for a user workspace.",
+                "You design a compact, logically structured knowledge-graph foundation for a user workspace.",
                 "Return JSON only.",
-                'Schema: { "title":"", "summary":"", "concepts":[{ "name":"", "summary":"", "reason":"", "confidence":0.0, "children":[{ "name":"", "summary":"", "reason":"", "confidence":0.0 }] }] }',
-                f"Generate up to {concept_limit} top-level concepts and at most {concept_limit} child concepts per node.",
+                'Schema: { "title":"", "summary":"", "foundation_kind":"", "concepts":[{ "frame_key":"", "name":"", "summary":"", "reason":"", "confidence":0.0, "children":[{ "name":"", "summary":"", "reason":"", "confidence":0.0 }] }], "links":[{ "from_frame":"", "to_frame":"", "relation_type":"", "reason":"", "weight":0.0 }] }',
+                f"Foundation kind: {foundation_kind}",
+                f"Generate up to {len(frame_plan)} top-level concepts and at most {concept_limit} child concepts per node.",
                 f"Depth limit: {depth}",
                 "Keep names concrete, concise, and useful for graph editing.",
+                "Use one top-level concept per frame when possible. Fill the frame with topic-specific content instead of repeating the topic as a bare label.",
+                f"Allowed relation types for links: {', '.join(allowed_link_types)}.",
+                "Use only the frame keys listed below. If you are unsure, leave a frame sparse rather than inventing a random branch.",
                 f"Topic: {foundation_topic[:800]}",
             ]
+            if frame_plan:
+                prompt_parts.append("Logical frames:")
+                for frame in frame_plan:
+                    prompt_parts.append(
+                        "- "
+                        + str(frame.get("key", ""))
+                        + ": "
+                        + str(frame.get("fallback_summary", "") or frame.get("label", "")).strip()
+                    )
             if target_label:
                 prompt_parts.append(f"Selected node: {target_label}")
             if target_summary:
@@ -11104,8 +12805,117 @@ class GraphWorkspaceService:
                 parsed_output = {}
                 used_fallback = True
 
-        def _normalize_foundation_concepts(value: Any, *, level: int) -> list[dict[str, Any]]:
+        def _weak_foundation_name(name: str, *, topic: str, frame_key: str = "") -> bool:
+            token = self._normalize_token(name)
+            if not token:
+                return True
+            if token in {"concept", "item", "node", "branch"}:
+                return True
+            if frame_key and token == self._normalize_token(frame_key):
+                return True
+            topic_token = self._normalize_token(topic)
+            if topic_token and token == topic_token:
+                return True
+            return False
+
+        def _normalize_foundation_concepts(
+            value: Any,
+            *,
+            level: int,
+            frames: list[dict[str, str]] | None = None,
+        ) -> list[dict[str, Any]]:
             rows = value if isinstance(value, list) else []
+            if level == 1 and frames:
+                frame_by_key = {
+                    self._normalize_token(frame.get("key", "")): dict(frame)
+                    for frame in frames
+                    if self._normalize_token(frame.get("key", ""))
+                }
+                frame_items: dict[str, dict[str, Any]] = {}
+                free_rows: list[dict[str, Any]] = []
+                for row in rows:
+                    item = self._as_mapping(row)
+                    if not item and isinstance(row, str):
+                        item = {"name": row}
+                    frame_key = self._normalize_token(
+                        item.get("frame_key", item.get("frame", item.get("slot", "")))
+                    )
+                    if frame_key and frame_key in frame_by_key and frame_key not in frame_items:
+                        frame_items[frame_key] = item
+                    else:
+                        free_rows.append(item)
+
+                out: list[dict[str, Any]] = []
+                used_name_tokens: set[str] = set()
+                free_index = 0
+                for frame in frames:
+                    frame_key = self._normalize_token(frame.get("key", ""))
+                    item = frame_items.get(frame_key, {})
+                    if not item and free_index < len(free_rows):
+                        item = free_rows[free_index]
+                        free_index += 1
+                    raw_name = " ".join(
+                        str(item.get("name", item.get("title", item.get("label", ""))) or "").split()
+                    ).strip()
+                    name = raw_name
+                    if _weak_foundation_name(name, topic=foundation_topic, frame_key=frame_key):
+                        name = " ".join(str(frame.get("fallback_name", "") or "").split()).strip()
+                    if not name:
+                        name = self._to_title(f"{foundation_topic} {frame.get('label', 'concept')}", fallback="Concept", limit=120)
+                    name_token = self._normalize_token(name)
+                    if name_token in used_name_tokens:
+                        name = self._to_title(
+                            f"{name} {frame.get('label', 'detail')}",
+                            fallback=name,
+                            limit=120,
+                        )
+                        name_token = self._normalize_token(name)
+                    used_name_tokens.add(name_token)
+
+                    summary = " ".join(
+                        str(item.get("summary", item.get("description", "")) or "").split()
+                    ).strip()
+                    if len(summary) < 16:
+                        summary = " ".join(str(frame.get("fallback_summary", "") or "").split()).strip()
+                    reason = " ".join(str(item.get("reason", "") or "").split()).strip()
+                    if not reason:
+                        reason = f"logical_frame:{frame_key}"
+                    children: list[dict[str, Any]] = []
+                    if level < depth:
+                        child_value = item.get("children", item.get("subconcepts", item.get("details", [])))
+                        children = _normalize_foundation_concepts(child_value, level=level + 1)
+                        if not children:
+                            children = [
+                                {
+                                    "name": self._to_title(
+                                        str(frame.get("child_name", "") or "Key Detail"),
+                                        fallback="Key Detail",
+                                        limit=120,
+                                    ),
+                                    "summary": self._to_title(
+                                        str(frame.get("child_summary", "") or "Structured supporting detail."),
+                                        fallback="Structured supporting detail.",
+                                        limit=360,
+                                    ),
+                                    "reason": "logical_child_scaffold",
+                                    "confidence": 0.58,
+                                    "children": [],
+                                }
+                            ]
+                    out.append(
+                        {
+                            "name": name[:120],
+                            "summary": summary[:360],
+                            "reason": reason[:320],
+                            "confidence": self._confidence(item.get("confidence", 0.72), 0.72),
+                            "children": children[:concept_limit],
+                            "frame_key": frame_key,
+                            "frame_label": str(frame.get("label", "") or "").strip(),
+                            "relation_hint": str(frame.get("default_link_to_next", "") or "").strip(),
+                        }
+                    )
+                return out
+
             out: list[dict[str, Any]] = []
             seen: set[str] = set()
             for row in rows:
@@ -11117,14 +12927,16 @@ class GraphWorkspaceService:
                 ).strip()
                 if not name:
                     continue
-                token = name.casefold()
+                token = self._normalize_token(name)
                 if token in seen:
                     continue
                 seen.add(token)
                 summary = " ".join(
                     str(item.get("summary", item.get("description", "")) or "").split()
                 ).strip()
-                reason = " ".join(str(item.get("reason", "") or "").split()).strip()
+                if len(summary) < 12:
+                    summary = f"Structured supporting detail for {self._to_title(name, fallback='this concept', limit=120)}."
+                reason = " ".join(str(item.get("reason", "") or "").split()).strip() or "supporting_detail"
                 children: list[dict[str, Any]] = []
                 if level < depth:
                     child_value = item.get("children", item.get("subconcepts", item.get("details", [])))
@@ -11140,6 +12952,64 @@ class GraphWorkspaceService:
                 )
                 if len(out) >= concept_limit:
                     break
+            return out
+
+        def _normalize_foundation_links(value: Any, concept_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            rows = value if isinstance(value, list) else []
+            valid_frames = {
+                self._normalize_token(item.get("frame_key", "")): item
+                for item in concept_rows
+                if self._normalize_token(item.get("frame_key", ""))
+            }
+            out: list[dict[str, Any]] = []
+            seen: set[tuple[str, str, str]] = set()
+            for row in rows:
+                item = self._as_mapping(row)
+                from_frame = self._normalize_token(item.get("from_frame", item.get("from", "")))
+                to_frame = self._normalize_token(item.get("to_frame", item.get("to", "")))
+                relation_type = self._pick_allowed_token(
+                    item.get("relation_type", item.get("relation", "")),
+                    allowed=allowed_link_types,
+                    default="",
+                )
+                if not from_frame or not to_frame or from_frame == to_frame:
+                    continue
+                if from_frame not in valid_frames or to_frame not in valid_frames or not relation_type:
+                    continue
+                sig = (from_frame, to_frame, relation_type)
+                if sig in seen:
+                    continue
+                seen.add(sig)
+                out.append(
+                    {
+                        "from_frame": from_frame,
+                        "to_frame": to_frame,
+                        "relation_type": relation_type,
+                        "reason": " ".join(str(item.get("reason", "") or "").split()).strip(),
+                        "weight": round(self._confidence(item.get("weight", 0.68), 0.68), 4),
+                    }
+                )
+
+            for index, frame in enumerate(frame_plan[:-1]):
+                from_frame = self._normalize_token(frame.get("key", ""))
+                to_frame = self._normalize_token(frame_plan[index + 1].get("key", ""))
+                relation_type = self._pick_allowed_token(
+                    frame.get("default_link_to_next", "clarifies"),
+                    allowed=allowed_link_types,
+                    default="clarifies",
+                )
+                sig = (from_frame, to_frame, relation_type)
+                if from_frame and to_frame and from_frame in valid_frames and to_frame in valid_frames and sig not in seen:
+                    seen.add(sig)
+                    out.append(
+                        {
+                            "from_frame": from_frame,
+                            "to_frame": to_frame,
+                            "relation_type": relation_type,
+                            "reason": f"logical_sequence:{from_frame}->{to_frame}",
+                            "weight": 0.71,
+                        }
+                    )
             return out
 
         blueprint_title = " ".join(str(parsed_output.get("title", "") or "").split()).strip()
@@ -11165,55 +13035,11 @@ class GraphWorkspaceService:
                     limit=180,
                 )
 
-        concepts = _normalize_foundation_concepts(parsed_output.get("concepts", []), level=1)
+        concepts = _normalize_foundation_concepts(parsed_output.get("concepts", []), level=1, frames=frame_plan)
+        links = _normalize_foundation_links(parsed_output.get("links", []), concepts)
         if not concepts:
-            source_text = "\n".join(part for part in (foundation_topic, clean_context, target_summary) if part).strip()
-            raw_chunks = [
-                " ".join(chunk.split()).strip()
-                for chunk in re.split(r"[\n;,|]+", source_text)
-                if " ".join(str(chunk or "").split()).strip()
-            ]
-            name_candidates = [
-                chunk
-                for chunk in raw_chunks
-                if 3 <= len(chunk) <= 80
-            ]
-            if len(name_candidates) < concept_limit:
-                fallback_words = [
-                    token
-                    for token in re.findall(r"[\w-]{4,}", source_text, flags=re.UNICODE)
-                    if len(token) >= 4
-                ]
-                for token in fallback_words:
-                    if len(name_candidates) >= concept_limit:
-                        break
-                    if any(token.casefold() == item.casefold() for item in name_candidates):
-                        continue
-                    name_candidates.append(token)
-            if not name_candidates:
-                name_candidates = ["core concept", "key detail", "next step"][:concept_limit]
-            concepts = []
-            for index, name in enumerate(name_candidates[:concept_limit], start=1):
-                child_rows: list[dict[str, Any]] = []
-                if depth > 1:
-                    child_rows.append(
-                        {
-                            "name": f"{name} detail",
-                            "summary": "Fallback deeper layer added because LLM structure was unavailable.",
-                            "reason": "fallback_depth_expansion",
-                            "confidence": 0.52,
-                            "children": [],
-                        }
-                    )
-                concepts.append(
-                    {
-                        "name": self._to_title(name, fallback=f"Concept {index}", limit=120),
-                        "summary": f"Fallback concept extracted from the foundation request #{index}.",
-                        "reason": "fallback_concept_extraction",
-                        "confidence": 0.56,
-                        "children": child_rows,
-                    }
-                )
+            concepts = _normalize_foundation_concepts([], level=1, frames=frame_plan)
+            links = _normalize_foundation_links([], concepts)
             used_fallback = True
 
         selected_model_path = str(resolution.get("selected_model_path", "") or requested_model_path)
@@ -11223,16 +13049,22 @@ class GraphWorkspaceService:
                 "title": blueprint_title,
                 "summary": blueprint_summary,
                 "topic": foundation_topic,
+                "foundation_kind": foundation_kind,
                 "context": clean_context,
                 "source": "graph_foundation_builder",
                 "depth": depth,
                 "concept_limit": concept_limit,
+                "frame_plan": [dict(item) for item in frame_plan],
+                "logical_template": True,
                 "target_node_id": target_node_id if target_node_id > 0 else 0,
                 "target_label": target_label,
                 "requested_model_path": requested_model_path,
                 "selected_model_path": selected_model_path,
-                "requested_role": resolved_role,
+                "requested_role": requested_role,
+                "resolved_role": resolved_role,
                 "resolution": dict(resolution),
+                "mode_policy_node_id": self._to_int(mode_policy.get("mode_node_id", 0), 0),
+                "mode_policy_fallback_used": bool(mode_policy.get("fallback_used", False)),
                 "used_fallback": bool(used_fallback),
             },
             state={
@@ -11244,6 +13076,7 @@ class GraphWorkspaceService:
         root_node_id = int(root_node.id)
         created_node_ids: list[int] = [root_node_id]
         created_edge_count = 0
+        top_level_node_ids_by_frame: dict[str, int] = {}
 
         if target_node_id > 0 and target_row is not None:
             self._connect_nodes(
@@ -11256,17 +13089,27 @@ class GraphWorkspaceService:
             )
             created_edge_count += 1
 
-        def _create_concept_branch(parent_node_id: int, concept_rows: list[dict[str, Any]], *, level: int) -> None:
+        def _create_concept_branch(
+            parent_node_id: int,
+            concept_rows: list[dict[str, Any]],
+            *,
+            level: int,
+        ) -> None:
             nonlocal created_edge_count
             for item in concept_rows[:concept_limit]:
+                concept_frame_key = self._normalize_token(self._as_mapping(item).get("frame_key", ""))
                 concept_node = self.api.engine.create_node(
                     "concept",
                     attributes={
                         "name": str(item.get("name", "") or "").strip(),
                         "summary": str(item.get("summary", "") or "").strip(),
                         "reason": str(item.get("reason", "") or "").strip(),
+                        "frame_key": concept_frame_key,
+                        "frame_label": str(item.get("frame_label", "") or "").strip(),
+                        "relation_hint": str(item.get("relation_hint", "") or "").strip(),
                         "foundation_root_id": root_node_id,
                         "foundation_topic": foundation_topic,
+                        "foundation_kind": foundation_kind,
                         "concept_level": level,
                     },
                     state={
@@ -11276,13 +13119,20 @@ class GraphWorkspaceService:
                 )
                 concept_node_id = int(concept_node.id)
                 created_node_ids.append(concept_node_id)
+                if level == 1 and concept_frame_key:
+                    top_level_node_ids_by_frame[concept_frame_key] = concept_node_id
                 self._connect_nodes(
                     from_node=parent_node_id,
                     to_node=concept_node_id,
                     relation_type="contains_concept" if level == 1 else "deepens_concept",
                     weight=max(0.5, 0.9 - (0.08 * max(0, level - 1))),
                     logic_rule="graph_foundation_builder",
-                    metadata={"level": level, "root_node_id": root_node_id},
+                    metadata={
+                        "level": level,
+                        "root_node_id": root_node_id,
+                        "frame_key": concept_frame_key,
+                        "foundation_kind": foundation_kind,
+                    },
                 )
                 created_edge_count += 1
                 children = [
@@ -11293,16 +13143,37 @@ class GraphWorkspaceService:
                     _create_concept_branch(concept_node_id, children, level=level + 1)
 
         _create_concept_branch(root_node_id, concepts, level=1)
+        for link in links:
+            from_node_id = self._to_int(top_level_node_ids_by_frame.get(str(link.get("from_frame", ""))), 0)
+            to_node_id = self._to_int(top_level_node_ids_by_frame.get(str(link.get("to_frame", ""))), 0)
+            relation_type = str(link.get("relation_type", "") or "").strip()
+            if from_node_id <= 0 or to_node_id <= 0 or from_node_id == to_node_id or not relation_type:
+                continue
+            self._connect_nodes(
+                from_node=from_node_id,
+                to_node=to_node_id,
+                relation_type=relation_type,
+                weight=self._confidence(link.get("weight", 0.68), 0.68),
+                logic_rule="graph_foundation_logic",
+                metadata={
+                    "root_node_id": root_node_id,
+                    "foundation_kind": foundation_kind,
+                    "from_frame": str(link.get("from_frame", "") or "").strip(),
+                    "to_frame": str(link.get("to_frame", "") or "").strip(),
+                    "reason": str(link.get("reason", "") or "").strip(),
+                },
+            )
+            created_edge_count += 1
 
         monitor_focus_ids = [root_node_id, *created_node_ids[1:]]
         if target_node_id > 0:
             monitor_focus_ids.append(target_node_id)
         graph_monitor = self._run_graph_monitor(
-            user_id=str(root.get("user_id", "default_user") or "default_user").strip() or "default_user",
-            session_id=str(root.get("session_id", "") or "").strip() or f"graph_foundation_{root_node_id}",
+            user_id=user_id,
+            session_id=session_id or f"graph_foundation_{root_node_id}",
             source="graph_foundation_builder",
             focus_node_ids=monitor_focus_ids,
-            hint_text=f"{blueprint_summary}\n{foundation_topic}",
+            hint_text=f"{blueprint_summary}\n{foundation_topic}\n{clean_context[:900]}",
             model_path=selected_model_path,
             model_role="planner",
             apply_changes=True,
@@ -11316,6 +13187,8 @@ class GraphWorkspaceService:
                 "created_nodes": len(created_node_ids),
                 "created_edges": created_edge_count,
                 "focus_node_id": root_node_id,
+                "foundation_kind": foundation_kind,
+                "logical_links": len(links),
             },
         )
 
@@ -11324,10 +13197,12 @@ class GraphWorkspaceService:
             {
                 "root_node_id": root_node_id,
                 "target_node_id": target_node_id,
+                "foundation_kind": foundation_kind,
                 "created_nodes": len(created_node_ids),
                 "created_edges": created_edge_count,
                 "top_level_concepts": len(concepts),
                 "depth": depth,
+                "mode_policy_node_id": self._to_int(mode_policy.get("mode_node_id", 0), 0),
                 "persisted": bool(persisted),
             },
         )
@@ -11348,7 +13223,11 @@ class GraphWorkspaceService:
                 "top_level_concepts": len(concepts),
                 "depth": depth,
                 "concept_limit": concept_limit,
+                "foundation_kind": foundation_kind,
+                "logical_links": len(links),
+                "mode_policy_node_id": self._to_int(mode_policy.get("mode_node_id", 0), 0),
             },
+            "mode_policy": mode_policy,
             "summary": {
                 "title": blueprint_title,
                 "summary": blueprint_summary,
@@ -11356,11 +13235,16 @@ class GraphWorkspaceService:
                 "created_edges": created_edge_count,
                 "focus_node_id": root_node_id,
                 "model_path": selected_model_path,
+                "foundation_kind": foundation_kind,
+                "logical_links": len(links),
             },
             "blueprint": {
                 "title": blueprint_title,
                 "summary": blueprint_summary,
+                "foundation_kind": foundation_kind,
+                "frame_plan": [dict(item) for item in frame_plan],
                 "concepts": concepts,
+                "links": links,
             },
             "graph_monitor": graph_monitor,
             "model": {
