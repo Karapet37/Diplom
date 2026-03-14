@@ -91,7 +91,7 @@ For each node, the graph workspace answers:
 Backend:
 
 ```bash
-cd /home/karapet/agent_project
+cd <project_root>
 pip install -e .[dev]
 python start.py --host 127.0.0.1 --port 8008
 ```
@@ -99,7 +99,7 @@ python start.py --host 127.0.0.1 --port 8008
 Frontend:
 
 ```bash
-cd /home/karapet/agent_project
+cd <project_root>
 VITE_API_BASE_URL=http://127.0.0.1:8008 npm --prefix webapp run dev
 ```
 
@@ -112,14 +112,14 @@ Open:
 Backend:
 
 ```bash
-cd /home/karapet/agent_project
+cd <project_root>
 PYTHONPATH=. roaches_viz/.venv/bin/python -m pytest -q
 ```
 
 Frontend build:
 
 ```bash
-cd /home/karapet/agent_project
+cd <project_root>
 npm --prefix webapp run build
 ```
 
