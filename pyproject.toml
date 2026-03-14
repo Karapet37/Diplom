@@ -30,4 +30,4 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*", "roaches_viz*", "core*"]
+include = ["src*", "roaches_viz*"]

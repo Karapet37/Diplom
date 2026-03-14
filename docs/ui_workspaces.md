@@ -1,42 +1,35 @@
 # UI Workspaces
 
-The active frontend is split into two workspaces.
+The frontend is reduced to two workspaces only.
 
-## Chat Workspace
+## Chat
 
-Layout:
-- left sidebar: sessions and chat tools
-- right main panel: scrollable message thread
-- fixed input bar at the bottom
+Purpose:
+
+- user conversation
+- session switching
+- personality selection
+- fixed composer
 
 Rules:
-- messages scroll inside the thread area
-- the composer stays at the bottom
-- no extra tools are placed between the thread and the input bar
 
-Session storage:
-- `data/sessions/{session_id}.json`
+- render only user and assistant messages
+- keep the composer fixed at the bottom
+- do not render graph jobs or internal pipeline logs in the thread
 
-## Graph Workspace
+## Graph
 
-Layout:
-- left sidebar: sessions, graph query, quick foundation loading
-- graph canvas in the main area
-- node editor panel on the right
+Purpose:
 
-The graph workspace renders only a relevant subgraph for the current query.
+- inspect graph nodes and edges
+- rebuild graph from session files
+- inspect personalities
 
-Subgraph flow:
-- current session query or manual graph query
-- `/api/cognitive/graph/subgraph`
-- seed matches + neighbor expansion
-- filtered nodes and edges rendered in the canvas
+Rules:
 
-## Graph Zones
-
-Graph material remains split into:
-- `graph/verified/`
-- `graph/pending/`
-
-Chat sessions are stored separately in:
-- `data/sessions/`
+- the graph should answer three questions for every node:
+  1. who / what is this node
+  2. what is it like
+  3. how does it act through relations
+- the graph view should use `memory/graphs/nodes.json` and `memory/graphs/edges.json` as the source of truth
+- do not expose debug-only controller panels in the MVP UI

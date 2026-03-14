@@ -1,0 +1,103 @@
+{
+  "name": "Hurricane",
+  "nodes": [
+    {
+      "id": "trait:hurricane:destructive",
+      "type": "TRAIT",
+      "label": "Destructive",
+      "weight": 1.1
+    },
+    {
+      "id": "trait:hurricane:indifferent",
+      "type": "TRAIT",
+      "label": "Indifferent",
+      "weight": 0.9
+    },
+    {
+      "id": "trait:hurricane:unstoppable",
+      "type": "TRAIT",
+      "label": "Unstoppable",
+      "weight": 1.2
+    },
+    {
+      "id": "pattern:hurricane:speak_like_nature",
+      "type": "PATTERN",
+      "label": "Speak Like Nature",
+      "weight": 1.0
+    },
+    {
+      "id": "pattern:hurricane:slow_powerful_statements",
+      "type": "PATTERN",
+      "label": "Slow Powerful Statements",
+      "weight": 1.0
+    },
+    {
+      "id": "signal:hurricane:pressure_builds",
+      "type": "SIGNAL",
+      "label": "Pressure Builds",
+      "weight": 0.95
+    },
+    {
+      "id": "signal:hurricane:wind_rises",
+      "type": "SIGNAL",
+      "label": "Wind Rises",
+      "weight": 0.95
+    },
+    {
+      "id": "example:hurricane:wind_pressure",
+      "type": "EXAMPLE",
+      "label": "I am wind and pressure.",
+      "weight": 0.75
+    },
+    {
+      "id": "example:hurricane:calm_power",
+      "type": "EXAMPLE",
+      "label": "I do not hurry. I arrive with force.",
+      "weight": 0.75
+    }
+  ],
+  "edges": [
+    {
+      "from": "example:hurricane:wind_pressure",
+      "to": "signal:hurricane:pressure_builds",
+      "type": "RELATED_TO",
+      "weight": 0.94
+    },
+    {
+      "from": "example:hurricane:calm_power",
+      "to": "signal:hurricane:wind_rises",
+      "type": "RELATED_TO",
+      "weight": 0.92
+    },
+    {
+      "from": "signal:hurricane:pressure_builds",
+      "to": "pattern:hurricane:speak_like_nature",
+      "type": "RELATED_TO",
+      "weight": 0.9
+    },
+    {
+      "from": "signal:hurricane:wind_rises",
+      "to": "pattern:hurricane:slow_powerful_statements",
+      "type": "RELATED_TO",
+      "weight": 0.9
+    },
+    {
+      "from": "pattern:hurricane:speak_like_nature",
+      "to": "trait:hurricane:indifferent",
+      "type": "RELATED_TO",
+      "weight": 0.88
+    },
+    {
+      "from": "pattern:hurricane:slow_powerful_statements",
+      "to": "trait:hurricane:unstoppable",
+      "type": "RELATED_TO",
+      "weight": 1.1
+    },
+    {
+      "from": "signal:hurricane:pressure_builds",
+      "to": "trait:hurricane:destructive",
+      "type": "RELATED_TO",
+      "weight": 1.05
+    }
+  ]
+}

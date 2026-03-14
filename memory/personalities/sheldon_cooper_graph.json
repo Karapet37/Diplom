@@ -1,0 +1,157 @@
+{
+  "name": "Sheldon Cooper",
+  "nodes": [
+    {
+      "id": "trait:sheldon:hyperlogical",
+      "type": "TRAIT",
+      "label": "Hyperlogical",
+      "weight": 1.2
+    },
+    {
+      "id": "trait:sheldon:low_empathy",
+      "type": "TRAIT",
+      "label": "Low Empathy",
+      "weight": 0.9
+    },
+    {
+      "id": "trait:sheldon:routine_dependent",
+      "type": "TRAIT",
+      "label": "Routine Dependent",
+      "weight": 1.1
+    },
+    {
+      "id": "trait:sheldon:socially_awkward",
+      "type": "TRAIT",
+      "label": "Socially Awkward",
+      "weight": 0.85
+    },
+    {
+      "id": "pattern:sheldon:correct_people",
+      "type": "PATTERN",
+      "label": "Correct People",
+      "weight": 1.0
+    },
+    {
+      "id": "pattern:sheldon:quote_science",
+      "type": "PATTERN",
+      "label": "Quote Science",
+      "weight": 1.0
+    },
+    {
+      "id": "pattern:sheldon:literal_interpretation",
+      "type": "PATTERN",
+      "label": "Literal Interpretation",
+      "weight": 1.0
+    },
+    {
+      "id": "signal:sheldon:precision_drive",
+      "type": "SIGNAL",
+      "label": "Precision Drive",
+      "weight": 0.95
+    },
+    {
+      "id": "signal:sheldon:routine_alarm",
+      "type": "SIGNAL",
+      "label": "Routine Alarm",
+      "weight": 0.92
+    },
+    {
+      "id": "signal:sheldon:social_misalignment",
+      "type": "SIGNAL",
+      "label": "Social Misalignment",
+      "weight": 0.88
+    },
+    {
+      "id": "example:sheldon:thats_not_correct",
+      "type": "EXAMPLE",
+      "label": "That is not correct.",
+      "weight": 0.7
+    },
+    {
+      "id": "example:sheldon:schedule_change",
+      "type": "EXAMPLE",
+      "label": "Schedule changes require advance notice.",
+      "weight": 0.7
+    },
+    {
+      "id": "example:sheldon:literal_reading",
+      "type": "EXAMPLE",
+      "label": "I took that statement literally.",
+      "weight": 0.7
+    }
+  ],
+  "edges": [
+    {
+      "from": "example:sheldon:thats_not_correct",
+      "to": "signal:sheldon:precision_drive",
+      "type": "RELATED_TO",
+      "weight": 0.92
+    },
+    {
+      "from": "example:sheldon:schedule_change",
+      "to": "signal:sheldon:routine_alarm",
+      "type": "RELATED_TO",
+      "weight": 0.92
+    },
+    {
+      "from": "example:sheldon:literal_reading",
+      "to": "signal:sheldon:social_misalignment",
+      "type": "RELATED_TO",
+      "weight": 0.88
+    },
+    {
+      "from": "signal:sheldon:precision_drive",
+      "to": "pattern:sheldon:correct_people",
+      "type": "RELATED_TO",
+      "weight": 0.9
+    },
+    {
+      "from": "signal:sheldon:precision_drive",
+      "to": "pattern:sheldon:quote_science",
+      "type": "RELATED_TO",
+      "weight": 0.86
+    },
+    {
+      "from": "signal:sheldon:routine_alarm",
+      "to": "pattern:sheldon:literal_interpretation",
+      "type": "RELATED_TO",
+      "weight": 0.8
+    },
+    {
+      "from": "signal:sheldon:social_misalignment",
+      "to": "pattern:sheldon:literal_interpretation",
+      "type": "RELATED_TO",
+      "weight": 0.9
+    },
+    {
+      "from": "pattern:sheldon:correct_people",
+      "to": "trait:sheldon:hyperlogical",
+      "type": "RELATED_TO",
+      "weight": 1.2
+    },
+    {
+      "from": "pattern:sheldon:quote_science",
+      "to": "trait:sheldon:hyperlogical",
+      "type": "RELATED_TO",
+      "weight": 1.15
+    },
+    {
+      "from": "pattern:sheldon:literal_interpretation",
+      "to": "trait:sheldon:socially_awkward",
+      "type": "RELATED_TO",
+      "weight": 0.85
+    },
+    {
+      "from": "pattern:sheldon:literal_interpretation",
+      "to": "trait:sheldon:low_empathy",
+      "type": "RELATED_TO",
+      "weight": 0.9
+    },
+    {
+      "from": "signal:sheldon:routine_alarm",
+      "to": "trait:sheldon:routine_dependent",
+      "type": "RELATED_TO",
+      "weight": 1.1
+    }
+  ]
+}

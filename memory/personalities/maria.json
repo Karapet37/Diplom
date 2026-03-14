@@ -1,0 +1,25 @@
+{
+  "person_id": "person:maria",
+  "source_id": "source:maria-log",
+  "traits": [
+    "aggressive_communication",
+    "emotional_leverage",
+    "high_directness"
+  ],
+  "patterns": [
+    "directive_pressure",
+    "dominance_warning",
+    "guilt_pressure"
+  ],
+  "style": [
+    "aggressive_tone",
+    "direct_command",
+    "guilt_loaded"
+  ],
+  "importance_weights": {
+    "aggressive_communication": 0.693147,
+    "emotional_leverage": 0.693147,
+    "high_directness": 1.098612
+  },
+  "name": "maria"
+}

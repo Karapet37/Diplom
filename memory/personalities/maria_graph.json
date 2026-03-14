@@ -1,0 +1,268 @@
+{
+  "name": "maria",
+  "nodes": [
+    {
+      "id": "example:40f9e282c62a28ed",
+      "type": "EXAMPLE",
+      "label": "hey watch where you're going",
+      "weight": 0.5
+    },
+    {
+      "id": "example:8358c432be5c73f6",
+      "type": "EXAMPLE",
+      "label": "If you loved me you would do this.",
+      "weight": 0.5
+    },
+    {
+      "id": "pattern:directive_pressure",
+      "type": "PATTERN",
+      "label": "Directive Pressure",
+      "weight": 0.5
+    },
+    {
+      "id": "pattern:dominance_warning",
+      "type": "PATTERN",
+      "label": "Dominance Warning",
+      "weight": 0.5
+    },
+    {
+      "id": "pattern:guilt_pressure",
+      "type": "PATTERN",
+      "label": "Guilt Pressure",
+      "weight": 0.5
+    },
+    {
+      "id": "person:maria",
+      "type": "PERSON",
+      "label": "Maria",
+      "weight": 0.5
+    },
+    {
+      "id": "signal:aggressive_tone",
+      "type": "SIGNAL",
+      "label": "Aggressive tone",
+      "weight": 0.5
+    },
+    {
+      "id": "signal:direct_command",
+      "type": "SIGNAL",
+      "label": "Direct command",
+      "weight": 0.5
+    },
+    {
+      "id": "signal:guilt_loaded",
+      "type": "SIGNAL",
+      "label": "Guilt-loaded pressure",
+      "weight": 0.5
+    },
+    {
+      "id": "trait:maria:aggressive_communication",
+      "type": "TRAIT",
+      "label": "Aggressive Communication",
+      "weight": 0.693147
+    },
+    {
+      "id": "trait:maria:emotional_leverage",
+      "type": "TRAIT",
+      "label": "Emotional Leverage",
+      "weight": 0.693147
+    },
+    {
+      "id": "trait:maria:high_directness",
+      "type": "TRAIT",
+      "label": "High Directness",
+      "weight": 1.098612
+    }
+  ],
+  "edges": [
+    {
+      "from": "person:maria",
+      "to": "example:8358c432be5c73f6",
+      "type": "SAID_EXAMPLE",
+      "weight": 1.0,
+      "confidence": 0.95
+    },
+    {
+      "from": "example:8358c432be5c73f6",
+      "to": "signal:guilt_loaded",
+      "type": "RELATED_TO",
+      "weight": 0.9,
+      "confidence": 0.9
+    },
+    {
+      "from": "example:8358c432be5c73f6",
+      "to": "signal:direct_command",
+      "type": "RELATED_TO",
+      "weight": 0.9,
+      "confidence": 0.9
+    },
+    {
+      "from": "example:8358c432be5c73f6",
+      "to": "pattern:guilt_pressure",
+      "type": "EXAMPLE_OF",
+      "weight": 1.0,
+      "confidence": 0.92
+    },
+    {
+      "from": "signal:guilt_loaded",
+      "to": "pattern:guilt_pressure",
+      "type": "RELATED_TO",
+      "weight": 0.8,
+      "confidence": 0.85
+    },
+    {
+      "from": "signal:direct_command",
+      "to": "pattern:guilt_pressure",
+      "type": "RELATED_TO",
+      "weight": 0.8,
+      "confidence": 0.85
+    },
+    {
+      "from": "example:8358c432be5c73f6",
+      "to": "pattern:directive_pressure",
+      "type": "EXAMPLE_OF",
+      "weight": 1.0,
+      "confidence": 0.92
+    },
+    {
+      "from": "signal:guilt_loaded",
+      "to": "pattern:directive_pressure",
+      "type": "RELATED_TO",
+      "weight": 0.8,
+      "confidence": 0.85
+    },
+    {
+      "from": "signal:direct_command",
+      "to": "pattern:directive_pressure",
+      "type": "RELATED_TO",
+      "weight": 0.8,
+      "confidence": 0.85
+    },
+    {
+      "from": "person:maria",
+      "to": "example:40f9e282c62a28ed",
+      "type": "SAID_EXAMPLE",
+      "weight": 1.0,
+      "confidence": 0.95
+    },
+    {
+      "from": "example:40f9e282c62a28ed",
+      "to": "signal:aggressive_tone",
+      "type": "RELATED_TO",
+      "weight": 0.9,
+      "confidence": 0.9
+    },
+    {
+      "from": "example:40f9e282c62a28ed",
+      "to": "signal:direct_command",
+      "type": "RELATED_TO",
+      "weight": 0.9,
+      "confidence": 0.9
+    },
+    {
+      "from": "example:40f9e282c62a28ed",
+      "to": "pattern:dominance_warning",
+      "type": "EXAMPLE_OF",
+      "weight": 1.0,
+      "confidence": 0.92
+    },
+    {
+      "from": "signal:aggressive_tone",
+      "to": "pattern:dominance_warning",
+      "type": "RELATED_TO",
+      "weight": 0.8,
+      "confidence": 0.85
+    },
+    {
+      "from": "signal:direct_command",
+      "to": "pattern:dominance_warning",
+      "type": "RELATED_TO",
+      "weight": 0.8,
+      "confidence": 0.85
+    },
+    {
+      "from": "example:40f9e282c62a28ed",
+      "to": "pattern:directive_pressure",
+      "type": "EXAMPLE_OF",
+      "weight": 1.0,
+      "confidence": 0.92
+    },
+    {
+      "from": "signal:aggressive_tone",
+      "to": "pattern:directive_pressure",
+      "type": "RELATED_TO",
+      "weight": 0.8,
+      "confidence": 0.85
+    },
+    {
+      "from": "person:maria",
+      "to": "trait:maria:emotional_leverage",
+      "type": "HAS_TRAIT",
+      "weight": 0.693147,
+      "confidence": 0.49
+    },
+    {
+      "from": "pattern:guilt_pressure",
+      "to": "trait:maria:emotional_leverage",
+      "type": "RELATED_TO",
+      "weight": 0.693147,
+      "confidence": 0.82
+    },
+    {
+      "from": "pattern:directive_pressure",
+      "to": "trait:maria:emotional_leverage",
+      "type": "RELATED_TO",
+      "weight": 0.693147,
+      "confidence": 0.82
+    },
+    {
+      "from": "person:maria",
+      "to": "trait:maria:high_directness",
+      "type": "HAS_TRAIT",
+      "weight": 1.098612,
+      "confidence": 0.53
+    },
+    {
+      "from": "pattern:guilt_pressure",
+      "to": "trait:maria:high_directness",
+      "type": "RELATED_TO",
+      "weight": 1.098612,
+      "confidence": 0.82
+    },
+    {
+      "from": "pattern:directive_pressure",
+      "to": "trait:maria:high_directness",
+      "type": "RELATED_TO",
+      "weight": 1.098612,
+      "confidence": 0.82
+    },
+    {
+      "from": "pattern:dominance_warning",
+      "to": "trait:maria:high_directness",
+      "type": "RELATED_TO",
+      "weight": 1.098612,
+      "confidence": 0.82
+    },
+    {
+      "from": "person:maria",
+      "to": "trait:maria:aggressive_communication",
+      "type": "HAS_TRAIT",
+      "weight": 0.693147,
+      "confidence": 0.49
+    },
+    {
+      "from": "pattern:dominance_warning",
+      "to": "trait:maria:aggressive_communication",
+      "type": "RELATED_TO",
+      "weight": 0.693147,
+      "confidence": 0.82
+    },
+    {
+      "from": "pattern:directive_pressure",
+      "to": "trait:maria:aggressive_communication",
+      "type": "RELATED_TO",
+      "weight": 0.693147,
+      "confidence": 0.82
+    }
+  ]
+}

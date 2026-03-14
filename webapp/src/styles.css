@@ -1407,6 +1407,43 @@ small,
   color: var(--muted);
 }
 
+.folder-drop-zone {
+  margin-top: 0.8rem;
+  border: 1px dashed rgba(123, 147, 173, 0.34);
+  border-radius: 18px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.45rem;
+  background: rgba(8, 16, 27, 0.52);
+}
+
+.folder-drop-zone.busy {
+  opacity: 0.74;
+}
+
+.file-button {
+  position: relative;
+  overflow: hidden;
+  justify-self: start;
+}
+
+.file-button input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.folder-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.folder-card {
+  cursor: default;
+}
+
 .chat-workspace-panel {
   height: calc(100vh - 190px);
   display: grid;
@@ -1488,4 +1525,37 @@ small,
   .graph-workspace-shell {
     grid-template-columns: 1fr;
   }
+}
+
+.error-banner {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(200, 45, 45, 0.18);
+  border: 1px solid rgba(255, 120, 120, 0.25);
+  color: #ffd4d4;
+}
+
+.graph-shell {
+  display: grid;
+  gap: 16px;
+}
+
+.graph-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+}
+
+.graph-toolbar .grow {
+  flex: 1;
+}
+
+.node-answer-panel .node-answer-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.node-answer-panel h3 {
+  margin-bottom: 8px;
 }

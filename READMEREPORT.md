@@ -2,133 +2,172 @@
 
 Repository: `https://github.com/Karapet37/Diplom`
 
-## 1. Current State
+## 1. Ընթացիկ Նպատակ
 
-The repository was converged into one active application instead of several parallel experiments.
+Repository-ը բերվել է դեպի մեկ minimal աշխատող product.
 
-Current active system:
+`chat_engine -> llm -> session file -> knowledge_extractor -> memory/graphs -> context_builder -> next answer`
 
-- one backend runtime
-- one frontend
-- one root Python environment
-- one cognitive graph subsystem
+Project-ը այլևս չի դիտարկվում որպես multi-engine research sandbox։ Ակտիվ նպատակը file-first MVP-ն է։
 
-Main active directories:
+## 2. Canonical Runtime
 
-- `core/`
-- `runtime/`
-- `roaches_viz/roaches_viz/`
-- `src/web/`
+Ակտիվ business modules-ը.
+
+- `roaches_viz/roaches_viz/chat_engine.py`
+- `roaches_viz/roaches_viz/llm.py`
+- `roaches_viz/roaches_viz/history_store.py`
+- `roaches_viz/roaches_viz/knowledge_extractor.py`
+- `roaches_viz/roaches_viz/graph_store.py`
+- `roaches_viz/roaches_viz/context_builder.py`
+- `roaches_viz/roaches_viz/api.py`
+
+Միայն thin bootstrap.
+
+- `start.py`
+- `src/web/combined_app.py`
+- `src/web/api.py`
+
+Միայն Frontend.
+
 - `webapp/`
 
-## 2. Active Architecture
+## 3. File-First Memory Layout
 
-### Core layer
+```text
+memory/
+  sessions/
+    {session_id}.txt
+  files/
+    uploaded_documents/
+      {session_id}/
+        {safe_filename}
+  personalities/
+    index.json
+    {name}.json
+    {name}_graph.json
+    proposals/
+      {name}.json
+  graphs/
+    nodes.json
+    edges.json
+```
 
-The repository now has a core-first contract:
+Այս ֆայլերը MVP-ի source of truth-ն են։
 
-- `system_core`
-- `personality_core`
-- `graph_core`
-- `context_core`
-- `agent_core`
-- `style_engine`
-- `speech_dna`
-- `dialogue_engine`
-- `scenario_engine`
-- `agent_roles`
-- `graph_initializer`
-- `graph_traversal`
+## 4. Dialogue Pipeline
 
-This layer defines the stable data model and orchestration boundaries.
+Ակտիվ dialogue flow-ը սա է.
 
-### Runtime layer
+1. user-ը ուղարկում է message
+2. `chat_engine.py`-ը բեռնում է.
+   - recent session text
+   - selected personality file
+   - graph context
+3. `llm.py`-ը կառուցում է մեկ plain-text chat prompt
+4. վերադարձվում է assistant reply
+5. `history_store.py`-ը երկու turn-երն էլ append է անում `memory/sessions/{session_id}.txt`
+6. background extraction-ը կարդում է session file-ը և uploaded files-ը
+7. graph/personality updates-ը առաջարկվում և validate են արվում
+8. հաջորդ reply-ը կարող է օգտագործել graph/personality context
 
-The active runtime is asynchronous:
+Chat path-ը graph files-ը ուղիղ չի գրում։
 
-1. user query
-2. fast assistant/router reply
-3. response returned immediately
-4. background graph job
-5. pending -> verified graph update
+## 5. Extractor Contract
 
-This removed the old synchronous path that caused long delays and `504` errors.
+`knowledge_extractor.py`-ը միակ տեղն է, որը text-ը վերածում է graph կամ personality updates-ի։
 
-### Storage layer
+Նրա contract-ը.
 
-The system stores:
+- կարդալ session/source text
+- LLM-ից խնդրել structured JSON proposals
+- validate անել proposals-ը
+- merge անել դեպի.
+  - `memory/graphs/nodes.json`
+  - `memory/graphs/edges.json`
+- validated personality proposals-ը materialize անել file-backed profiles-ի և personality graphs-ի մեջ
 
-- graph state
-- sessions
-- style profiles
-- personality logs
+Invalid JSON-ը discard է արվում։
 
-Runtime storage zones:
+Դատարկ graph payload-ները երբեք չեն overwrite անում ոչ դատարկ graph files-ը։
 
-- `graph/verified/`
-- `graph/pending/`
-- `data/sessions/`
-- `style_profiles/`
-- `roaches_viz/logs/`
+## 6. Personality Contract
 
-## 3. What Was Cleaned Up
+Personalities-ը file-backed են։
 
-The repository was prepared for normal git use.
+Հիմնական files-ը.
 
-### Kept under version control
+- `memory/personalities/index.json`
+- `memory/personalities/{name}.json`
+- `memory/personalities/{name}_graph.json`
+- `memory/personalities/proposals/{name}.json`
 
-- source code
-- tests
-- documentation
-- runtime directory placeholders (`.gitkeep`)
+`context_builder.py`-ը տնօրինում է read path-ը.
 
-### Removed from git tracking / ignored
+- listing personalities
+- loading profiles
+- loading personality graphs
+- building persona prompt blocks
 
-- runtime graph artifacts
-- project backups
-- session JSON files
-- style profile JSON files
-- runtime logs
-- DB sidecar files
-- local models
-- local environments
+`knowledge_extractor.py`-ը տնօրինում է write path-ը.
 
-This reduces noise and makes the repository copyable without dragging local runtime state into git.
+- writing proposal files
+- examples -> signals -> patterns -> traits
+- personality graph updates
+- materializing validated personality proposal files
 
-## 4. Documentation Updated
+## 7. Ամենակարևոր Added Missing Behavior-ը
 
-### `README.md`
+System-ը պետք է սա անի, երբ տեսնում է personality, որը գոյություն չունի.
 
-Updated to reflect:
+`вижу личность, ищу в графе, не нашел, запрашиваю создание файла анкеты под его описание`
 
-- current unified architecture
-- active runtime surfaces
-- workspaces
-- run commands
-- test commands
-- git hygiene rules
+Ակտիվ implementation-ը սա է.
 
-### `READMEREPORT.md`
+1. detect անել candidate personality/entity
+2. check անել.
+   - `memory/personalities/{name}.json`
+   - graph files
+3. եթե missing է.
+   - գրել `memory/personalities/proposals/{name}.json`
+   - վերադարձնել.
+     - `Контекст личности не найден. Запрошено создание анкеты по описанию.`
+4. background extraction-ը հետո materialize է անում file-backed personality-ն
 
-Rewritten to reflect the current system instead of older experimental stages.
+## 8. Graph UI Contract
 
-## 5. Current User-Facing System
+Graph workspace-ը node-ի համար պատասխանում է միայն երեք գործնական հարցի.
 
-### Chat workspace
+1. who / what is this node
+2. what it is like
+3. how it acts through relations
 
-- session sidebar
-- message history
-- fixed input bar
-- async response path
+## 9. Bootstrap և Frontend
 
-### Graph workspace
+`src/web/combined_app.py`-ը մնում է միայն որպես thin integration shell։
 
-- relevant subgraph rendering
-- node editing
-- relation editing
-- graph search and subgraph loading
+`webapp/`-ը մնում է միակ Frontend-ը և կրճատված է մինչև.
 
-## 6. Current Run Instructions
+- Chat
+- Graph
+- Session list
+- Personality dropdown
+- File upload
+
+## 10. Tests
+
+Կրճատված test set-ը կենտրոնացած է իրական MVP behavior-ի վրա.
+
+- chat-ը գրում է session file
+- file upload-ը documents-ը պահում է `memory/files/uploaded_documents/{session_id}/` տակ
+- graph-ը կառուցվում է session-ից և files-ից
+- graph files-ը մնում են ոչ դատարկ
+- personality files-ը բեռնվում են `index.json`-ից
+- missing personalities-ը ստեղծում են proposal files
+- հաջորդ answers-ը կարող են օգտագործել graph/personality context
+- prompt leaks-ը չեն հասնում user output
+
+## 11. Run
 
 Backend:
 
@@ -145,27 +184,18 @@ cd /home/karapet/agent_project
 VITE_API_BASE_URL=http://127.0.0.1:8008 npm --prefix webapp run dev
 ```
 
-## 7. Current Test Instructions
+## 12. Verification
 
 Backend:
 
 ```bash
 cd /home/karapet/agent_project
-PYTHONPATH=. roaches_viz/.venv/bin/python -m pytest -q tests/unit roaches_viz/tests style_tests
+PYTHONPATH=. roaches_viz/.venv/bin/python -m pytest -q
 ```
 
-Frontend:
+Frontend build:
 
 ```bash
 cd /home/karapet/agent_project
 npm --prefix webapp run build
 ```
-
-## 8. Practical Result
-
-The repository is now closer to a normal working product:
-
-- code and docs stay tracked
-- runtime state stays local
-- generated files no longer pollute git history
-- architecture is documented as one active system, not a stack of experiments

@@ -1,32 +1,22 @@
 import React, { useEffect, useMemo, useRef } from "react";
 
-function DiffNodeCard({ item }) {
-  return (
-    <article className="branch-card">
-      <strong>{item.label || `${item.type}:${item.id}`}</strong>
-      <span>{item.type}</span>
-      {item.short_gloss ? <p>{item.short_gloss}</p> : null}
-    </article>
-  );
-}
-
-function DiffEdgeCard({ item }) {
-  return (
-    <article className="branch-card">
-      <strong>{item.src_label} → {item.dst_label}</strong>
-      <span>{item.type} · {Number(item.weight || 0).toFixed(2)}</span>
-    </article>
-  );
-}
+const PROMPT_LEAK_MARKERS = [
+  "behavioral_dialogue_simulation",
+  "behavioral_dialogue_simulation_fast",
+  "\"task\": \"behavioral_dialogue_simulation",
+  "\"task\": \"behavioral_dialogue_simulation_fast",
+  "use only the ram graph and personality data below",
+  "do not answer like a polite assistant",
+  "return plain text only",
+  "do not output json",
+  "dialogue_contract",
+  "ram_context",
+  "agent_plan",
+  "system instruction",
+];
 
 function ThreadMessage({ item, t }) {
   const role = item.role === "user" ? "user" : "assistant";
-  const metadata = item.metadata || {};
-  const diff = metadata.graphDiff || {};
-  const job = metadata.graphJob || null;
-  const contextNodes = metadata.contextNodes || [];
-  const hasDiff = diff.attached && (((diff.nodes || []).length > 0) || ((diff.edges || []).length > 0));
-
   return (
     <article className={`chat-thread-item ${role}`}>
       <header>
@@ -34,71 +24,6 @@ function ThreadMessage({ item, t }) {
         <span>{item.timestamp}</span>
       </header>
       <p>{item.message}</p>
-
-      {hasDiff ? (
-        <details className="chat-message-details" open>
-          <summary>{t("chat_graph_diff")}</summary>
-          <div className="summary-strip compact">
-            <article className="summary-mini-card"><span>{t("chat_new_nodes")}</span><strong>{diff.node_count || 0}</strong></article>
-            <article className="summary-mini-card"><span>{t("chat_new_edges")}</span><strong>{diff.edge_count || 0}</strong></article>
-          </div>
-          <div className="controller-grid chat-details-grid">
-            {(diff.nodes || []).length ? (
-              <section className="controller-card wide">
-                <h3>{t("chat_new_nodes")}</h3>
-                <div className="branch-list">
-                  {(diff.nodes || []).map((node) => <DiffNodeCard key={node.id} item={node} />)}
-                </div>
-              </section>
-            ) : null}
-            {(diff.edges || []).length ? (
-              <section className="controller-card wide">
-                <h3>{t("chat_new_edges")}</h3>
-                <div className="branch-list">
-                  {(diff.edges || []).map((edge, index) => (
-                    <DiffEdgeCard key={`${edge.src_id}-${edge.type}-${edge.dst_id}-${index}`} item={edge} />
-                  ))}
-                </div>
-              </section>
-            ) : null}
-          </div>
-        </details>
-      ) : null}
-
-      {job ? (
-        <details className="chat-message-details" open>
-          <summary>{t("chat_graph_build_status")}</summary>
-          <div className="controller-grid chat-details-grid">
-            <section className="controller-card wide">
-              <div className="flag-row"><span>{t("chat_graph_job_state")}</span><strong>{job.status || "unknown"}</strong></div>
-              {job.reason ? <div className="flag-row"><span>{t("chat_graph_job_reason")}</span><strong>{job.reason}</strong></div> : null}
-              {(job.requests || []).length ? (
-                <div className="stack-gap-sm">
-                  <h3>{t("chat_graph_job_requests")}</h3>
-                  <ul className="dense-list compact">
-                    {job.requests.map((request) => <li key={request}>{request}</li>)}
-                  </ul>
-                </div>
-              ) : null}
-            </section>
-          </div>
-        </details>
-      ) : null}
-
-      {contextNodes.length ? (
-        <details className="chat-message-details">
-          <summary>{t("chat_context_nodes")}</summary>
-          <div className="branch-list">
-            {contextNodes.slice(0, 8).map((node) => (
-              <article key={node.node_id} className="branch-card">
-                <strong>{node.name}</strong>
-                <span>{node.type} · {Number(node.score || 0).toFixed(2)}</span>
-                <p>{node.description}</p>
-              </article>
-            ))}
-          </div>
-        </details>
-      ) : null}
     </article>
   );
 }
@@ -173,11 +98,64 @@ function listMessages(session) {
   if (!session || !Array.isArray(session.messages)) {
     return [];
   }
-  return session.messages.map((item, index) => ({
-    id: item.id || `${item.role || "msg"}-${index}`,
-    role: item.role || "assistant",
-    message: item.message || "",
-    timestamp: item.timestamp || "",
-    metadata: item.metadata || {},
-  }));
+  return session.messages
+    .map((item, index) => ({
+      id: item.id || `${item.role || "msg"}-${index}`,
+      role: item.role || "assistant",
+      message: normalizeAssistantMessage(item.role || "assistant", item.message || ""),
+      timestamp: item.timestamp || "",
+    }))
+    .filter((item) => item.role === "user" || item.message.trim());
+}
+
+function normalizeAssistantMessage(role, message) {
+  const raw = String(message || "");
+  if (role === "user") {
+    return raw;
+  }
+  if (looksLikePromptLeak(raw)) {
+    return "";
+  }
+  const trimmed = raw.trim();
+  const candidates = [];
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    candidates.push(trimmed);
+  }
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start !== -1 && end > start) {
+    candidates.push(trimmed.slice(start, end + 1));
+  }
+  try {
+    for (const candidate of candidates) {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object") {
+        const keys = ["assistant_reply", "reply", "text", "message", "content", "response"];
+        for (const key of keys) {
+          const value = parsed[key];
+          if (typeof value === "string" && value.trim()) {
+            return looksLikePromptLeak(value) ? "" : value.trim();
+          }
+        }
+        const character = String(parsed.character || parsed.name || "").trim();
+        const traits = Array.isArray(parsed.traits)
+          ? parsed.traits.map((item) => String(item || "").trim()).filter(Boolean)
+          : [];
+        if (character && traits.length) {
+          return `${character}: ${traits.join("; ")}`;
+        }
+      }
+    }
+  } catch (_) {
+    return raw;
+  }
+  return looksLikePromptLeak(raw) ? "" : raw;
+}
+
+function looksLikePromptLeak(value) {
+  const lowered = String(value || "").trim().toLowerCase();
+  if (!lowered) {
+    return false;
+  }
+  return PROMPT_LEAK_MARKERS.some((marker) => lowered.includes(marker));
 }

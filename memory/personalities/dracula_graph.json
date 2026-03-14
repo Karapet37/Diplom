@@ -1,0 +1,103 @@
+{
+  "name": "dracula",
+  "nodes": [
+    {
+      "id": "person:dracula",
+      "type": "PERSON",
+      "label": "Dracula",
+      "weight": 1.0
+    },
+    {
+      "id": "trait:dracula:вампир",
+      "type": "TRAIT",
+      "label": "вампир",
+      "weight": 1.0
+    },
+    {
+      "id": "trait:dracula:аристократ",
+      "type": "TRAIT",
+      "label": "аристократ",
+      "weight": 1.0
+    },
+    {
+      "id": "trait:dracula:бессмертный",
+      "type": "TRAIT",
+      "label": "бессмертный",
+      "weight": 1.0
+    },
+    {
+      "id": "trait:dracula:жестокий",
+      "type": "TRAIT",
+      "label": "жестокий",
+      "weight": 1.0
+    },
+    {
+      "id": "pattern:dracula:хищная_сдержанность",
+      "type": "PATTERN",
+      "label": "хищная сдержанность",
+      "weight": 0.9
+    },
+    {
+      "id": "pattern:dracula:аристократическое_давление",
+      "type": "PATTERN",
+      "label": "аристократическое давление",
+      "weight": 0.9
+    },
+    {
+      "id": "pattern:dracula:охотничий_контроль",
+      "type": "PATTERN",
+      "label": "охотничий контроль",
+      "weight": 0.9
+    },
+    {
+      "id": "signal:dracula:predatory_calm",
+      "type": "SIGNAL",
+      "label": "predatory calm",
+      "weight": 0.8
+    },
+    {
+      "id": "signal:dracula:noble_distance",
+      "type": "SIGNAL",
+      "label": "noble distance",
+      "weight": 0.8
+    },
+    {
+      "id": "example:dracula:0",
+      "type": "EXAMPLE",
+      "label": "Да, Дракула — известный литературный персонаж: вампир и аристократ.",
+      "weight": 0.7
+    },
+    {
+      "id": "example:dracula:1",
+      "type": "EXAMPLE",
+      "label": "Его обычно описывают как бессмертного хищника с холодной и жестокой натурой.",
+      "weight": 0.7
+    }
+  ],
+  "edges": [
+    {
+      "from": "person:dracula",
+      "to": "trait:dracula:вампир",
+      "type": "HAS_TRAIT",
+      "weight": 1.0
+    },
+    {
+      "from": "person:dracula",
+      "to": "trait:dracula:аристократ",
+      "type": "HAS_TRAIT",
+      "weight": 1.0
+    },
+    {
+      "from": "person:dracula",
+      "to": "trait:dracula:бессмертный",
+      "type": "HAS_TRAIT",
+      "weight": 1.0
+    },
+    {
+      "from": "person:dracula",
+      "to": "trait:dracula:жестокий",
+      "type": "HAS_TRAIT",
+      "weight": 1.0
+    }
+  ]
+}

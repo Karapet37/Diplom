@@ -1,0 +1,191 @@
+{
+  "session_id": "session-ed54b4ced4e5",
+  "title": "New session",
+  "created_at": "2026-03-13T04:30:10.279440+00:00",
+  "updated_at": "2026-03-13T18:31:32.001868+00:00",
+  "last_query": "а кто леонард для тебя",
+  "tools": {
+    "user_id": "local_user",
+    "extra_context": "",
+    "personality_name": "sheldon_cooper"
+  },
+  "messages": [
+    {
+      "id": "user-0",
+      "role": "user",
+      "message": "Шелдон Ли Купер (англ. Sheldon Lee Cooper) — вымышленный персонаж, один из основных героев американского телесериала «Теория Большого взрыва» и его спин-оффа «Детство Шелдона». Роль Шелдона Купера в «Теории Большого взрыва» исполняет Джим Парсонс, получивший за неё премии «Эмми» (2010, 2011, 2013, 2014) и «Золотой глобус» (2011) как лучший актёр комедийного сериала. Иэн Армитидж исполнял роль Шелдона Купера в сериале «Детство Шелдона».",
+      "timestamp": "08:30"
+    },
+    {
+      "id": "assistant-1",
+      "role": "assistant",
+      "message": "I think { \"task\": \"behavioral_dialogue_simulation_fast\", \"response\": \"Эй, ты что-то там про Шелдона Ли Купера написал. Ну и что? Это же какой-то там актер из какого-то сериала. Чем он тебе интересен?\" }",
+      "timestamp": "08:31"
+    },
+    {
+      "id": "user-2",
+      "role": "user",
+      "message": "мне интересен его образ мышления",
+      "timestamp": "08:31"
+    },
+    {
+      "id": "assistant-3",
+      "role": "assistant",
+      "message": "I think {",
+      "timestamp": "08:32"
+    },
+    {
+      "id": "\"response\"-4",
+      "role": "\"response\"",
+      "message": "\"Ну и что? Ты хочешь знать, как он думает? А я-то чего? Мне-то что до его мыслей? Ладно, если тебе интересно, то он, похоже, очень упертый и не любит, когда его опровергают. Но это не значит, что он всегда прав. Может, просто боится ошибиться.\"",
+      "timestamp": "08:32"
+    },
+    {
+      "id": "user-5",
+      "role": "user",
+      "message": "скажешь мне его характеристики как человека?",
+      "timestamp": "08:33"
+    },
+    {
+      "id": "assistant-6",
+      "role": "assistant",
+      "message": "I think { \"character\": \"Шелдон Ли Купер\", \"traits\": [ \"очень умный, но иногда бывает занудным\", \"любит физику и теорию относительности\", \"не очень понимает нюансы человеческих взаимоотношений\", \"очень структурирован и организован\", \"имеет слабость к кошкам\", \"не любит, когда его что-то беспокоит\" ] }",
+      "timestamp": "08:33"
+    },
+    {
+      "id": "user-7",
+      "role": "user",
+      "message": "психические заболевания?",
+      "timestamp": "08:34"
+    },
+    {
+      "id": "assistant-8",
+      "role": "assistant",
+      "message": "I think { \"response\": \"Психические заболевания? Тут у Шелдона Ли Купера информации нет. Может, и есть какие-то странные мысли, но это же фантастика, там всё можно. А что ты имел в виду?\" }",
+      "timestamp": "08:34"
+    },
+    {
+      "id": "user-9",
+      "role": "user",
+      "message": "помню размножения личности, беззаботного шелдона хотели принять перед свадьбой. или как он донимал артура после смерти. эти галлюцинации во сне и мизофобия, боязнь криков и избегание перемен?",
+      "timestamp": "08:37"
+    },
+    {
+      "id": "assistant-10",
+      "role": "assistant",
+      "message": "I think {}",
+      "timestamp": "08:37"
+    },
+    {
+      "id": "user-11",
+      "role": "user",
+      "message": "помню размножения личности, беззаботного шелдона хотели принять перед свадьбой. или как он донимал артура после смерти. эти галлюцинации во сне и мизофобия, боязнь криков и избегание перемен. может есть среди этого психболезни",
+      "timestamp": "08:38"
+    },
+    {
+      "id": "assistant-12",
+      "role": "assistant",
+      "message": "I think {}",
+      "timestamp": "08:38"
+    },
+    {
+      "id": "user-13",
+      "role": "user",
+      "message": "помню размножения личности, беззаботного шелдона хотели принять перед свадьбой. или как он донимал артура после смерти. эти галлюцинации во сне и мизофобия, боязнь криков и избегание перемен. может есть среди этого психболезни",
+      "timestamp": "12:12"
+    },
+    {
+      "id": "assistant-14",
+      "role": "assistant",
+      "message": "Шелдон может страдать от психических болезней, таких как мизофония или галлюцинации во сне. Это связано с его боязнью криков и избеганием перемен. Однако, для точного диагноза недостаточно данных. Нужно более подробную информацию о его поведении и симптомах.",
+      "timestamp": "12:15"
+    },
+    {
+      "id": "user-15",
+      "role": "user",
+      "message": "дай мне его анкету",
+      "timestamp": "12:17"
+    },
+    {
+      "id": "assistant-16",
+      "role": "assistant",
+      "message": "behavioral_dialogue_simulation_fast Respond in Russian.; Use only the RAM graph and personality data below.; Use the user message as the main target.; Do not answer like a polite assistant.; If evidence is weak, say what is missing inside the character's logic.; Return plain text only.; Do not output JSON.; Do not prefix the answer with thoughts like 'I think'.; User style profile is active. Match style, not content.",
+      "timestamp": "12:18"
+    },
+    {
+      "id": "Sentence length target-17",
+      "role": "Sentence length target",
+      "message": "0.00",
+      "timestamp": "12:18"
+    },
+    {
+      "id": "Slang level-18",
+      "role": "Slang level",
+      "message": "0.00",
+      "timestamp": "12:18"
+    },
+    {
+      "id": "Formality-19",
+      "role": "Formality",
+      "message": "0.00",
+      "timestamp": "12:18"
+    },
+    {
+      "id": "Aggressiveness-20",
+      "role": "Aggressiveness",
+      "message": "0.00",
+      "timestamp": "12:18"
+    },
+    {
+      "id": "Humor level-21",
+      "role": "Humor level",
+      "message": "0.00",
+      "timestamp": "12:18"
+    },
+    {
+      "id": "Punctuation style-22",
+      "role": "Punctuation style",
+      "message": "0.00",
+      "timestamp": "12:18"
+    },
+    {
+      "id": "Directness-23",
+      "role": "Directness",
+      "message": "0.00",
+      "timestamp": "12:18"
+    },
+    {
+      "id": "Profanity tolerance-24",
+      "role": "Profanity tolerance",
+      "message": "0.00",
+      "timestamp": "12:18"
+    },
+    {
+      "id": "user-25",
+      "role": "user",
+      "message": "леонард хофстедер. кто он?",
+      "timestamp": "12:59"
+    },
+    {
+      "id": "assistant-26",
+      "role": "assistant",
+      "message": "Леонард Хофстедер - это вымышленный персонаж, один из основных героев американского телесериала «Теория большого взрыва». Этот персонаж не указан в предоставленном контексте, поэтому невозможно сказать точно, кто именно вы имеете в виду.",
+      "timestamp": "13:02"
+    },
+    {
+      "id": "msg-user-1773426648381",
+      "role": "user",
+      "message": "а кто леонард для тебя",
+      "timestamp": "22:30"
+    },
+    {
+      "id": "msg-assistant-1773426691994-done",
+      "role": "assistant",
+      "message": "Леонард для меня - это вымышленный персонаж, один из основных героев американского телесериала «Теория большого взрыва». Этот персонаж не указан в предоставленном контексте, поэтому невозможно сказать точно, кто именно вы имеете в виду.",
+      "timestamp": "22:31"
+    }
+  ],
+  "attached_source_ids": [
+    "source:session:session-ed54b4ced4e5"
+  ]
+}

@@ -1,62 +1,31 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  createCognitiveEdge,
-  createCognitiveNode,
   createCognitiveSession,
+  getCognitiveGraph,
   getCognitiveGraphSubgraph,
-  getCognitiveHealth,
   getCognitiveSession,
-  getCognitiveStyleProfile,
-  getControlState,
   getHealth,
-  getStatus,
-  learnCognitiveStyle,
+  listCognitivePersonalities,
   listCognitiveSessions,
-  loadCognitiveFoundation,
+  rebuildCognitiveGraph,
   respondCognitiveChat,
-  saveCognitiveSession,
-  updateCognitiveEdge,
-  updateCognitiveNode,
-} from "./api";
-import { ChatGraphPanel } from "./components/Chat/ChatGraphPanel";
-import { GraphEditorPanel } from "./components/Editor/GraphEditorPanel";
-import { GraphWorkspace } from "./components/Graph/GraphWorkspace";
-import { Sidebar } from "./components/Layout/Sidebar";
-import { TopBar } from "./components/Layout/TopBar";
-import { createTranslator, LANGUAGE_OPTIONS } from "./lib/i18n";
+  uploadCognitiveFiles,
+} from './api';
+import { ChatGraphPanel } from './components/Chat/ChatGraphPanel';
+import { GraphWorkspace } from './components/Graph/GraphWorkspace';
+import { Sidebar } from './components/Layout/Sidebar';
+import { TopBar } from './components/Layout/TopBar';
+import { createTranslator, LANGUAGE_OPTIONS } from './lib/i18n';
 
-const LANGUAGE_STORAGE_KEY = "workspace_ui_language_v3";
-
-const EMPTY_TOOLS = {
-  user_id: "local_user",
-  extra_context: "",
-};
-
-const EMPTY_SUBGRAPH = {
-  nodes: [],
-  edges: [],
-  seed_node_ids: [],
-  query: "",
-};
-
-function nowStamp() {
-  return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function linesToList(value) {
-  return String(value || "")
-    .split(/\n|,/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
+const LANGUAGE_STORAGE_KEY = 'workspace_ui_language_mvp';
 
 function buildLoopSets(edges) {
   const pairCounts = new Set();
   const twoCycleKeys = new Set();
   const loopNodeIds = new Set();
   for (const edge of edges || []) {
-    const src = String(edge.src_id || "");
-    const dst = String(edge.dst_id || "");
+    const src = String(edge.from || edge.src_id || '');
+    const dst = String(edge.to || edge.dst_id || '');
     if (!src || !dst) continue;
     if (src === dst) {
       loopNodeIds.add(src);
@@ -65,656 +34,352 @@ function buildLoopSets(edges) {
     pairCounts.add(`${src}|${dst}`);
   }
   for (const edge of edges || []) {
-    const src = String(edge.src_id || "");
-    const dst = String(edge.dst_id || "");
+    const src = String(edge.from || edge.src_id || '');
+    const dst = String(edge.to || edge.dst_id || '');
     if (!src || !dst || src === dst) continue;
     if (pairCounts.has(`${dst}|${src}`)) {
-      loopNodeIds.add(src);
-      loopNodeIds.add(dst);
       twoCycleKeys.add(`${src}|${dst}`);
       twoCycleKeys.add(`${dst}|${src}`);
+      loopNodeIds.add(src);
+      loopNodeIds.add(dst);
     }
   }
   return { loopNodeIds, twoCycleKeys };
 }
 
-function buildNodeDraft(node) {
-  if (!node) {
-    return {
-      id: "",
-      type: "",
-      label: "",
-      short_gloss: "",
-      what_it_is: "",
-      how_it_works: "",
-      how_to_recognize: "",
-      examplesText: "",
-      tagsText: "",
-    };
-  }
-  return {
-    id: String(node.id || ""),
-    type: String(node.type || ""),
-    label: String(node.label || node.name || ""),
-    short_gloss: String(node.short_gloss || node.description || ""),
-    what_it_is: String(node.what_it_is || node.plain_explanation || ""),
-    how_it_works: String(node.how_it_works || ""),
-    how_to_recognize: String(node.how_to_recognize || ""),
-    examplesText: Array.isArray(node.examples) ? node.examples.join("\n") : "",
-    tagsText: Array.isArray(node.tags) ? node.tags.join(", ") : "",
-  };
+function nodeIdentity(node) {
+  if (!node) return '';
+  return [node.name || node.id, node.type ? `(${node.type})` : ''].filter(Boolean).join(' ');
 }
 
-function buildEdgeDraft(edge) {
-  if (!edge) {
-    return { src_id: "", dst_id: "", type: "", weight: 1, confidence: 0.7 };
-  }
-  return {
-    src_id: String(edge.src_id || ""),
-    dst_id: String(edge.dst_id || ""),
-    type: String(edge.type || ""),
-    weight: Number(edge.weight ?? 1),
-    confidence: Number(edge.confidence ?? 0.7),
-  };
+function nodeDescription(node) {
+  if (!node) return '';
+  const traits = Array.isArray(node.attributes?.traits) && node.attributes.traits.length
+    ? `traits=${node.attributes.traits.join(', ')}`
+    : '';
+  const parts = [
+    node.description || node.short_gloss || '',
+    traits,
+    `importance=${Number(node.importance ?? 0).toFixed(2)}`,
+    `confidence=${Number(node.confidence ?? 0).toFixed(2)}`,
+    `frequency=${Number(node.frequency ?? 0).toFixed(0)}`,
+  ].filter(Boolean);
+  return parts.join(' | ');
+}
+
+function nodeRelations(nodeId, edges, nodesById) {
+  if (!nodeId) return [];
+  return (edges || [])
+    .filter((edge) => String(edge.from || edge.src_id || '') === String(nodeId) || String(edge.to || edge.dst_id || '') === String(nodeId))
+    .map((edge) => {
+      const from = String(edge.from || edge.src_id || '');
+      const to = String(edge.to || edge.dst_id || '');
+      const otherId = from === String(nodeId) ? to : from;
+      const otherNode = nodesById.get(otherId);
+      return {
+        key: `${from}|${edge.type}|${to}`,
+        type: edge.type,
+        weight: Number(edge.weight ?? 1).toFixed(2),
+        other: otherNode?.name || otherNode?.id || otherId,
+        direction: from === String(nodeId) ? 'out' : 'in',
+      };
+    });
 }
 
 export default function App() {
   const [uiLanguage, setUiLanguage] = useState(() => {
-    if (typeof window === "undefined") return "en";
-    return window.localStorage.getItem(LANGUAGE_STORAGE_KEY) || "en";
+    if (typeof window === 'undefined') return 'ru';
+    return window.localStorage.getItem(LANGUAGE_STORAGE_KEY) || 'ru';
   });
   const t = useMemo(() => createTranslator(uiLanguage), [uiLanguage]);
 
-  const [workspace, setWorkspace] = useState("chat");
+  const [workspace, setWorkspace] = useState('chat');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
+  const [error, setError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const [health, setHealth] = useState(null);
-  const [status, setStatus] = useState(null);
-  const [controlState, setControlState] = useState(null);
-  const [cognitiveHealth, setCognitiveHealth] = useState(null);
 
   const [sessions, setSessions] = useState([]);
-  const [activeSessionId, setActiveSessionId] = useState("");
+  const [activeSessionId, setActiveSessionId] = useState('');
   const [activeSession, setActiveSession] = useState(null);
-  const [sessionTools, setSessionTools] = useState(EMPTY_TOOLS);
-
-  const [chatInput, setChatInput] = useState("");
+  const [chatInput, setChatInput] = useState('');
   const [chatRunning, setChatRunning] = useState(false);
-  const [chatProgress, setChatProgress] = useState("");
-  const [styleLearning, setStyleLearning] = useState(false);
-  const [styleProfile, setStyleProfile] = useState(null);
+  const [chatProgress, setChatProgress] = useState('');
 
-  const [graphQuery, setGraphQuery] = useState("");
-  const [subgraph, setSubgraph] = useState(EMPTY_SUBGRAPH);
-  const [subgraphLoading, setSubgraphLoading] = useState(false);
+  const [personalities, setPersonalities] = useState([]);
+  const [selectedPersonality, setSelectedPersonality] = useState('');
+  const [uploadingFiles, setUploadingFiles] = useState(false);
+
+  const [graphData, setGraphData] = useState({ nodes: [], edges: [], seed_node_ids: [], query: '' });
+  const [graphQuery, setGraphQuery] = useState('');
+  const [rebuildingGraph, setRebuildingGraph] = useState(false);
   const [selection, setSelection] = useState(null);
-  const [nodeDraft, setNodeDraft] = useState(buildNodeDraft(null));
-  const [edgeDraft, setEdgeDraft] = useState(buildEdgeDraft(null));
-  const [createNodeDraft, setCreateNodeDraft] = useState({
-    node_id: "",
-    type: "CONCEPT",
-    label: "",
-    name: "",
-    short_gloss: "",
-    description: "",
-    what_it_is: "",
-    plain_explanation: "",
-  });
-  const [relationDraft, setRelationDraft] = useState({
-    src_id: "",
-    dst_id: "",
-    type: "RELATED_TO",
-    weight: 1,
-    confidence: 0.7,
-  });
-  const [savingNode, setSavingNode] = useState(false);
-  const [savingEdge, setSavingEdge] = useState(false);
-  const [creatingNode, setCreatingNode] = useState(false);
-  const [creatingRelation, setCreatingRelation] = useState(false);
-  const [seedRunning, setSeedRunning] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== 'undefined') {
       window.localStorage.setItem(LANGUAGE_STORAGE_KEY, uiLanguage);
     }
   }, [uiLanguage]);
 
-  useEffect(() => {
-    let active = true;
-    const boot = async () => {
-      setLoading(true);
-      try {
-        const [nextHealth, nextStatus, nextControlState, nextCognitiveHealth, sessionResult] = await Promise.all([
-          getHealth(),
-          getStatus(),
-          getControlState(),
-          getCognitiveHealth(),
-          listCognitiveSessions(),
-        ]);
-        if (!active) return;
-        setHealth(nextHealth);
-        setStatus(nextStatus);
-        setControlState(nextControlState);
-        setCognitiveHealth(nextCognitiveHealth);
-        const nextSessions = sessionResult.sessions || [];
-        setSessions(nextSessions);
-        if (nextSessions.length) {
-          await loadSession(nextSessions[0].session_id, { suppressError: true });
-        } else {
-          await createSession();
-        }
-      } catch (bootError) {
-        if (active) {
-          setError(bootError.message || String(bootError));
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    };
-    void boot();
-    return () => {
-      active = false;
-    };
-  }, []);
+  async function handleCreateSession() {
+    const result = await createCognitiveSession({ title: 'New session' });
+    const session = result.session;
+    setSessions((current) => [session, ...current.filter((item) => item.session_id !== session.session_id)]);
+    setActiveSession(session);
+    setActiveSessionId(session.session_id);
+    return session;
+  }
 
-  useEffect(() => {
-    if (selection?.kind === "node") {
-      setNodeDraft(buildNodeDraft(selection.payload));
-      setRelationDraft((current) => ({ ...current, src_id: String(selection.id || "") }));
-      return;
-    }
-    if (selection?.kind === "edge") {
-      setEdgeDraft(buildEdgeDraft(selection.payload));
-      return;
-    }
-    setNodeDraft(buildNodeDraft(null));
-    setEdgeDraft(buildEdgeDraft(null));
-  }, [selection]);
+  async function loadSession(sessionId) {
+    const session = await getCognitiveSession(sessionId);
+    setActiveSession(session);
+    setActiveSessionId(session.session_id);
+    return session;
+  }
 
-  useEffect(() => {
-    const query = String(graphQuery || "").trim();
-    if (!query) {
-      setSubgraph(EMPTY_SUBGRAPH);
-      return;
-    }
-    let active = true;
-    setSubgraphLoading(true);
-    void getCognitiveGraphSubgraph({ query, limit: 32, hops: 1 })
-      .then((result) => {
-        if (!active) return;
-        setSubgraph({
-          nodes: result.nodes || [],
-          edges: result.edges || [],
-          seed_node_ids: result.seed_node_ids || [],
-          query: result.query || query,
-        });
-      })
-      .catch((subgraphError) => {
-        if (active) {
-          setError(subgraphError.message || String(subgraphError));
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setSubgraphLoading(false);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [graphQuery]);
+  async function loadGraph(query) {
+    const result = query ? await getCognitiveGraphSubgraph(query, 16) : await getCognitiveGraph();
+    setGraphData({
+      nodes: result.nodes || [],
+      edges: result.edges || [],
+      seed_node_ids: result.seed_node_ids || [],
+      query: result.query || query || '',
+    });
+    return result;
+  }
 
-  const loopSets = useMemo(() => buildLoopSets(subgraph.edges), [subgraph.edges]);
-
-  async function refreshSystem() {
-    setRefreshing(true);
+  async function bootstrap() {
+    setLoading(true);
+    setError('');
     try {
-      const [nextHealth, nextStatus, nextControlState, nextCognitiveHealth, sessionResult] = await Promise.all([
+      const [nextHealth, personalityResult, sessionsResult] = await Promise.all([
         getHealth(),
-        getStatus(),
-        getControlState(),
-        getCognitiveHealth(),
+        listCognitivePersonalities(),
         listCognitiveSessions(),
       ]);
       setHealth(nextHealth);
-      setStatus(nextStatus);
-      setControlState(nextControlState);
-      setCognitiveHealth(nextCognitiveHealth);
-      setSessions(sessionResult.sessions || []);
-    } catch (refreshError) {
-      setError(refreshError.message || String(refreshError));
+      setPersonalities(personalityResult.personalities || []);
+      const nextSessions = sessionsResult.sessions || [];
+      setSessions(nextSessions);
+      if (nextSessions.length) {
+        await loadSession(nextSessions[0].session_id);
+      } else {
+        await handleCreateSession();
+      }
+      await loadGraph('');
+    } catch (bootError) {
+      setError(bootError.message || String(bootError));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void bootstrap();
+  }, []);
+
+  async function refreshAll() {
+    setRefreshing(true);
+    try {
+      await bootstrap();
     } finally {
       setRefreshing(false);
     }
   }
 
-  async function createSession() {
-    try {
-      const result = await createCognitiveSession({ title: "New session", tools: sessionTools });
-      const session = result.session;
-      setSessions((current) => [summarizeSession(session), ...current.filter((item) => item.session_id !== session.session_id)]);
-      setActiveSessionId(session.session_id);
-      setActiveSession(session);
-      setSessionTools({ ...EMPTY_TOOLS, ...(session.tools || {}) });
-      setGraphQuery("");
-      setWorkspace("chat");
-      return session;
-    } catch (createError) {
-      setError(createError.message || String(createError));
-      return null;
-    }
-  }
-
-  async function loadSession(sessionId, options = {}) {
-    try {
-      const result = await getCognitiveSession(sessionId);
-      const session = result.session;
-      setActiveSessionId(session.session_id);
-      setActiveSession(session);
-      setSessionTools({ ...EMPTY_TOOLS, ...(session.tools || {}) });
-      setGraphQuery(session.last_query || "");
-      if (session.tools?.user_id) {
-        try {
-          const profile = await getCognitiveStyleProfile(session.tools.user_id);
-          setStyleProfile(profile.profile || null);
-        } catch (_ignored) {
-          setStyleProfile(null);
-        }
-      } else {
-        setStyleProfile(null);
-      }
-    } catch (sessionError) {
-      if (!options.suppressError) {
-        setError(sessionError.message || String(sessionError));
-      }
-    }
-  }
-
-  async function persistSession(nextSession) {
-    if (!nextSession?.session_id) return;
-    const result = await saveCognitiveSession(nextSession.session_id, {
-      title: nextSession.title,
-      last_query: nextSession.last_query || "",
-      tools: nextSession.tools || {},
-      messages: nextSession.messages || [],
-    });
-    const saved = result.session;
-    setActiveSession(saved);
-    setSessions((current) => [summarizeSession(saved), ...current.filter((item) => item.session_id !== saved.session_id)]);
-  }
-
-  async function runChat() {
-    if (!chatInput.trim()) return;
-    setError("");
+  async function handleRunChat() {
+    const message = chatInput.trim();
+    if (!message || chatRunning) return;
     setChatRunning(true);
-    setChatProgress(t("chat_thinking"));
-    const baseSession = activeSession?.session_id ? activeSession : await createSession();
-    if (!baseSession?.session_id) {
-      setChatRunning(false);
-      setChatProgress("");
-      return;
-    }
-
-    const userMessage = {
-      id: `msg-user-${Date.now()}`,
-      role: "user",
-      message: chatInput.trim(),
-      timestamp: nowStamp(),
-    };
-    const placeholder = {
-      id: `msg-assistant-${Date.now()}`,
-      role: "assistant",
-      message: t("chat_thinking"),
-      timestamp: nowStamp(),
-      metadata: {},
-    };
-    const optimisticSession = {
-      ...baseSession,
-      title: baseSession.title || buildSessionTitle(chatInput),
-      last_query: chatInput.trim(),
-      tools: sessionTools,
-      messages: [...(baseSession.messages || []), userMessage, placeholder],
-    };
-    setActiveSession(optimisticSession);
-    setSessions((current) => [summarizeSession(optimisticSession), ...current.filter((item) => item.session_id !== optimisticSession.session_id)]);
-    const outgoing = chatInput;
-    setChatInput("");
-
+    setChatProgress(t('chat_running'));
+    setError('');
     try {
+      const sessionId = activeSessionId || (await handleCreateSession()).session_id;
       const result = await respondCognitiveChat({
-        message: outgoing,
-        context: sessionTools.extra_context || "",
-        user_id: sessionTools.user_id || "",
-        save_to_graph: true,
-        apply_to_graph: true,
+        message,
+        session_id: sessionId,
+        language: uiLanguage,
+        personality_name: selectedPersonality,
       });
-      const assistantMessage = {
-        id: `msg-assistant-${Date.now()}-done`,
-        role: "assistant",
-        message: result.assistant_reply || t("chat_no_reply"),
-        timestamp: nowStamp(),
-        metadata: {
-          graphDiff: result.graph_diff || null,
-          graphJob: result.graph_job || null,
-          contextNodes: result.context_nodes || result.ram_graph?.ranked_context || [],
-          ramGraph: result.ram_graph || {},
-          style: result.style || null,
-        },
-      };
-      const savedSession = {
-        ...optimisticSession,
-        messages: [...(baseSession.messages || []), userMessage, assistantMessage],
-      };
-      await persistSession(savedSession);
-      setGraphQuery(outgoing);
+      setChatInput('');
+      if (result.session) {
+        setActiveSession(result.session);
+        setActiveSessionId(result.session.session_id);
+        setSessions((current) => [result.session, ...current.filter((item) => item.session_id !== result.session.session_id)]);
+      } else {
+        await loadSession(sessionId);
+      }
+      const followupQuery = result.current_entity || selectedPersonality || message;
+      await loadGraph(followupQuery);
+      setWorkspace('chat');
     } catch (runError) {
       setError(runError.message || String(runError));
-      const failedSession = {
-        ...baseSession,
-        messages: [...(baseSession.messages || []), userMessage],
-      };
-      setActiveSession(failedSession);
-      await persistSession({ ...failedSession, tools: sessionTools, last_query: outgoing });
     } finally {
       setChatRunning(false);
-      setChatProgress("");
+      setChatProgress('');
     }
   }
 
-  async function runLearnStyle() {
-    const userId = String(sessionTools.user_id || "").trim();
-    const session = activeSession;
-    if (!userId || !session?.messages?.length) return;
-    setStyleLearning(true);
+  async function handleUploadFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length || uploadingFiles) return;
+    setUploadingFiles(true);
+    setError('');
     try {
-      const result = await learnCognitiveStyle({
-        user_id: userId,
-        learn_style_button: true,
-        messages: session.messages.map((item) => ({ role: item.role, message: item.message })),
-        max_messages: 12,
-      });
-      setStyleProfile(result.profile || null);
-    } catch (styleError) {
-      setError(styleError.message || String(styleError));
+      const sessionId = activeSessionId || (await handleCreateSession()).session_id;
+      await uploadCognitiveFiles(sessionId, files);
+      await loadSession(sessionId);
+      await loadGraph(graphQuery.trim() || selectedPersonality || activeSession?.title || files[0].name || '');
+      setWorkspace('graph');
+    } catch (uploadError) {
+      setError(uploadError.message || String(uploadError));
     } finally {
-      setStyleLearning(false);
+      setUploadingFiles(false);
     }
   }
 
-  async function loadFoundation(datasetId) {
-    setSeedRunning(true);
+  async function handleGraphSearch() {
     try {
-      await loadCognitiveFoundation({ dataset_id: datasetId, replace_graph: true });
-      if (graphQuery.trim()) {
-        const result = await getCognitiveGraphSubgraph({ query: graphQuery.trim(), limit: 32, hops: 1 });
-        setSubgraph({
-          nodes: result.nodes || [],
-          edges: result.edges || [],
-          seed_node_ids: result.seed_node_ids || [],
-          query: result.query || graphQuery.trim(),
-        });
-      }
-    } catch (seedError) {
-      setError(seedError.message || String(seedError));
-    } finally {
-      setSeedRunning(false);
+      await loadGraph(graphQuery.trim());
+      setWorkspace('graph');
+    } catch (graphError) {
+      setError(graphError.message || String(graphError));
     }
   }
 
-  async function saveSelectedNode() {
-    if (!nodeDraft.id) return;
-    setSavingNode(true);
+  async function handleGraphRebuild() {
+    setRebuildingGraph(true);
+    setError('');
     try {
-      const result = await updateCognitiveNode(nodeDraft.id, {
-        type: nodeDraft.type,
-        label: nodeDraft.label,
-        short_gloss: nodeDraft.short_gloss,
-        what_it_is: nodeDraft.what_it_is,
-        how_it_works: nodeDraft.how_it_works,
-        how_to_recognize: nodeDraft.how_to_recognize,
-        examples: linesToList(nodeDraft.examplesText),
-        tags: linesToList(nodeDraft.tagsText),
-      });
-      setSelection({ kind: "node", id: nodeDraft.id, payload: result.node });
-      if (graphQuery.trim()) {
-        const refreshed = await getCognitiveGraphSubgraph({ query: graphQuery.trim(), limit: 32, hops: 1 });
-        setSubgraph({
-          nodes: refreshed.nodes || [],
-          edges: refreshed.edges || [],
-          seed_node_ids: refreshed.seed_node_ids || [],
-          query: refreshed.query || graphQuery.trim(),
-        });
-      }
-    } catch (saveError) {
-      setError(saveError.message || String(saveError));
+      await rebuildCognitiveGraph({ session_id: activeSessionId, personality_name: selectedPersonality });
+      await loadGraph(graphQuery.trim() || selectedPersonality || activeSession?.title || '');
+    } catch (rebuildError) {
+      setError(rebuildError.message || String(rebuildError));
     } finally {
-      setSavingNode(false);
+      setRebuildingGraph(false);
     }
   }
 
-  async function saveSelectedEdge() {
-    if (!edgeDraft.src_id || !edgeDraft.dst_id || !edgeDraft.type) return;
-    setSavingEdge(true);
-    try {
-      const result = await updateCognitiveEdge(edgeDraft);
-      setSelection({ kind: "edge", id: `${edgeDraft.src_id}|${edgeDraft.type}|${edgeDraft.dst_id}`, payload: result.edge });
-      if (graphQuery.trim()) {
-        const refreshed = await getCognitiveGraphSubgraph({ query: graphQuery.trim(), limit: 32, hops: 1 });
-        setSubgraph({
-          nodes: refreshed.nodes || [],
-          edges: refreshed.edges || [],
-          seed_node_ids: refreshed.seed_node_ids || [],
-          query: refreshed.query || graphQuery.trim(),
-        });
-      }
-    } catch (saveError) {
-      setError(saveError.message || String(saveError));
-    } finally {
-      setSavingEdge(false);
-    }
-  }
-
-  async function createNode() {
-    if (!createNodeDraft.node_id || !createNodeDraft.label) return;
-    setCreatingNode(true);
-    try {
-      await createCognitiveNode(createNodeDraft);
-      const nextQuery = graphQuery.trim() || createNodeDraft.label;
-      setGraphQuery(nextQuery);
-      setCreateNodeDraft({
-        node_id: "",
-        type: "CONCEPT",
-        label: "",
-        name: "",
-        short_gloss: "",
-        description: "",
-        what_it_is: "",
-        plain_explanation: "",
-      });
-    } catch (createError) {
-      setError(createError.message || String(createError));
-    } finally {
-      setCreatingNode(false);
-    }
-  }
-
-  async function createRelation() {
-    if (!relationDraft.src_id || !relationDraft.dst_id || !relationDraft.type) return;
-    setCreatingRelation(true);
-    try {
-      await createCognitiveEdge(relationDraft);
-      if (graphQuery.trim()) {
-        const refreshed = await getCognitiveGraphSubgraph({ query: graphQuery.trim(), limit: 32, hops: 1 });
-        setSubgraph({
-          nodes: refreshed.nodes || [],
-          edges: refreshed.edges || [],
-          seed_node_ids: refreshed.seed_node_ids || [],
-          query: refreshed.query || graphQuery.trim(),
-        });
-      }
-      setRelationDraft((current) => ({ ...current, dst_id: "", type: "RELATED_TO", weight: 1, confidence: 0.7 }));
-    } catch (createError) {
-      setError(createError.message || String(createError));
-    } finally {
-      setCreatingRelation(false);
-    }
-  }
-
-  const selectionLabel = selection?.kind === "node"
-    ? (selection.payload?.label || selection.payload?.name || selection.id)
-    : selection?.kind === "edge"
-      ? `${selection.payload?.src_id || ""} → ${selection.payload?.dst_id || ""}`
-      : "";
+  const loops = useMemo(() => buildLoopSets(graphData.edges || []), [graphData.edges]);
+  const nodesById = useMemo(() => new Map((graphData.nodes || []).map((node) => [String(node.id), node])), [graphData.nodes]);
+  const selectedNode = selection?.kind === 'node' ? selection.payload : null;
+  const selectedNodeRelations = useMemo(() => nodeRelations(selectedNode?.id, graphData.edges || [], nodesById), [selectedNode, graphData.edges, nodesById]);
 
   if (loading) {
-    return (
-      <div className="operating-room loading-screen">
-        <div className="loading-card glass-panel">
-          <p className="eyebrow">{t("common_loading")}</p>
-          <h1>{t("top_title")}</h1>
-        </div>
-      </div>
-    );
+    return <main className="app-shell loading-shell"><div className="empty-state large"><h2>Loading...</h2></div></main>;
   }
 
   return (
-    <div className="operating-room">
+    <main className="app-shell">
       <TopBar
         health={health}
-        engineHealth={cognitiveHealth}
-        controlState={controlState}
-        searchTerm={graphQuery}
-        onSearchChange={setGraphQuery}
         language={uiLanguage}
         languageOptions={LANGUAGE_OPTIONS}
         onLanguageChange={setUiLanguage}
-        onRefresh={() => void refreshSystem()}
-        onRebuild={null}
-        onRunQuality={null}
+        onRefresh={refreshAll}
         refreshing={refreshing}
-        rebuilding={false}
-        qualityRunning={false}
         t={t}
       />
-
-      {error ? (
-        <section className="glass-panel error-banner">
-          <strong>{t("runtime_error")}</strong>
-          <span>{error}</span>
-        </section>
-      ) : null}
-
-      <div className="operating-room__body workspace-shell">
+      <div className="or-layout">
         <Sidebar
           workspace={workspace}
           onWorkspaceChange={setWorkspace}
           sessions={sessions}
           activeSessionId={activeSessionId}
           onSelectSession={(sessionId) => void loadSession(sessionId)}
-          onCreateSession={() => void createSession()}
-          sessionTools={sessionTools}
-          onSessionToolsChange={(tools) => {
-            setSessionTools(tools);
-            if (activeSession?.session_id) {
-              void persistSession({ ...activeSession, tools });
-            }
-          }}
-          onLearnStyle={() => void runLearnStyle()}
-          styleLearning={styleLearning}
-          styleProfile={styleProfile}
+          onCreateSession={() => void handleCreateSession()}
+          personalities={personalities}
+          selectedPersonality={selectedPersonality}
+          onSelectPersonality={setSelectedPersonality}
+          onUploadFiles={(files) => void handleUploadFiles(files)}
+          uploadingFiles={uploadingFiles}
           graphQuery={graphQuery}
           onGraphQueryChange={setGraphQuery}
-          onUseSessionQuery={() => setGraphQuery(activeSession?.last_query || "")}
-          onQuickLoadHuman={() => void loadFoundation("human_foundations")}
-          onQuickLoadPsychology={() => void loadFoundation("psychology_foundations")}
-          seedRunning={seedRunning}
+          onGraphSearch={() => void handleGraphSearch()}
+          onGraphRebuild={() => void handleGraphRebuild()}
+          rebuildingGraph={rebuildingGraph}
           t={t}
         />
 
-        <div className="workspace-center workspace-center--single">
-          {workspace === "chat" ? (
+        <section className="workspace-main">
+          {error ? <div className="error-banner">{error}</div> : null}
+
+          {workspace === 'chat' ? (
             <ChatGraphPanel
               session={activeSession}
               value={chatInput}
               onChange={setChatInput}
               running={chatRunning}
               progress={chatProgress}
-              onRun={() => void runChat()}
+              onRun={() => void handleRunChat()}
               t={t}
             />
           ) : (
-            <div className="graph-workspace-shell">
-              <section className="graph-stage glass-panel">
-                <header className="panel-heading compact">
-                  <div>
-                    <p className="eyebrow">{t("graph_body")}</p>
-                    <h2>{t("sidebar_graph_workspace")}</h2>
-                    <p>{graphQuery ? `${t("graph_query_label")}: ${graphQuery}` : t("graph_workspace_empty_text")}</p>
-                  </div>
-                </header>
-                <GraphWorkspace
-                  nodes={subgraph.nodes}
-                  edges={subgraph.edges}
-                  loops={loopSets}
-                  selectedNodeId={selection?.kind === "node" ? selection.id : ""}
-                  selectedEdgeKey={selection?.kind === "edge" ? selection.id : ""}
-                  highlightedNodeIds={new Set(subgraph.seed_node_ids || [])}
-                  highlightedEdgeKeys={new Set()}
-                  searchHitIds={new Set(subgraph.seed_node_ids || [])}
-                  onSelectNode={(node) => setSelection({ kind: "node", id: String(node.id), payload: node })}
-                  onSelectEdge={(edge) => setSelection({ kind: "edge", id: edge.edge_key || `${edge.src_id}|${edge.type}|${edge.dst_id}`, payload: edge })}
-                  onClearSelection={() => setSelection(null)}
-                  t={t}
-                />
-                {subgraphLoading ? <div className="graph-inline-status">{t("top_refreshing")}</div> : null}
-              </section>
-
-              <GraphEditorPanel
-                selection={selection}
-                nodeDraft={nodeDraft}
-                edgeDraft={edgeDraft}
-                createNodeDraft={createNodeDraft}
-                relationDraft={relationDraft}
-                visibleNodes={subgraph.nodes}
-                onNodeDraftChange={setNodeDraft}
-                onEdgeDraftChange={setEdgeDraft}
-                onCreateNodeDraftChange={setCreateNodeDraft}
-                onRelationDraftChange={setRelationDraft}
-                onSaveNode={() => void saveSelectedNode()}
-                onSaveEdge={() => void saveSelectedEdge()}
-                onCreateNode={() => void createNode()}
-                onCreateRelation={() => void createRelation()}
-                savingNode={savingNode}
-                savingEdge={savingEdge}
-                creatingNode={creatingNode}
-                creatingRelation={creatingRelation}
+            <div className="graph-shell">
+              <div className="graph-toolbar glass-panel">
+                <label className="field-stack compact grow">
+                  <span>{t('graph_query')}</span>
+                  <input value={graphQuery} onChange={(event) => setGraphQuery(event.target.value)} placeholder={t('graph_query_placeholder')} />
+                </label>
+                <button type="button" onClick={() => void handleGraphSearch()}>{t('graph_search')}</button>
+                <button type="button" onClick={() => void handleGraphRebuild()} disabled={rebuildingGraph}>
+                  {rebuildingGraph ? t('graph_rebuilding') : t('graph_rebuild')}
+                </button>
+              </div>
+              <GraphWorkspace
+                nodes={graphData.nodes || []}
+                edges={graphData.edges || []}
+                loops={loops}
+                selectedNodeId={selection?.kind === 'node' ? selection.id : ''}
+                selectedEdgeKey={selection?.kind === 'edge' ? selection.id : ''}
+                highlightedNodeIds={new Set(graphData.seed_node_ids || [])}
+                highlightedEdgeKeys={new Set()}
+                searchHitIds={new Set(graphData.seed_node_ids || [])}
+                onSelectNode={(node) => setSelection({ kind: 'node', id: node.id, payload: node })}
+                onSelectEdge={(edge) => setSelection({ kind: 'edge', id: `${edge.from || edge.src_id}|${edge.type}|${edge.to || edge.dst_id}`, payload: edge })}
+                onClearSelection={() => setSelection(null)}
                 t={t}
               />
+              <section className="workspace-panel glass-panel node-answer-panel">
+                <header className="panel-heading compact">
+                  <div>
+                    <p className="eyebrow">Graph node</p>
+                    <h2>{selectedNode ? (selectedNode.name || selectedNode.id) : t('graph_no_selection')}</h2>
+                  </div>
+                </header>
+                {selectedNode ? (
+                  <div className="node-answer-grid">
+                    <section>
+                      <h3>{t('graph_node_identity')}</h3>
+                      <p>{nodeIdentity(selectedNode)}</p>
+                    </section>
+                    <section>
+                      <h3>{t('graph_node_description')}</h3>
+                      <p>{nodeDescription(selectedNode)}</p>
+                    </section>
+                    <section>
+                      <h3>{t('graph_node_relations')}</h3>
+                      {selectedNodeRelations.length ? (
+                        <ul className="dense-list">
+                          {selectedNodeRelations.map((item) => (
+                            <li key={item.key}>
+                              <strong>{item.direction === 'out' ? '->' : '<-'}</strong> {item.type} {item.other} <span>({item.weight})</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p>{t('graph_no_selection')}</p>
+                      )}
+                    </section>
+                  </div>
+                ) : (
+                  <p>{t('graph_no_selection')}</p>
+                )}
+              </section>
             </div>
           )}
-        </div>
+        </section>
       </div>
-    </div>
+    </main>
   );
-}
-
-function summarizeSession(session) {
-  return {
-    session_id: session.session_id,
-    title: session.title || "Untitled session",
-    created_at: session.created_at || "",
-    updated_at: session.updated_at || "",
-    last_query: session.last_query || "",
-    message_count: Array.isArray(session.messages) ? session.messages.length : 0,
-  };
-}
-
-function buildSessionTitle(message) {
-  const raw = String(message || "").trim();
-  if (!raw) return "New session";
-  return raw.length > 48 ? `${raw.slice(0, 48)}…` : raw;
 }

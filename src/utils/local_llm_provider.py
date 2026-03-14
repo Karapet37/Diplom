@@ -15,6 +15,16 @@ except ImportError:
 
 from threading import Lock
 
+from src.utils.prompt_budgeter import (
+    MAX_REASONING_N_CTX,
+    MAX_ROUTER_N_CTX,
+    MIN_REASONING_N_CTX,
+    MIN_ROUTER_N_CTX,
+    SAFE_ERROR_REPLY,
+    retry_infer,
+)
+from src.utils.token_budget import select_n_ctx
+
 # Backward-compatible single-model globals.
 _LLM_INSTANCE: "Llama" | None = None
 _LLM_FN: Callable[[str], str] | None = None
@@ -414,26 +424,36 @@ def _llm_cache_key(model_path: str, *, n_ctx: int, max_tokens: int) -> str:
 
 
 def _resolve_n_ctx(role: str | None = None, explicit_n_ctx: int | None = None) -> int:
-    if explicit_n_ctx is not None:
-        return int(explicit_n_ctx)
     role_key = _normalize_role(role or ROLE_GENERAL)
+    allowed = _allowed_n_ctx_list_for_role(role_key)
+    if explicit_n_ctx is not None:
+        return select_n_ctx(int(explicit_n_ctx), allowed)
     role_env = _ROLE_N_CTX_ENV_MAP.get(role_key, "LOCAL_GGUF_N_CTX")
     value = os.getenv(role_env)
     if value is None or str(value).strip() == "":
         fallback = os.getenv("LOCAL_GGUF_N_CTX")
         value = fallback if fallback is not None and str(fallback).strip() != "" else "2048"
-    return int(value)
+    return select_n_ctx(int(value), allowed)
+
+
+def _allowed_n_ctx_list_for_role(role: str | None) -> list[int]:
+    role_key = _normalize_role(role or ROLE_GENERAL)
+    if role_key == ROLE_ANALYST:
+        return [MIN_ROUTER_N_CTX, 1536, MAX_ROUTER_N_CTX]
+    return [MIN_REASONING_N_CTX, 3072, 4096, MAX_REASONING_N_CTX]
 
 
 def _is_model_loaded(model_path: str) -> bool:
     prefix = f"{model_path}::"
-    return any(key == model_path or key.startswith(prefix) for key in _PATH_LLM_FN)
+    return any(key == model_path or key.startswith(prefix) for key in _PATH_LLM_FN) or any(
+        key == model_path or key.startswith(prefix) for key in _ROLE_LLM_FN if "::" in key
+    )
 
 
 def _build_llm_for_path(model_path: str, *, n_ctx: int | None = None) -> "Llama" | None:
     if Llama is None:
         return None
-    resolved_n_ctx = _resolve_n_ctx(explicit_n_ctx=n_ctx)
+    resolved_n_ctx = max(MIN_ROUTER_N_CTX, min(MAX_REASONING_N_CTX, int(n_ctx))) if n_ctx is not None else _resolve_n_ctx()
     return Llama(
         model_path=str(model_path),
         n_ctx=resolved_n_ctx,
@@ -442,7 +462,7 @@ def _build_llm_for_path(model_path: str, *, n_ctx: int | None = None) -> "Llama"
     )
 
 
-def _make_llm_fn(llm: "Llama", *, max_tokens: int | None = None) -> Callable[[str], str]:
+def _make_raw_llm_fn(llm: "Llama", *, max_tokens: int | None = None) -> Callable[[str], str]:
     resolved_max_tokens = int(max_tokens if max_tokens is not None else int(os.getenv("LOCAL_GGUF_MAX_TOKENS", "2048")))
 
     def llm_fn(prompt: str) -> str:
@@ -466,10 +486,66 @@ def _make_llm_fn(llm: "Llama", *, max_tokens: int | None = None) -> Callable[[st
                 )
                 result_text = out["choices"][0]["message"]["content"]
             except Exception as inner_exc:
-                _warn(f"[local_llm_provider] WARN: LLM inference failed: {inner_exc}")
-                return ""
+                raise RuntimeError(str(inner_exc)) from inner_exc
         return str(result_text or "")
 
+    setattr(llm_fn, "_llm", llm)
+    setattr(llm_fn, "_max_tokens", resolved_max_tokens)
+    return llm_fn
+
+
+def _resolve_max_tokens(explicit_max_tokens: int | None = None) -> int:
+    return int(explicit_max_tokens if explicit_max_tokens is not None else int(os.getenv("LOCAL_GGUF_MAX_TOKENS", "2048")))
+
+
+def _make_budgeted_llm_fn(
+    *,
+    role: str,
+    model_path: str,
+    n_ctx: int,
+    max_tokens: int,
+) -> Callable[[str], str]:
+    allowed_contexts = _allowed_n_ctx_list_for_role(role)
+
+    def _builder(_role: str, requested_n_ctx: int, requested_max_tokens: int) -> Callable[[str], str] | None:
+        cache_key = _llm_cache_key(model_path, n_ctx=requested_n_ctx, max_tokens=requested_max_tokens)
+        with _LLM_LOCK:
+            if cache_key in _PATH_LLM_FN:
+                return _PATH_LLM_FN[cache_key]
+            try:
+                llm = _build_llm_for_path(model_path, n_ctx=requested_n_ctx)
+            except Exception as exc:
+                _warn(
+                    f"[local_llm_provider] WARN: Failed to initialize model '{model_path}' "
+                    f"for role '{role}' at n_ctx={requested_n_ctx}: {exc}"
+                )
+                return None
+            if llm is None:
+                return None
+            raw_fn = _make_raw_llm_fn(llm, max_tokens=requested_max_tokens)
+            _PATH_LLM_INSTANCE[cache_key] = llm
+            _PATH_LLM_FN[cache_key] = raw_fn
+            return raw_fn
+
+    def llm_fn(prompt: str) -> str:
+        outcome = retry_infer(
+            _builder,
+            role,
+            str(prompt or ""),
+            token_budget=n_ctx,
+            allowed_n_ctx_range=allowed_contexts,
+            max_tokens=max_tokens,
+        )
+        if not outcome.get("ok"):
+            _warn(
+                f"[local_llm_provider] WARN: inference fallback used for role '{role}' "
+                f"after attempts={outcome.get('attempts')!r}"
+            )
+        return str(outcome.get("text") or SAFE_ERROR_REPLY)
+
+    setattr(llm_fn, "_model_path", model_path)
+    setattr(llm_fn, "_n_ctx", n_ctx)
+    setattr(llm_fn, "_max_tokens", max_tokens)
     return llm_fn
 
 
@@ -512,11 +588,11 @@ def build_role_llm_fn(
             return None
 
         resolved_n_ctx = _resolve_n_ctx(role_key, n_ctx)
-        resolved_max_tokens = int(max_tokens if max_tokens is not None else int(os.getenv("LOCAL_GGUF_MAX_TOKENS", "2048")))
+        resolved_max_tokens = _resolve_max_tokens(max_tokens)
         cache_key = _llm_cache_key(model_path, n_ctx=resolved_n_ctx, max_tokens=resolved_max_tokens)
 
-        if cache_key in _PATH_LLM_FN:
-            fn = _PATH_LLM_FN[cache_key]
+        if cache_key in _ROLE_LLM_FN:
+            fn = _ROLE_LLM_FN[cache_key]
             if n_ctx is None and max_tokens is None:
                 _ROLE_LLM_FN[role_key] = fn
             return fn
@@ -527,24 +603,20 @@ def build_role_llm_fn(
                 _ROLE_ERRORS_WARNED.add("missing_llama_cpp")
             return None
 
-        try:
-            llm = _build_llm_for_path(model_path, n_ctx=resolved_n_ctx)
-            if llm is None:
-                return None
-            fn = _make_llm_fn(llm, max_tokens=resolved_max_tokens)
-        except Exception as exc:
-            _warn(f"[local_llm_provider] WARN: Failed to initialize role '{role_key}' model: {exc}")
-            _ROLE_ERRORS_WARNED.add(f"init:{role_key}")
-            return None
+        fn = _make_budgeted_llm_fn(
+            role=role_key,
+            model_path=model_path,
+            n_ctx=resolved_n_ctx,
+            max_tokens=resolved_max_tokens,
+        )
 
-        _PATH_LLM_INSTANCE[cache_key] = llm
-        _PATH_LLM_FN[cache_key] = fn
+        _ROLE_LLM_FN[cache_key] = fn
         if n_ctx is None and max_tokens is None:
             _ROLE_LLM_FN[role_key] = fn
 
         if role_key == ROLE_GENERAL:
             global _LLM_INSTANCE, _LLM_FN, _LLM_UNAVAILABLE, _LAST_ERROR
-            _LLM_INSTANCE = llm
+            _LLM_INSTANCE = None
             _LLM_FN = fn
             _LLM_UNAVAILABLE = False
         _LAST_ERROR = ""
@@ -582,10 +654,10 @@ def build_model_llm_fn(
     normalized_path = str(normalized)
     with _LLM_LOCK:
         resolved_n_ctx = _resolve_n_ctx(explicit_n_ctx=n_ctx)
-        resolved_max_tokens = int(max_tokens if max_tokens is not None else int(os.getenv("LOCAL_GGUF_MAX_TOKENS", "2048")))
+        resolved_max_tokens = _resolve_max_tokens(max_tokens)
         cache_key = _llm_cache_key(normalized_path, n_ctx=resolved_n_ctx, max_tokens=resolved_max_tokens)
-        if cache_key in _PATH_LLM_FN:
-            return _PATH_LLM_FN[cache_key]
+        if cache_key in _ROLE_LLM_FN:
+            return _ROLE_LLM_FN[cache_key]
 
         if Llama is None:
             if "missing_llama_cpp" not in _ROLE_ERRORS_WARNED:
@@ -593,18 +665,14 @@ def build_model_llm_fn(
                 _ROLE_ERRORS_WARNED.add("missing_llama_cpp")
             return None
 
-        try:
-            llm = _build_llm_for_path(normalized_path, n_ctx=resolved_n_ctx)
-            if llm is None:
-                return None
-            fn = _make_llm_fn(llm, max_tokens=resolved_max_tokens)
-        except Exception as exc:
-            _warn(f"[local_llm_provider] WARN: Failed to initialize explicit model '{normalized_path}': {exc}")
-            _ROLE_ERRORS_WARNED.add(f"init:path:{normalized_path}")
-            return None
+        fn = _make_budgeted_llm_fn(
+            role=ROLE_GENERAL,
+            model_path=normalized_path,
+            n_ctx=resolved_n_ctx,
+            max_tokens=resolved_max_tokens,
+        )
 
-        _PATH_LLM_INSTANCE[cache_key] = llm
-        _PATH_LLM_FN[cache_key] = fn
+        _ROLE_LLM_FN[cache_key] = fn
         return fn
 
 
@@ -665,36 +733,28 @@ def build_local_llm_fn() -> Callable[[str], str] | None:
             _LLM_UNAVAILABLE = True
             return None
 
-        default_cache_key = _llm_cache_key(
-            model_path,
-            n_ctx=_resolve_n_ctx(),
-            max_tokens=int(os.getenv("LOCAL_GGUF_MAX_TOKENS", "2048")),
-        )
-        if default_cache_key in _PATH_LLM_FN:
-            _LLM_FN = _PATH_LLM_FN[default_cache_key]
-            _LLM_INSTANCE = _PATH_LLM_INSTANCE.get(default_cache_key)
+        resolved_n_ctx = _resolve_n_ctx()
+        resolved_max_tokens = _resolve_max_tokens()
+        default_cache_key = _llm_cache_key(model_path, n_ctx=resolved_n_ctx, max_tokens=resolved_max_tokens)
+        if default_cache_key in _ROLE_LLM_FN:
+            _LLM_FN = _ROLE_LLM_FN[default_cache_key]
+            _LLM_INSTANCE = None
             _ROLE_LLM_FN.setdefault(ROLE_GENERAL, _LLM_FN)
             _ROLE_MODEL_MAP.setdefault(ROLE_GENERAL, model_path)
             _LLM_UNAVAILABLE = False
             _LAST_ERROR = ""
             return _LLM_FN
 
-        try:
-            llm = _build_llm_for_path(model_path)
-            if llm is None:
-                _LLM_UNAVAILABLE = True
-                return None
-            llm_fn = _make_llm_fn(llm)
-        except Exception as exc:
-            _warn(f"[local_llm_provider] WARN: Failed to initialize model: {exc}")
-            _LLM_UNAVAILABLE = True
-            _LAST_ERROR = "init_failed"
-            return None
+        llm_fn = _make_budgeted_llm_fn(
+            role=ROLE_GENERAL,
+            model_path=model_path,
+            n_ctx=resolved_n_ctx,
+            max_tokens=resolved_max_tokens,
+        )
 
-        _LLM_INSTANCE = llm
+        _LLM_INSTANCE = None
         _LLM_FN = llm_fn
-        _PATH_LLM_INSTANCE[default_cache_key] = llm
-        _PATH_LLM_FN[default_cache_key] = llm_fn
+        _ROLE_LLM_FN[default_cache_key] = llm_fn
         _ROLE_LLM_FN[ROLE_GENERAL] = llm_fn
         _ROLE_MODEL_MAP[ROLE_GENERAL] = model_path
         _LLM_UNAVAILABLE = False

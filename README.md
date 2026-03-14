@@ -1,120 +1,90 @@
 # Agent Project
 
-Unified graph-first AI runtime with one backend, one frontend, one root environment.
+Minimal graph-grounded dialogue MVP.
 
-## Active Architecture
+The repository now converges to one active runtime:
 
-The repository now has one active system boundary:
+`chat_engine -> llm -> session file -> knowledge_extractor -> memory/graphs -> context_builder -> next answer`
 
-- `core/`
-  - foundational contracts for graph, personality, context, agents, style, dialogue, scenarios, and traversal
-- `runtime/`
-  - async request orchestration
-  - fast response pipeline
-  - background graph build queue and workers
-- `roaches_viz/roaches_viz/`
-  - behavioral graph engine, storage, ingestion, Graph-RAG, API layer, actor integration
-- `src/web/`
-  - combined FastAPI application
-  - workspace/control-plane endpoints
-  - mounts the cognitive runtime under the same server
+## Active Modules
+
+Canonical business modules:
+
+- `roaches_viz/roaches_viz/chat_engine.py`
+- `roaches_viz/roaches_viz/llm.py`
+- `roaches_viz/roaches_viz/history_store.py`
+- `roaches_viz/roaches_viz/knowledge_extractor.py`
+- `roaches_viz/roaches_viz/graph_store.py`
+- `roaches_viz/roaches_viz/context_builder.py`
+- `roaches_viz/roaches_viz/api.py`
+
+Thin bootstrap:
+
+- `start.py`
+- `src/web/combined_app.py`
+- `src/web/api.py`
+
+Frontend:
+
 - `webapp/`
-  - the only runtime frontend
 
-There is no separate production frontend or second backend runtime.
+## File-First Memory
 
-## Runtime Model
+```text
+memory/
+  sessions/
+    {session_id}.txt
+  files/
+    uploaded_documents/
+      {session_id}/
+        {safe_filename}
+  personalities/
+    index.json
+    {name}.json
+    {name}_graph.json
+    proposals/
+      {name}.json
+  graphs/
+    nodes.json
+    edges.json
+```
 
-Current request path:
+## Runtime Rules
 
-1. user query
-2. fast assistant/router
-3. immediate response
-4. background graph job
-5. pending/verified graph update
+1. User sends a message.
+2. `chat_engine.py` loads:
+   - recent session text
+   - selected personality file, if any
+   - graph context through `context_builder.py`
+3. `llm.py` builds the prompt and returns:
+   - plain text reply
+   - optional structured proposal JSON
+4. `history_store.py` appends the exchange to `memory/sessions/{session_id}.txt`
+5. Background extraction reads session files and uploaded files.
+6. `knowledge_extractor.py` generates validated graph proposals and merges them into:
+   - `memory/graphs/nodes.json`
+   - `memory/graphs/edges.json`
+7. If a personality/entity is referenced but not found, the system writes:
+   - `memory/personalities/proposals/{name}.json`
+8. `knowledge_extractor.py` validates and materializes:
+   - `memory/personalities/{name}.json`
+   - `memory/personalities/{name}_graph.json`
+9. Next replies may use graph and personality context.
 
-Graph storage zones:
+## Critical Contract
 
-- `graph/verified/`
-- `graph/pending/`
+- The LLM never writes graph files directly.
+- The LLM only returns proposals.
+- The extractor validates proposals before merge.
+- Graph files are never overwritten with empty data.
 
-Session storage:
+## Graph UI Contract
 
-- `data/sessions/{session_id}.json`
+For each node, the graph workspace answers:
 
-Style profiles:
-
-- `style_profiles/{user_id}.json`
-
-Personality logs:
-
-- `roaches_viz/logs/{person_id}.txt`
-
-These runtime artifacts are intentionally ignored by git.
-
-## Core-First Modules
-
-Main core modules:
-
-- `core/system_core.py`
-- `core/personality_core.py`
-- `core/graph_core.py`
-- `core/context_core.py`
-- `core/agent_core.py`
-- `core/style_engine.py`
-- `core/speech_dna.py`
-- `core/dialogue_engine.py`
-- `core/scenario_engine.py`
-- `core/agent_roles.py`
-- `core/graph_initializer.py`
-- `core/graph_traversal.py`
-
-Design notes:
-
-- `docs/core_system_design.md`
-- `docs/ui_workspaces.md`
-
-## Main API Surfaces
-
-Workspace and controller:
-
-- `/api/...`
-
-Cognitive runtime:
-
-- `/api/cognitive/...`
-
-Key endpoints:
-
-- `GET /api/cognitive/health`
-- `POST /api/cognitive/chat/respond`
-- `GET /api/cognitive/graph`
-- `GET /api/cognitive/graph/subgraph`
-- `GET /api/cognitive/graph/search`
-- `POST /api/cognitive/ingest`
-- `POST /api/cognitive/foundations/load`
-- `GET /api/cognitive/sessions`
-- `POST /api/cognitive/sessions`
-- `POST /api/cognitive/style/learn`
-- `GET /api/cognitive/style/profile`
-- `GET /api/cognitive/agent-roles`
-- `POST /api/cognitive/scenario/preview`
-
-## Frontend Workspaces
-
-The frontend is split into two workspaces:
-
-1. `Chat`
-   - session sidebar
-   - scrollable message thread
-   - fixed composer at the bottom
-
-2. `Graph`
-   - graph tools sidebar
-   - relevant subgraph canvas
-   - node editor / relation editor
-
-The graph workspace renders only relevant subgraphs, not the entire graph.
+1. who / what is this node
+2. what it is like
+3. how it acts through relations
 
 ## Run
 
@@ -126,7 +96,7 @@ pip install -e .[dev]
 python start.py --host 127.0.0.1 --port 8008
 ```
 
-Frontend dev:
+Frontend:
 
 ```bash
 cd /home/karapet/agent_project
@@ -143,7 +113,7 @@ Backend:
 
 ```bash
 cd /home/karapet/agent_project
-PYTHONPATH=. roaches_viz/.venv/bin/python -m pytest -q tests/unit roaches_viz/tests style_tests
+PYTHONPATH=. roaches_viz/.venv/bin/python -m pytest -q
 ```
 
 Frontend build:
@@ -153,21 +123,12 @@ cd /home/karapet/agent_project
 npm --prefix webapp run build
 ```
 
-## Git Hygiene
+## Personality Proposal Behavior
 
-The repository is prepared so that git tracks source code and docs, but ignores runtime state:
+If the system detects a personality and cannot find it in graph or files, it must do this:
 
-- ignored:
-  - local envs
-  - model files
-  - DB files
-  - session files
-  - style profiles
-  - graph pending/verified JSON artifacts
-  - runtime logs
-  - project backups
-- tracked:
-  - source code
-  - tests
-  - docs
-  - `.gitkeep` placeholders for runtime directories
+`вижу личность, ищу в графе, не нашел, запрашиваю создание файла анкеты под его описание`
+
+The user-facing fallback is:
+
+- `Контекст личности не найден. Запрошено создание анкеты по описанию.`

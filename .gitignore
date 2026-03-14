@@ -28,19 +28,18 @@ data/*.sqlite3
 data/*.sqlite3-*
 data/autonomous_graph_snapshot.json
 
-# Runtime-generated graph/session/style artifacts
+# Runtime-generated graph/session artifacts
 data/project_backups/*.json
 data/sessions/*.json
 !data/sessions/.gitkeep
-graph/pending/*.json
-!graph/pending/.gitkeep
-graph/verified/*.json
-!graph/verified/.gitkeep
-style_profiles/*.json
-!style_profiles/.gitkeep
-roaches_viz/logs/*.txt
-!roaches_viz/logs/.gitkeep
-style_tests/style_test_metrics.json
+memory/sessions/*.txt
+!memory/sessions/.gitkeep
+memory/graphs/*.json
+!memory/graphs/.gitkeep
+memory/personalities/proposals/*.json
+!memory/personalities/proposals/.gitkeep
+memory/graph_history/**
+!memory/graph_history/.gitkeep
 
 # Generated exports and reports
 reports/

@@ -1,0 +1,23 @@
+{
+  "name": "Hurricane",
+  "entity_type": "natural_force",
+  "traits": [
+    "destructive",
+    "indifferent",
+    "unstoppable"
+  ],
+  "patterns": [
+    "speak_like_nature",
+    "slow_powerful_statements"
+  ],
+  "style": [
+    "calm",
+    "powerful",
+    "natural_force_tone"
+  ],
+  "importance_weights": {
+    "destructive": 1.1,
+    "indifferent": 0.9,
+    "unstoppable": 1.2
+  }
+}
