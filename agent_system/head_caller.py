@@ -1,0 +1,65 @@
+from __future__ import annotations
+
+from typing import Any
+
+from .duplicate_resolver import normalize_name
+from .models import ClassificationDecision, MessageAnalysis
+from .models import HEAD_ENTITY_TYPES
+from .persona_engine import load_persona, spawn_head
+
+
+def prepare_heads(
+    *,
+    analysis: MessageAnalysis,
+    classifications: list[ClassificationDecision],
+    graph_store: Any,
+) -> list[dict[str, Any]]:
+    prepared: list[dict[str, Any]] = []
+    selected_token = normalize_name(analysis.selected_head)
+    for decision in classifications:
+        node = graph_store.upsert_entity(
+            name=decision.entity_name,
+            entity_type=decision.entity_type,
+            aliases=[],
+            description='',
+            confidence=decision.confidence,
+            source='chat',
+        )
+        allow_head = decision.entity_type in HEAD_ENTITY_TYPES or (
+            selected_token and normalize_name(decision.entity_name) == selected_token
+        )
+        head = (
+            spawn_head(
+                decision.entity_name,
+                entity_type=decision.entity_type,
+                aliases=list(node.get('aliases') or []),
+                source='chat',
+            )
+            if allow_head
+            else None
+        )
+        prepared.append({'decision': decision, 'node': node, 'head': head})
+    return prepared
+
+
+def select_primary_head(
+    *,
+    analysis: MessageAnalysis,
+    prepared_heads: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    selected = str(analysis.selected_head or analysis.primary_entity or '').strip().lower()
+    if selected:
+        for item in prepared_heads:
+            head = item.get('head')
+            if head is None:
+                continue
+            if str(head.meta.get('slug') or '').lower() == selected or str(head.name or '').lower() == selected:
+                return item
+    for item in prepared_heads:
+        if item.get('head') is not None:
+            return item
+    if analysis.primary_entity:
+        bundle = load_persona(analysis.primary_entity)
+        if bundle:
+            return {'decision': None, 'node': None, 'head': bundle}
+    return None

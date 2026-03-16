@@ -1,94 +1,103 @@
 # Agent Project
 
-Minimal graph-grounded dialogue MVP.
+Stable persona graph agent runtime.
 
-The repository now converges to one active runtime:
+## Canonical Architecture
 
-`chat_engine -> llm -> session file -> knowledge_extractor -> memory/graphs -> context_builder -> next answer`
+```text
+chat (neck)
+-> message analyzer
+-> feature extractor
+-> classifier forest
+-> head caller
+-> persona head
+-> context builder
+-> LLM
+-> response
+```
 
-## Active Modules
+The LLM is only used for:
 
-Canonical business modules:
+- knowledge extraction
+- response generation
 
-- `roaches_viz/roaches_viz/chat_engine.py`
-- `roaches_viz/roaches_viz/llm.py`
-- `roaches_viz/roaches_viz/history_store.py`
-- `roaches_viz/roaches_viz/knowledge_extractor.py`
-- `roaches_viz/roaches_viz/graph_store.py`
-- `roaches_viz/roaches_viz/context_builder.py`
-- `roaches_viz/roaches_viz/api.py`
+System logic, routing, head spawning, graph hygiene, and context ranking are deterministic Python code.
 
-Thin bootstrap:
+## Active Runtime
 
-- `start.py`
-- `src/web/combined_app.py`
-- `src/web/api.py`
+The repository now treats `agent_system/` as the single canonical backend. The packaged runtime stays below 25 Python modules and centers on:
 
-Frontend:
+- `agent_system/chat_engine.py`
+- `agent_system/message_analyzer.py`
+- `agent_system/feature_extractor.py`
+- `agent_system/classifier_forest.py`
+- `agent_system/head_caller.py`
+- `agent_system/persona_engine.py`
+- `agent_system/graph_store.py`
+- `agent_system/context_builder.py`
+- `agent_system/entity_extractor.py`
+- `agent_system/file_ingestion.py`
+- `agent_system/llm.py`
+- `agent_system/api.py`
 
-- `webapp/`
+Legacy directories such as `roaches_viz/`, `src/living_system/`, and `src/autonomous_graph/` are retained only as archival reference material. They are not packaged and are not part of the active validation path.
 
-## File-First Memory
+## Head Storage
+
+Each persona head is stored as a folder:
 
 ```text
 memory/
+  heads/
+    dracula/
+      traits.json
+      relations.json
+      examples.json
+      knowledge.txt
+      emotion_vector.json
+      meta.json
+```
+
+`examples.json` contains both example utterances and `situation_reactions`.
+
+## Knowledge Graph
+
+Global graph memory is file-first:
+
+```text
+memory/
+  graphs/
+    nodes.json
+    edges.json
   sessions/
     {session_id}.txt
   files/
     uploaded_documents/
       {session_id}/
-        {safe_filename}
-  personalities/
-    index.json
-    {name}.json
-    {name}_graph.json
-    proposals/
-      {name}.json
-  graphs/
-    nodes.json
-    edges.json
+        {filename}
+  proposals/
+    {head}.json
 ```
 
-## Runtime Rules
+Graph hygiene applies on persistence:
 
-1. User sends a message.
-2. `chat_engine.py` loads:
-   - recent session text
-   - selected personality file, if any
-   - graph context through `context_builder.py`
-3. `llm.py` builds the prompt and returns:
-   - plain text reply
-   - optional structured proposal JSON
-4. `history_store.py` appends the exchange to `memory/sessions/{session_id}.txt`
-5. Background extraction reads session files and uploaded files.
-6. `knowledge_extractor.py` generates validated graph proposals and merges them into:
-   - `memory/graphs/nodes.json`
-   - `memory/graphs/edges.json`
-7. If a personality/entity is referenced but not found, the system writes:
-   - `memory/personalities/proposals/{name}.json`
-8. `knowledge_extractor.py` validates and materializes:
-   - `memory/personalities/{name}.json`
-   - `memory/personalities/{name}_graph.json`
-9. Next replies may use graph and personality context.
+- importance decay: `importance *= 0.99`
+- duplicate merge using name similarity plus context similarity
+- garbage collection when `importance < 0.05` and `frequency < 2`
+- summary-node compression for repeated relation clusters
 
-## Critical Contract
+## Document Learning
 
-- The LLM never writes graph files directly.
-- The LLM only returns proposals.
-- The extractor validates proposals before merge.
-- Graph files are never overwritten with empty data.
+Supported ingestion formats:
 
-## Graph UI Contract
+- `txt`
+- `md`
+- `json`
+- `csv`
 
-For each node, the graph workspace answers:
-
-1. who / what is this node
-2. what it is like
-3. how it acts through relations
+Chunks stay below 2000 estimated tokens before LLM extraction proposals are validated and merged.
 
 ## Run
-
-Backend:
 
 ```bash
 cd <project_root>
@@ -96,39 +105,9 @@ pip install -e .[dev]
 python start.py --host 127.0.0.1 --port 8008
 ```
 
-Frontend:
-
-```bash
-cd <project_root>
-VITE_API_BASE_URL=http://127.0.0.1:8008 npm --prefix webapp run dev
-```
-
-Open:
-
-- `http://127.0.0.1:5173`
-
 ## Tests
 
-Backend:
-
 ```bash
 cd <project_root>
-PYTHONPATH=. roaches_viz/.venv/bin/python -m pytest -q
+python3 -m pytest -q
 ```
-
-Frontend build:
-
-```bash
-cd <project_root>
-npm --prefix webapp run build
-```
-
-## Personality Proposal Behavior
-
-If the system detects a personality and cannot find it in graph or files, it must do this:
-
-`вижу личность, ищу в графе, не нашел, запрашиваю создание файла анкеты под его описание`
-
-The user-facing fallback is:
-
-- `Контекст личности не найден. Запрошено создание анкеты по описанию.`
