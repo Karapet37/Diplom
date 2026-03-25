@@ -4,7 +4,9 @@ import re
 from typing import Any
 
 from .duplicate_resolver import normalize_name
-from .models import MessageAnalysis, MessageEntity
+from .language_tools import detect_language_code
+from .models import MessageAnalysis, MessageEntity, UserState
+from .situation_engine import model_situation
 
 ENTITY_PATTERNS = (
     re.compile(r'"([^"]{2,80})"'),
@@ -58,6 +60,62 @@ ENTITY_DESCRIPTOR_WORDS = {
     'phenomenon',
     'concept',
 }
+
+QUESTION_WORDS = ('who', 'what', 'why', 'how', 'when', 'where', 'кто', 'что', 'почему', 'как', 'когда', 'где')
+INSULT_WORDS = (
+    'stupid',
+    'idiot',
+    'pathetic',
+    'disgusting',
+    'hate',
+    'trash',
+    'ненавиж',
+    'туп',
+    'дурак',
+    'мерзк',
+    'жалк',
+)
+ANGER_WORDS = ('angry', 'furious', 'mad', 'rage', 'pissed', 'злой', 'ярость', 'бешен', 'сердит')
+DISTRESS_WORDS = (
+    'sad',
+    'depressed',
+    'hopeless',
+    'hurt',
+    'cry',
+    'crying',
+    'lost',
+    'terrible',
+    'afraid',
+    'scared',
+    'help me',
+    'боюсь',
+    'плохо',
+    'груст',
+    'тяжело',
+    'одиноко',
+)
+HELP_WORDS = ('please', 'help', 'sorry', 'support', 'помоги', 'пожалуйста', 'извини', 'нужна помощь')
+CELEBRATORY_WORDS = ('happy', 'glad', 'delighted', 'thrilled', 'excited', 'enjoyed', 'loved', 'рада', 'счастлив', 'доволен')
+MORAL_VIOLATION_WORDS = (
+    'kill',
+    'killed',
+    'hurt',
+    'harm',
+    'abuse',
+    'torture',
+    'stole',
+    'steal',
+    'murder',
+    'violence',
+    'pain',
+    'убил',
+    'навред',
+    'избил',
+    'мучил',
+    'украл',
+)
+SECOND_PERSON_HINTS = {'you', 'your', 'yourself', 'ты', 'тебя', 'твой', 'вам', 'дու', 'քեզ', 'քո'}
+SELF_REFERENCE_HINTS = {'i', 'me', 'my', 'myself', 'я', 'мне', 'мой', 'меня', 'ես', 'ինձ', 'իմ'}
 
 
 def _clean_message(message: str) -> str:
@@ -124,6 +182,62 @@ def _detect_situation(message: str, primary_entity: str) -> str:
     return stripped
 
 
+def _contains_any(text: str, values: tuple[str, ...]) -> float:
+    lowered = normalize_name(text)
+    return float(any(normalize_name(value) and normalize_name(value) in lowered for value in values))
+
+
+def _token_overlap(text: str, values: set[str]) -> float:
+    tokens = {token for token in normalize_name(text).split() if token}
+    return float(bool(tokens & values))
+
+
+def _analyze_user_state(message: str, *, primary_entity: str = '', selected_head: str = '') -> UserState:
+    clean = _clean_message(message)
+    lowered = normalize_name(clean)
+    persona_token = normalize_name(selected_head or primary_entity)
+    signals = {
+        'contains_question': float('?' in clean or any(word in lowered for word in QUESTION_WORDS)),
+        'contains_insult': _contains_any(clean, INSULT_WORDS),
+        'contains_anger': _contains_any(clean, ANGER_WORDS),
+        'contains_distress': _contains_any(clean, DISTRESS_WORDS),
+        'contains_help_request': _contains_any(clean, HELP_WORDS),
+        'contains_celebratory': _contains_any(clean, CELEBRATORY_WORDS),
+        'contains_moral_violation': _contains_any(clean, MORAL_VIOLATION_WORDS),
+        'contains_persona_reference': float(bool(persona_token and persona_token in lowered) or _token_overlap(clean, SECOND_PERSON_HINTS)),
+        'contains_self_reference': _token_overlap(clean, SELF_REFERENCE_HINTS),
+    }
+
+    if signals['contains_distress']:
+        tone = 'distressed'
+    elif signals['contains_anger'] or signals['contains_insult']:
+        tone = 'angry'
+    elif signals['contains_celebratory']:
+        tone = 'celebratory'
+    elif signals['contains_question']:
+        tone = 'inquisitive'
+    else:
+        tone = 'neutral'
+
+    if signals['contains_insult']:
+        intent = 'insult'
+    elif signals['contains_distress'] or signals['contains_help_request']:
+        intent = 'seek_support'
+    elif signals['contains_moral_violation']:
+        intent = 'confession'
+    elif signals['contains_question']:
+        intent = 'question'
+    else:
+        intent = 'statement'
+
+    return UserState(
+        language=detect_language_code(clean, fallback='en'),
+        tone=tone,
+        intent=intent,
+        signals=signals,
+    )
+
+
 def analyze_message(
     *,
     message: str,
@@ -149,20 +263,21 @@ def analyze_message(
     if not primary:
         primary = current_entity.strip()
 
-    cues = {
-        'contains_question': float('?' in clean or any(word in clean.lower() for word in ('who', 'what', 'why', 'как', 'кто', 'что', 'почему'))),
-        'contains_insult': float(any(word in clean.lower() for word in ('stupid', 'idiot', 'hate', 'ненавиж', 'туп', 'дурак'))),
-        'contains_fear': float(any(word in clean.lower() for word in ('afraid', 'fear', 'scared', 'боюсь', 'страх'))),
-        'contains_empathy': float(any(word in clean.lower() for word in ('please', 'help', 'sorry', 'помоги', 'пожалуйста', 'извини'))),
-    }
+    user_state = _analyze_user_state(clean, primary_entity=primary, selected_head=selected_head.strip())
+    situation = model_situation(
+        message=clean,
+        primary_entity=primary,
+        selected_head=selected_head.strip(),
+        user_state=user_state,
+    )
     return MessageAnalysis(
         message=clean,
         session_id=session_id,
         selected_head=selected_head.strip(),
         primary_entity=primary,
-        situation=_detect_situation(clean, primary),
         current_entity=current_entity.strip(),
         explicit_context=explicit_context.strip(),
         entities=entities,
-        cues=cues,
+        user_state=user_state,
+        situation=situation,
     )

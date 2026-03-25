@@ -57,7 +57,7 @@ def extract_features(entity: MessageEntity, analysis: MessageAnalysis) -> Entity
     feature_map = {
         'title_case_ratio': round(_title_case_score(entity.name), 4),
         'name_token_count': float(len(normalized_name.split())),
-        'message_question_signal': float(analysis.cues.get('contains_question') or 0.0),
+        'message_question_signal': analysis.user_state.signal('contains_question'),
         'person_hint_score': _keyword_score(combined_text, PERSON_HINTS),
         'fictional_hint_score': _keyword_score(combined_text, FICTIONAL_HINTS),
         'profession_hint_score': _keyword_score(combined_text, PROFESSION_HINTS),
