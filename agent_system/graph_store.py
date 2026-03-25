@@ -2,44 +2,39 @@ from __future__ import annotations
 
 import json
 import math
-import os
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from .duplicate_resolver import merge_aliases, normalize_name, relevance_decay, score_node, should_merge
-from .models import ENTITY_TYPES
+from .models import ENTITY_TYPES, GraphQuality
+from .runtime_config import get_runtime_config
 
 GRAPH_NODE_TYPES = set(ENTITY_TYPES)
+QUALITY_ALPHA = 0.45
+QUALITY_BETA = 0.35
+QUALITY_GAMMA = 0.2
 
 
 def repo_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return get_runtime_config().paths.repo_root
 
 
 def memory_root() -> Path:
-    env_root = str(os.environ.get('COGNITIVE_MEMORY_ROOT', '')).strip()
-    root = Path(env_root).resolve() if env_root else repo_root() / 'memory'
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    return get_runtime_config().paths.memory_root
 
 
 def graphs_dir() -> Path:
-    path = memory_root() / 'graphs'
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return get_runtime_config().paths.graphs_dir
 
 
 def heads_dir() -> Path:
-    path = memory_root() / 'heads'
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return get_runtime_config().paths.heads_dir
 
 
 def personality_proposals_dir() -> Path:
-    path = memory_root() / 'proposals'
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return get_runtime_config().paths.proposals_dir
 
 
 def graph_nodes_path() -> Path:
@@ -140,7 +135,55 @@ class GraphStore:
             'warnings': state['warnings'],
             'node_count': len(state['nodes']),
             'edge_count': len(state['edges']),
+            'quality': asdict(self.graph_quality(state['nodes'], state['edges'])),
         }
+
+    def graph_quality(
+        self,
+        nodes: list[dict[str, Any]] | None = None,
+        edges: list[dict[str, Any]] | None = None,
+    ) -> GraphQuality:
+        node_rows = self.load_nodes() if nodes is None else [self._normalize_node(node) for node in nodes if isinstance(node, dict)]
+        edge_rows = self.load_edges() if edges is None else [self._normalize_edge(edge) for edge in edges if isinstance(edge, dict)]
+        if not node_rows:
+            return GraphQuality(relevance=0.0, redundancy=0.0, connectivity=0.0, score=0.0)
+
+        relevance = round(
+            min(sum(min(score_node(node), 1.0) for node in node_rows) / max(len(node_rows), 1), 1.0),
+            6,
+        )
+        low_value_ratio = sum(
+            1 for node in node_rows if float(node.get('importance') or 0.0) < 0.05 and int(node.get('frequency') or 0) < 2
+        ) / max(len(node_rows), 1)
+        merge_candidates = 0
+        for index, left in enumerate(node_rows):
+            for right in node_rows[index + 1 :]:
+                if should_merge(left, right):
+                    merge_candidates += 1
+        duplicate_ratio = min(merge_candidates / max(len(node_rows), 1), 1.0)
+        redundancy = round(min((0.7 * duplicate_ratio) + (0.3 * low_value_ratio), 1.0), 6)
+
+        node_ids = {str(node.get('id') or '') for node in node_rows}
+        valid_edges = [
+            edge for edge in edge_rows if str(edge.get('from') or '') in node_ids and str(edge.get('to') or '') in node_ids
+        ]
+        connected_nodes = {
+            endpoint
+            for edge in valid_edges
+            for endpoint in (str(edge.get('from') or ''), str(edge.get('to') or ''))
+            if endpoint
+        }
+        connected_ratio = len(connected_nodes) / max(len(node_rows), 1)
+        edge_density = min(len(valid_edges) / max(len(node_rows) - 1, 1), 1.0)
+        connectivity = round(min((0.5 * connected_ratio) + (0.5 * edge_density), 1.0), 6)
+
+        score = round((QUALITY_ALPHA * relevance) - (QUALITY_BETA * redundancy) + (QUALITY_GAMMA * connectivity), 6)
+        return GraphQuality(
+            relevance=relevance,
+            redundancy=redundancy,
+            connectivity=connectivity,
+            score=score,
+        )
 
     def save_graph(
         self,
@@ -152,7 +195,9 @@ class GraphStore:
     ) -> dict[str, Any]:
         existing_nodes = self.load_nodes()
         existing_edges = self.load_edges()
+        quality_before = self.graph_quality(existing_nodes, existing_edges)
         state = self._prepare_graph_state(nodes, edges, apply_hygiene=apply_hygiene)
+        quality_after = self.graph_quality(state['nodes'], state['edges'])
         if not state['nodes'] and existing_nodes and reason != 'clear':
             return {
                 'ok': False,
@@ -161,6 +206,8 @@ class GraphStore:
                 'edge_count': len(existing_edges),
                 'validation_errors': state['errors'],
                 'validation_warnings': state['warnings'],
+                'quality_before': asdict(quality_before),
+                'quality_after': asdict(quality_after),
             }
         write_json(graph_nodes_path(), state['nodes'])
         write_json(graph_edges_path(), state['edges'])
@@ -174,6 +221,8 @@ class GraphStore:
             'merged_nodes': state['merged_nodes'],
             'removed_nodes': state['removed_nodes'],
             'summary_nodes': state['summary_nodes'],
+            'quality_before': asdict(quality_before),
+            'quality_after': asdict(quality_after),
         }
 
     def entity_exists(self, name: str) -> bool:
@@ -187,6 +236,12 @@ class GraphStore:
                 return node
         return None
 
+    def get_node_by_id(self, node_id: str) -> dict[str, Any] | None:
+        token = str(node_id or '').strip()
+        if not token:
+            return None
+        return next((node for node in self.load_nodes() if str(node.get('id') or '') == token), None)
+
     def upsert_entity(
         self,
         *,
@@ -199,6 +254,7 @@ class GraphStore:
         source: str = 'chat',
         folder: str = '',
         importance: float = 0.7,
+        translation_line: str = '',
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         nodes = self.load_nodes()
@@ -213,11 +269,71 @@ class GraphStore:
             source=source,
             folder=folder,
             importance=importance,
+            translation_line=translation_line,
             context=context,
         )
         node = self._upsert_node(nodes, candidate)
         self._commit(nodes, edges, reason='upsert_entity')
         return node
+
+    def create_node(
+        self,
+        *,
+        name: str,
+        node_type: str = 'CONCEPT',
+        aliases: list[str] | None = None,
+        description: str = '',
+        facts: list[str] | None = None,
+        translation_line: str = '',
+        confidence: float = 0.78,
+        importance: float = 0.72,
+        source: str = 'manual_edit',
+    ) -> dict[str, Any]:
+        return self.upsert_entity(
+            name=name,
+            entity_type=node_type,
+            aliases=aliases,
+            description=description,
+            facts=facts,
+            confidence=confidence,
+            source=source,
+            importance=importance,
+            translation_line=translation_line,
+            context={'source': source, 'edited': True},
+        )
+
+    def patch_node(
+        self,
+        node_id: str,
+        *,
+        description: str | None = None,
+        facts: list[str] | None = None,
+        translation_line: str | None = None,
+        context_patch: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        target = str(node_id or '').strip()
+        if not target:
+            return {'ok': False, 'reason': 'missing_node_id'}
+        nodes = self.load_nodes()
+        found = False
+        for node in nodes:
+            if str(node.get('id') or '') != target:
+                continue
+            found = True
+            if description is not None:
+                node['description'] = str(description or '').strip()
+            if facts is not None:
+                node['facts'] = [str(item).strip() for item in list(facts or []) if str(item).strip()][:16]
+            if translation_line is not None:
+                node['translation_line'] = str(translation_line or '').strip()
+            if context_patch:
+                node['context'] = {**dict(node.get('context') or {}), **dict(context_patch or {})}
+            break
+        if not found:
+            return {'ok': False, 'reason': 'node_not_found'}
+        result = self.save_graph(nodes, self.load_edges(), reason='patch_node', apply_hygiene=False)
+        result['node_id'] = target
+        return result
 
     def sync_head(
         self,
@@ -359,6 +475,109 @@ class GraphStore:
             edges.append(edge)
         return self._commit(nodes, edges, reason='link_head_relation')
 
+    def connect_nodes(
+        self,
+        *,
+        from_id: str,
+        to_id: str,
+        relation_type: str = 'RELATED_TO',
+        weight: float = 0.78,
+        confidence: float = 0.82,
+        source: str = 'manual_edit',
+    ) -> dict[str, Any]:
+        src = str(from_id or '').strip()
+        dst = str(to_id or '').strip()
+        if not src or not dst:
+            return {'ok': False, 'reason': 'missing_endpoint'}
+        nodes = self.load_nodes()
+        node_ids = {str(node.get('id') or '') for node in nodes}
+        if src not in node_ids or dst not in node_ids:
+            return {'ok': False, 'reason': 'missing_node'}
+        edges = self.load_edges()
+        edge = self._normalize_edge(
+            {
+                'from': src,
+                'to': dst,
+                'type': str(relation_type or 'RELATED_TO').strip().upper(),
+                'weight': weight,
+                'confidence': confidence,
+                'source': source,
+            }
+        )
+        if _edge_key(edge) not in {_edge_key(item) for item in edges}:
+            edges.append(edge)
+        result = self._commit(nodes, edges, reason='connect_nodes')
+        result['edge'] = edge
+        return result
+
+    def delete_node(self, node_id: str) -> dict[str, Any]:
+        target = str(node_id or '').strip()
+        if not target:
+            return {'ok': False, 'reason': 'missing_node_id'}
+        nodes = self.load_nodes()
+        if not any(str(node.get('id') or '') == target for node in nodes):
+            return {'ok': False, 'reason': 'node_not_found'}
+        next_nodes = [node for node in nodes if str(node.get('id') or '') != target]
+        next_edges = [
+            edge
+            for edge in self.load_edges()
+            if str(edge.get('from') or '') != target and str(edge.get('to') or '') != target
+        ]
+        reason = 'clear' if not next_nodes else 'delete_node'
+        result = self.save_graph(next_nodes, next_edges, reason=reason, apply_hygiene=False)
+        result['deleted_node_id'] = target
+        return result
+
+    def delete_edge(self, *, edge_id: str = '', from_id: str = '', relation_type: str = '', to_id: str = '') -> dict[str, Any]:
+        target_id = str(edge_id or '').strip()
+        target_key = (str(from_id or '').strip(), str(relation_type or '').strip().upper(), str(to_id or '').strip())
+        edges = self.load_edges()
+        next_edges = [
+            edge
+            for edge in edges
+            if not (
+                (target_id and str(edge.get('id') or '') == target_id)
+                or (all(target_key) and _edge_key(edge) == target_key)
+            )
+        ]
+        if len(next_edges) == len(edges):
+            return {'ok': False, 'reason': 'edge_not_found'}
+        result = self.save_graph(self.load_nodes(), next_edges, reason='delete_edge', apply_hygiene=False)
+        result['deleted_edge_id'] = target_id
+        return result
+
+    def merge_nodes_manual(self, *, primary_id: str, secondary_id: str) -> dict[str, Any]:
+        left = str(primary_id or '').strip()
+        right = str(secondary_id or '').strip()
+        if not left or not right or left == right:
+            return {'ok': False, 'reason': 'invalid_merge_pair'}
+        nodes = self.load_nodes()
+        primary = next((node for node in nodes if str(node.get('id') or '') == left), None)
+        secondary = next((node for node in nodes if str(node.get('id') or '') == right), None)
+        if primary is None or secondary is None:
+            return {'ok': False, 'reason': 'node_not_found'}
+        self._merge_node(primary, secondary)
+        next_nodes = [node for node in nodes if str(node.get('id') or '') != right]
+        next_edges: list[dict[str, Any]] = []
+        seen_edges: set[tuple[str, str, str]] = set()
+        for edge in self.load_edges():
+            updated = self._normalize_edge(
+                {
+                    **edge,
+                    'from': left if str(edge.get('from') or '') == right else str(edge.get('from') or ''),
+                    'to': left if str(edge.get('to') or '') == right else str(edge.get('to') or ''),
+                }
+            )
+            key = _edge_key(updated)
+            if not all(key) or key[0] == key[2] or key in seen_edges:
+                continue
+            seen_edges.add(key)
+            next_edges.append(updated)
+        result = self.save_graph(next_nodes, next_edges, reason='merge_nodes_manual', apply_hygiene=False)
+        result['merged_into'] = left
+        result['merged_from'] = right
+        return result
+
     def search_nodes(self, query: str, *, limit: int = 8) -> list[dict[str, Any]]:
         tokens = {normalize_name(token) for token in str(query or '').split() if normalize_name(token)}
         nodes = self.load_nodes()
@@ -403,6 +622,17 @@ class GraphStore:
             selected_ids.update(next_frontier)
             frontier = next_frontier
         selected_nodes = [node_map[node_id] for node_id in selected_ids if node_id in node_map]
+        non_summary_nodes = [node for node in selected_nodes if not str(node.get('id') or '').startswith('summary:')]
+        if non_summary_nodes:
+            selected_nodes = non_summary_nodes
+            selected_node_ids = {str(node.get('id') or '') for node in selected_nodes}
+            selected_edges = [
+                edge
+                for edge in selected_edges
+                if str(edge.get('type') or '') != 'SUMMARIZES'
+                and str(edge.get('from') or '') in selected_node_ids
+                and str(edge.get('to') or '') in selected_node_ids
+            ]
         selected_nodes.sort(key=score_node, reverse=True)
         return {
             'query': query,
@@ -415,7 +645,18 @@ class GraphStore:
         node = next((item for item in self.load_nodes() if str(item.get('id') or '') == str(node_id)), None)
         if node is None:
             return None
-        edges = [edge for edge in self.load_edges() if node_id in {str(edge.get('from') or ''), str(edge.get('to') or '')}]
+        node_map = {str(item.get('id') or ''): item for item in self.load_nodes()}
+        edges = []
+        for edge in self.load_edges():
+            if node_id not in {str(edge.get('from') or ''), str(edge.get('to') or '')}:
+                continue
+            edges.append(
+                {
+                    **edge,
+                    'from_name': str(node_map.get(str(edge.get('from') or ''), {}).get('name') or edge.get('from') or ''),
+                    'to_name': str(node_map.get(str(edge.get('to') or ''), {}).get('name') or edge.get('to') or ''),
+                }
+            )
         return {
             'who_or_what': {
                 'id': node.get('id'),
@@ -453,6 +694,7 @@ class GraphStore:
         source: str = 'chat',
         folder: str = '',
         importance: float = 0.7,
+        translation_line: str = '',
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return self._normalize_node(
@@ -461,6 +703,7 @@ class GraphStore:
                 'name': str(name or '').strip(),
                 'type': str(entity_type or 'CONCEPT').strip().upper(),
                 'aliases': list(aliases or []),
+                'translation_line': str(translation_line or '').strip(),
                 'description': str(description or '').strip(),
                 'facts': list(facts or []),
                 'folder': str(folder or '').strip(),
@@ -480,15 +723,19 @@ class GraphStore:
             'merged_nodes': 0,
             'removed_nodes': 0,
             'summary_nodes': 0,
+            'quality_before': None,
+            'quality_after': None,
         }
         state['nodes'], state['edges'], errors, warnings = self._validate_graph_state(state['nodes'], state['edges'])
         state['errors'].extend(errors)
         state['warnings'].extend(warnings)
         if apply_hygiene:
-            state['nodes'], state['edges'], merged, removed, summaries = self._apply_hygiene_in_memory(state['nodes'], state['edges'])
+            state['quality_before'] = asdict(self.graph_quality(state['nodes'], state['edges']))
+            state['nodes'], state['edges'], merged, removed, summaries, chosen_quality = self._apply_hygiene_in_memory(state['nodes'], state['edges'])
             state['merged_nodes'] = merged
             state['removed_nodes'] = removed
             state['summary_nodes'] = summaries
+            state['quality_after'] = asdict(chosen_quality)
             state['nodes'], state['edges'], errors, warnings = self._validate_graph_state(state['nodes'], state['edges'])
             state['errors'].extend(errors)
             state['warnings'].extend(warnings)
@@ -536,12 +783,16 @@ class GraphStore:
         self,
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, int, int]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, int, int, GraphQuality]:
+        base_quality = self.graph_quality(nodes, edges)
         decayed = [self._normalize_node({**node, 'importance': relevance_decay(float(node.get('importance') or 0.0))}) for node in nodes]
         merged_nodes, merged_edges, merged = self._merge_duplicates(decayed, edges)
         survivor_nodes, survivor_edges, removed = self._garbage_collect(merged_nodes, merged_edges)
         summarized_nodes, summarized_edges, summaries = self._create_summary_nodes(survivor_nodes, survivor_edges)
-        return summarized_nodes, summarized_edges, merged, removed, summaries
+        candidate_quality = self.graph_quality(summarized_nodes, summarized_edges)
+        if candidate_quality.score >= base_quality.score:
+            return summarized_nodes, summarized_edges, merged, removed, summaries, candidate_quality
+        return list(nodes), list(edges), 0, 0, 0, base_quality
 
     def _lexical_score(self, node: dict[str, Any], tokens: set[str], related_names: list[str]) -> float:
         fields = [
@@ -617,6 +868,11 @@ class GraphStore:
             not existing.get('description') or len(str(candidate.get('description') or '')) > len(str(existing.get('description') or ''))
         ):
             existing['description'] = candidate['description']
+        if candidate.get('translation_line') and (
+            not existing.get('translation_line')
+            or len(str(candidate.get('translation_line') or '')) > len(str(existing.get('translation_line') or ''))
+        ):
+            existing['translation_line'] = str(candidate.get('translation_line') or '').strip()
         if not existing.get('folder') and candidate.get('folder'):
             existing['folder'] = candidate['folder']
         existing['importance'] = round(max(float(existing.get('importance') or 0.0), float(candidate.get('importance') or 0.0)) + 0.05, 6)
@@ -657,6 +913,8 @@ class GraphStore:
         return survivors, filtered_edges, len(removed_ids)
 
     def _create_summary_nodes(self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+        if len(nodes) < 32:
+            return nodes, edges, 0
         node_map = {str(node.get('id') or ''): node for node in nodes}
         groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for edge in edges:
@@ -677,6 +935,7 @@ class GraphStore:
                     'id': summary_id,
                     'name': f'{src_name} {relation_type.lower()} summary',
                     'type': 'CONCEPT',
+                    'translation_line': f'{src_name} {relation_type.lower()} summary',
                     'description': f'{src_name} {relation_type.lower()} {", ".join(name for name in target_names if name)}.',
                     'aliases': target_names,
                     'facts': [f'{src_name} {relation_type.lower()} {name}.' for name in target_names if name],
@@ -714,6 +973,7 @@ class GraphStore:
             'name': str(node.get('name') or node.get('id') or '').strip(),
             'type': node_type,
             'aliases': merge_aliases(list(node.get('aliases') or [])),
+            'translation_line': str(node.get('translation_line') or '').strip(),
             'description': str(node.get('description') or '').strip(),
             'facts': list(dict.fromkeys(facts))[:16],
             'folder': str(node.get('folder') or '').strip(),

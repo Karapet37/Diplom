@@ -4,6 +4,7 @@ __all__ = [
     'api',
     'chat_engine',
     'classifier_forest',
+    'concept_graphs',
     'context_builder',
     'demo',
     'duplicate_resolver',
@@ -18,4 +19,6 @@ __all__ = [
     'models',
     'persona_engine',
     'prompt_builder',
+    'runtime_config',
+    'situation_engine',
 ]

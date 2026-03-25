@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from agent_system.runtime_config import get_runtime_config
+
 from .token_budget import select_n_ctx, token_count, truncate_to_fit
 
 
@@ -100,9 +102,16 @@ def retry_infer(
     requested_budget = select_n_ctx(token_budget, allowed_contexts)
     start_index = allowed_contexts.index(requested_budget)
     attempts: list[dict[str, Any]] = []
+    runtime = get_runtime_config()
+    retry_rounds = runtime.retries.retry_rounds
+    max_context_attempts = runtime.max_context_attempts_for_role(role)
+
     current_prompt = str(prompt or "")
-    for retry_round in range(2):
-        for n_ctx in allowed_contexts[start_index:]:
+    for retry_round in range(retry_rounds):
+        candidate_contexts = allowed_contexts[start_index : start_index + max_context_attempts]
+        if not candidate_contexts:
+            candidate_contexts = allowed_contexts[start_index:] or allowed_contexts
+        for n_ctx in candidate_contexts:
             llm_fn = llm_fn_builder(role, n_ctx, max_tokens)
             if llm_fn is None:
                 attempts.append({"n_ctx": n_ctx, "status": "builder_unavailable"})
@@ -133,7 +142,7 @@ def retry_infer(
                     "attempts": attempts,
                 }
             attempts[-1]["status"] = "retry"
-        if retry_round == 0:
+        if retry_round < retry_rounds - 1:
             current_prompt = truncate_to_fit(None, current_prompt, max(256, int(token_count(None, current_prompt) * 0.72)))
             start_index = 0
     return {

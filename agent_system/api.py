@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import base64
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .chat_engine import generate_response
 from .file_ingestion import ingest_file, rebuild_artifacts, store_uploaded_file
+from .graph_localizer import localized_node_view
 from .graph_store import GraphStore
-from .history_store import create_session
-from .persona_engine import list_personas, load_persona
+from .history_store import create_session, list_sessions, parse_session
+from .runtime_config import get_runtime_config
+from .node_rethinker import rethink_graph_nodes
+from .persona_engine import formalize_persona, list_personas, load_persona
 
 
 class SessionRequest(BaseModel):
@@ -22,6 +28,7 @@ class ChatRequest(BaseModel):
     session_id: str = ''
     message: str
     selected_persona: str = ''
+    personality_name: str = ''
     explicit_context: str = ''
     language: str = 'en'
 
@@ -37,6 +44,49 @@ class RebuildRequest(BaseModel):
     personality_name: str = ''
 
 
+class GraphNodeRequest(BaseModel):
+    name: str
+    node_type: str = 'CONCEPT'
+    aliases: list[str] = Field(default_factory=list)
+    description: str = ''
+    facts: list[str] = Field(default_factory=list)
+    translation_line: str = ''
+
+
+class GraphEdgeRequest(BaseModel):
+    from_id: str
+    to_id: str
+    relation_type: str = 'RELATED_TO'
+    weight: float = 0.78
+    confidence: float = 0.82
+
+
+class GraphMergeRequest(BaseModel):
+    primary_id: str
+    secondary_id: str
+
+
+class GraphRethinkRequest(BaseModel):
+    node_ids: list[str] = Field(default_factory=list)
+    query: str = ''
+    limit: int = 6
+    context_budget: int = 4000
+    active_mode: bool = False
+    language: str = 'en'
+    preview_only: bool = False
+
+
+def _frontend_index_candidates() -> tuple[Path, Path, Path]:
+    paths = get_runtime_config().paths
+    return paths.webapp_assets_dir, paths.webapp_dist_index, paths.webapp_fallback_index
+
+
+def _parse_upload_request(payload: Any) -> UploadRequest:
+    if hasattr(UploadRequest, 'model_validate'):
+        return UploadRequest.model_validate(payload)
+    return UploadRequest.parse_obj(payload)
+
+
 def create_router() -> APIRouter:
     router = APIRouter()
 
@@ -44,47 +94,166 @@ def create_router() -> APIRouter:
     def health() -> dict[str, Any]:
         return {'ok': True, 'runtime': 'persona-graph-agent'}
 
+    @router.get('/sessions')
+    def list_sessions_endpoint() -> dict[str, Any]:
+        return {'sessions': list_sessions()}
+
     @router.post('/sessions')
     def create_session_endpoint(request: SessionRequest) -> dict[str, Any]:
-        return create_session(request.session_id, request.title)
+        session = create_session(request.session_id, request.title)
+        return {'session': session}
+
+    @router.get('/sessions/{session_id}')
+    def session_endpoint(session_id: str) -> dict[str, Any]:
+        session = parse_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail='Session not found')
+        return session
 
     @router.post('/chat/respond')
     def chat_endpoint(request: ChatRequest) -> dict[str, Any]:
+        selected_persona = str(request.selected_persona or request.personality_name or '').strip()
         return generate_response(
             message=request.message,
             session_id=request.session_id,
-            selected_persona=request.selected_persona,
+            selected_persona=selected_persona,
             explicit_context=request.explicit_context,
             language=request.language,
         )
 
     @router.post('/files/upload')
-    def upload_endpoint(request: UploadRequest) -> dict[str, Any]:
+    async def upload_endpoint(request: Request) -> dict[str, Any]:
+        content_type = str(request.headers.get('content-type') or '').lower()
+        if 'multipart/form-data' in content_type:
+            form = await request.form()
+            raw_session_id = str(form.get('session_id') or '').strip()
+            session = create_session(raw_session_id)
+            uploaded: list[dict[str, Any]] = []
+            for item in form.getlist('files'):
+                filename = str(getattr(item, 'filename', '') or '').strip()
+                if not filename or not hasattr(item, 'read'):
+                    continue
+                content = await item.read()
+                path = store_uploaded_file(session['session_id'], filename, content)
+                uploaded.append({'path': str(path), 'result': ingest_file(path)})
+            if not uploaded:
+                raise HTTPException(status_code=400, detail='No files were uploaded')
+            return {
+                'session_id': session['session_id'],
+                'files': uploaded,
+            }
+
         try:
-            content = base64.b64decode(request.content_base64.encode('utf-8'))
+            payload = _parse_upload_request(await request.json())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f'Invalid upload payload: {exc}') from exc
+        try:
+            content = base64.b64decode(payload.content_base64.encode('utf-8'))
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f'Invalid base64 payload: {exc}') from exc
-        path = store_uploaded_file(request.session_id, request.filename, content)
+        session = create_session(payload.session_id)
+        path = store_uploaded_file(session['session_id'], payload.filename, content)
         result = ingest_file(path)
-        return {'path': str(path), 'result': result}
+        return {
+            'session_id': session['session_id'],
+            'path': str(path),
+            'result': result,
+            'files': [{'path': str(path), 'result': result}],
+        }
 
     @router.get('/graph')
     def graph_endpoint() -> dict[str, Any]:
         return GraphStore().load_graph()
 
     @router.get('/graph/subgraph')
-    def subgraph_endpoint(query: str = '') -> dict[str, Any]:
-        return GraphStore().subgraph(query, limit=8, depth=1)
+    def subgraph_endpoint(query: str = '', limit: int = 8) -> dict[str, Any]:
+        default_limit = get_runtime_config().settings.graph_subgraph_limit
+        return GraphStore().subgraph(query, limit=max(1, min(int(limit or default_limit), 64)), depth=1)
+
+    @router.get('/graph/nodes/{node_id}/view')
+    def graph_node_view_endpoint(node_id: str, language: str = 'en') -> dict[str, Any]:
+        view = localized_node_view(node_id, language=language, store=GraphStore())
+        if view is None:
+            raise HTTPException(status_code=404, detail='node_not_found')
+        return view
+
+    @router.post('/graph/nodes')
+    def create_graph_node_endpoint(request: GraphNodeRequest) -> dict[str, Any]:
+        store = GraphStore()
+        node = store.create_node(
+            name=request.name,
+            node_type=request.node_type,
+            aliases=list(request.aliases or []),
+            description=request.description,
+            facts=list(request.facts or []),
+            translation_line=request.translation_line,
+        )
+        return {'ok': True, 'node': node, 'graph': store.load_graph()}
+
+    @router.delete('/graph/nodes/{node_id}')
+    def delete_graph_node_endpoint(node_id: str) -> dict[str, Any]:
+        store = GraphStore()
+        result = store.delete_node(node_id)
+        if not result.get('ok'):
+            raise HTTPException(status_code=404, detail=result.get('reason') or 'node_not_found')
+        return {'ok': True, 'result': result, 'graph': store.load_graph()}
+
+    @router.post('/graph/edges')
+    def create_graph_edge_endpoint(request: GraphEdgeRequest) -> dict[str, Any]:
+        store = GraphStore()
+        result = store.connect_nodes(
+            from_id=request.from_id,
+            to_id=request.to_id,
+            relation_type=request.relation_type,
+            weight=request.weight,
+            confidence=request.confidence,
+        )
+        if not result.get('ok'):
+            raise HTTPException(status_code=400, detail=result.get('reason') or 'connect_failed')
+        return {'ok': True, 'result': result, 'graph': store.load_graph()}
+
+    @router.delete('/graph/edges/{edge_id}')
+    def delete_graph_edge_endpoint(edge_id: str) -> dict[str, Any]:
+        store = GraphStore()
+        result = store.delete_edge(edge_id=edge_id)
+        if not result.get('ok'):
+            raise HTTPException(status_code=404, detail=result.get('reason') or 'edge_not_found')
+        return {'ok': True, 'result': result, 'graph': store.load_graph()}
+
+    @router.post('/graph/nodes/merge')
+    def merge_graph_nodes_endpoint(request: GraphMergeRequest) -> dict[str, Any]:
+        store = GraphStore()
+        result = store.merge_nodes_manual(primary_id=request.primary_id, secondary_id=request.secondary_id)
+        if not result.get('ok'):
+            raise HTTPException(status_code=400, detail=result.get('reason') or 'merge_failed')
+        return {'ok': True, 'result': result, 'graph': store.load_graph()}
+
+    @router.post('/graph/rethink')
+    def rethink_graph_endpoint(request: GraphRethinkRequest) -> dict[str, Any]:
+        runtime = get_runtime_config().settings
+        return rethink_graph_nodes(
+            node_ids=list(request.node_ids or []),
+            query=request.query,
+            limit=max(1, min(int(request.limit or 6), 16)),
+            context_budget=max(
+                runtime.rethink_context_budget_min,
+                min(int(request.context_budget or runtime.rethink_context_budget), runtime.rethink_context_budget_max),
+            ),
+            active_mode=bool(request.active_mode),
+            language=request.language,
+            preview_only=bool(request.preview_only),
+        )
 
     @router.get('/personalities')
-    def personalities_endpoint() -> list[dict[str, Any]]:
-        return list_personas()
+    def personalities_endpoint() -> dict[str, Any]:
+        return {'personalities': list_personas()}
 
     @router.get('/personalities/{name}')
     def personality_endpoint(name: str) -> dict[str, Any]:
         bundle = load_persona(name)
         if bundle is None:
             raise HTTPException(status_code=404, detail='Head not found')
+        model = formalize_persona(bundle)
         return {
             'name': bundle.name,
             'entity_type': bundle.entity_type,
@@ -94,6 +263,17 @@ def create_router() -> APIRouter:
             'situation_reactions': bundle.situation_reactions,
             'knowledge': bundle.knowledge,
             'emotion_vector': bundle.emotion_vector,
+            'formal_model': {
+                'T': model.T,
+                'E': model.E,
+                'R': model.R,
+                'M': model.M,
+            },
+            'triad': {
+                'log_tuples': bundle.log_tuples,
+                'persona_form': bundle.persona_form,
+                'decision_explanation': bundle.decision_explanation,
+            },
             'meta': bundle.meta,
         }
 
@@ -107,13 +287,22 @@ def create_router() -> APIRouter:
 def create_app() -> FastAPI:
     app = FastAPI(title='Persona Graph Agent')
     app.include_router(create_router(), prefix='/api/cognitive')
+    assets_dir, dist_index, fallback_index = _frontend_index_candidates()
+    feature_flags = get_runtime_config().features
+
+    if feature_flags.enable_frontend_assets and assets_dir.exists() and not any(getattr(route, 'path', None) == '/assets' for route in app.routes):
+        app.mount('/assets', StaticFiles(directory=assets_dir), name='assets')
 
     @app.get('/api/health')
     def api_health() -> dict[str, Any]:
         return {'ok': True, 'surface': 'combined'}
 
     @app.get('/')
-    def root() -> dict[str, Any]:
+    def root() -> Any:
+        if feature_flags.enable_frontend_root and dist_index.exists():
+            return FileResponse(dist_index)
+        if feature_flags.enable_frontend_root and fallback_index.exists():
+            return FileResponse(fallback_index)
         return {'ok': True, 'runtime': 'persona-graph-agent'}
 
     return app

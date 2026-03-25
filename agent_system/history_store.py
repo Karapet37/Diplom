@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .duplicate_resolver import normalize_name
-from .graph_store import memory_root
+from .runtime_config import get_runtime_config
 
 _ENTITY_PATTERNS = (
     r'"([^"]{2,80})"',
@@ -42,15 +42,11 @@ _ENTITY_STOPWORDS = {
 
 
 def sessions_dir() -> Path:
-    path = memory_root() / 'sessions'
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return get_runtime_config().paths.sessions_dir
 
 
 def files_dir() -> Path:
-    path = memory_root() / 'files' / 'uploaded_documents'
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return get_runtime_config().paths.uploaded_documents_dir
 
 
 def _utc_now() -> str:
