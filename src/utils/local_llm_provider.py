@@ -8,6 +8,8 @@ import re
 import sys
 from typing import Any, Callable
 
+from agent_system.runtime_config import get_runtime_config
+
 try:
     from llama_cpp import Llama
 except ImportError:
@@ -127,6 +129,18 @@ _UNCENSORED_MODEL_HINTS: tuple[str, ...] = (
     "uncensored-heretic",
     "mistral-nemo-2407-12b",
 )
+_JSON_PROMPT_HINTS: tuple[str, ...] = (
+    "return valid json only",
+    "schema:",
+    '"entities":[',
+    '"persona_payload":{',
+    '"node_improvement":{',
+)
+
+
+def _allow_uncensored_autodiscovery() -> bool:
+    token = str(os.getenv("LOCAL_ALLOW_UNCENSORED_AUTODISCOVERY", "") or "").strip().lower()
+    return token in {"1", "true", "yes", "on"}
 
 
 def _warn(message: str) -> None:
@@ -152,6 +166,13 @@ def _contains_any(token: str, hints: tuple[str, ...]) -> bool:
 
 def _path_token(path: Path) -> str:
     return str(path.resolve()).replace("\\", "/").lower()
+
+
+def _resolve_runtime_path(raw: str) -> Path:
+    path = Path(str(raw or '').strip()).expanduser()
+    if not path.is_absolute():
+        path = get_runtime_config().paths.repo_root / path
+    return path.resolve()
 
 
 def _split_info(path: Path) -> tuple[str, int, int] | None:
@@ -204,7 +225,7 @@ def _iter_model_dirs() -> list[Path]:
     for raw in raw_dirs:
         if not raw:
             continue
-        path = Path(raw).expanduser()
+        path = _resolve_runtime_path(raw)
         key = str(path.resolve()) if path.exists() else str(path)
         if key in seen:
             continue
@@ -286,7 +307,7 @@ def _resolve_model_role_paths() -> dict[str, str]:
         explicit = str(os.getenv(env_name, "") or "").strip()
         if not explicit:
             continue
-        path = Path(explicit).expanduser()
+        path = _resolve_runtime_path(explicit)
         normalized = _resolve_entrypoint(path)
         if normalized is None:
             if path.exists() and path.is_file():
@@ -369,7 +390,7 @@ def _resolve_model_role_paths() -> dict[str, str]:
         pick = _select_best(analyst_candidates or general_candidates, scorer=_score_analyst)
         if pick is not None:
             role_map[ROLE_ANALYST] = str(pick)
-    if ROLE_UNCENSORED not in role_map:
+    if ROLE_UNCENSORED not in role_map and _allow_uncensored_autodiscovery():
         pick = _select_best(general_candidates, scorer=_score_uncensored)
         if pick is not None:
             role_map[ROLE_UNCENSORED] = str(pick)
@@ -400,7 +421,7 @@ def _get_model_path() -> str | None:
     """
     explicit = str(os.getenv("LOCAL_GGUF_MODEL", "") or "").strip()
     if explicit:
-        path = Path(explicit).expanduser()
+        path = _resolve_runtime_path(explicit)
         normalized = _resolve_entrypoint(path)
         if normalized is not None:
             if normalized != path:
@@ -458,8 +479,14 @@ def _build_llm_for_path(model_path: str, *, n_ctx: int | None = None) -> "Llama"
         model_path=str(model_path),
         n_ctx=resolved_n_ctx,
         temperature=float(os.getenv("LOCAL_GGUF_TEMPERATURE", "0.15")),
+        n_batch=int(os.getenv("LOCAL_GGUF_N_BATCH", "256")),
         verbose=False,
     )
+
+
+def _prompt_prefers_json_output(prompt: str) -> bool:
+    lowered = str(prompt or "").strip().lower()
+    return any(hint in lowered for hint in _JSON_PROMPT_HINTS)
 
 
 def _make_raw_llm_fn(llm: "Llama", *, max_tokens: int | None = None) -> Callable[[str], str]:
@@ -467,26 +494,27 @@ def _make_raw_llm_fn(llm: "Llama", *, max_tokens: int | None = None) -> Callable
 
     def llm_fn(prompt: str) -> str:
         messages = [{"role": "user", "content": str(prompt or "")}]
-        try:
-            response = llm.create_chat_completion(
-                messages=messages,
-                response_format={"type": "json_object"},
-                max_tokens=resolved_max_tokens,
-                temperature=float(os.getenv("LOCAL_GGUF_TEMPERATURE", "0.15")),
-                top_p=float(os.getenv("LOCAL_GGUF_TOP_P", "0.9")),
-            )
-            result_text = response["choices"][0]["message"]["content"]
-        except Exception:
+        kwargs = {
+            "messages": messages,
+            "max_tokens": resolved_max_tokens,
+            "temperature": float(os.getenv("LOCAL_GGUF_TEMPERATURE", "0.15")),
+            "top_p": float(os.getenv("LOCAL_GGUF_TOP_P", "0.9")),
+        }
+        if _prompt_prefers_json_output(prompt):
             try:
-                out = llm.create_chat_completion(
-                    messages=messages,
-                    max_tokens=resolved_max_tokens,
-                    temperature=float(os.getenv("LOCAL_GGUF_TEMPERATURE", "0.15")),
-                    top_p=float(os.getenv("LOCAL_GGUF_TOP_P", "0.9")),
+                response = llm.create_chat_completion(
+                    response_format={"type": "json_object"},
+                    **kwargs,
                 )
-                result_text = out["choices"][0]["message"]["content"]
-            except Exception as inner_exc:
-                raise RuntimeError(str(inner_exc)) from inner_exc
+                result_text = response["choices"][0]["message"]["content"]
+                return str(result_text or "")
+            except Exception:
+                pass
+        try:
+            out = llm.create_chat_completion(**kwargs)
+            result_text = out["choices"][0]["message"]["content"]
+        except Exception as inner_exc:
+            raise RuntimeError(str(inner_exc)) from inner_exc
         return str(result_text or "")
 
     setattr(llm_fn, "_llm", llm)
@@ -638,7 +666,7 @@ def build_model_llm_fn(
     raw = str(model_path or "").strip()
     if not raw:
         return None
-    path = Path(raw).expanduser()
+    path = _resolve_runtime_path(raw)
     normalized = _resolve_entrypoint(path)
     if normalized is None:
         if path.exists() and path.is_file():
@@ -694,6 +722,7 @@ def list_model_advisors() -> dict[str, Any]:
         "models_dir": str(os.getenv("LOCAL_MODELS_DIR", "models/gguf") or "models/gguf"),
         "detected_models": models,
         "advisors": advisors,
+        "uncensored_autodiscovery_enabled": _allow_uncensored_autodiscovery(),
         "translator_policy": "optional_if_available",
         "translator_priority": "madlad400",
         "fast_model_priority": "nanbeige4.1-3b.q3_k_m.gguf",

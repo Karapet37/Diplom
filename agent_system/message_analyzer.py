@@ -238,7 +238,7 @@ def _analyze_user_state(message: str, *, primary_entity: str = '', selected_head
     )
 
 
-def analyze_message(
+def analyze_message_state(
     *,
     message: str,
     session_id: str,
@@ -246,7 +246,7 @@ def analyze_message(
     current_entity: str = '',
     explicit_context: str = '',
     known_entities: list[dict[str, Any]] | None = None,
-) -> MessageAnalysis:
+) -> dict[str, Any]:
     clean = _clean_message(message)
     known = list(known_entities or [])
     entities = _extract_entities(clean, known)
@@ -264,20 +264,49 @@ def analyze_message(
         primary = current_entity.strip()
 
     user_state = _analyze_user_state(clean, primary_entity=primary, selected_head=selected_head.strip())
+    return {
+        'message': clean,
+        'session_id': session_id,
+        'selected_head': selected_head.strip(),
+        'primary_entity': primary,
+        'current_entity': current_entity.strip(),
+        'explicit_context': explicit_context.strip(),
+        'entities': entities,
+        'user_state': user_state,
+    }
+
+
+def analyze_message(
+    *,
+    message: str,
+    session_id: str,
+    selected_head: str = '',
+    current_entity: str = '',
+    explicit_context: str = '',
+    known_entities: list[dict[str, Any]] | None = None,
+) -> MessageAnalysis:
+    prepared = analyze_message_state(
+        message=message,
+        session_id=session_id,
+        selected_head=selected_head,
+        current_entity=current_entity,
+        explicit_context=explicit_context,
+        known_entities=known_entities,
+    )
     situation = model_situation(
-        message=clean,
-        primary_entity=primary,
-        selected_head=selected_head.strip(),
-        user_state=user_state,
+        message=str(prepared['message'] or ''),
+        primary_entity=str(prepared['primary_entity'] or ''),
+        selected_head=str(prepared['selected_head'] or ''),
+        user_state=prepared['user_state'],
     )
     return MessageAnalysis(
-        message=clean,
+        message=str(prepared['message'] or ''),
         session_id=session_id,
-        selected_head=selected_head.strip(),
-        primary_entity=primary,
-        current_entity=current_entity.strip(),
-        explicit_context=explicit_context.strip(),
-        entities=entities,
-        user_state=user_state,
+        selected_head=str(prepared['selected_head'] or ''),
+        primary_entity=str(prepared['primary_entity'] or ''),
+        current_entity=str(prepared['current_entity'] or ''),
+        explicit_context=str(prepared['explicit_context'] or ''),
+        entities=list(prepared['entities'] or []),
+        user_state=prepared['user_state'],
         situation=situation,
     )

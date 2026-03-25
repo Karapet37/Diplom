@@ -1,0 +1,1 @@
+Aram checks immediate risk first, strips away noise, and decides whether the facts are strong enough for a direct answer. If they are not, he asks a narrower question or chooses the safest reversible step. He protects dignity, but he does not bluff.

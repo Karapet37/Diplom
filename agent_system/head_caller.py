@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .duplicate_resolver import normalize_name
-from .models import ClassificationDecision, MessageAnalysis
+from .models import ClassificationDecision, MessageAnalysis, PersonaSelectionExplanation
 from .models import HEAD_ENTITY_TYPES
 from .persona_engine import load_persona, spawn_head
 
@@ -54,12 +54,51 @@ def select_primary_head(
             if head is None:
                 continue
             if str(head.meta.get('slug') or '').lower() == selected or str(head.name or '').lower() == selected:
-                return item
+                decision = item.get('decision')
+                enriched = dict(item)
+                enriched['selection_explanation'] = PersonaSelectionExplanation(
+                    persona_name=head.name,
+                    source='explicit_selection',
+                    reason='Selected persona matched an explicit user-selected head.',
+                    evidence=[
+                        f'selected_head={analysis.selected_head}',
+                        f'entity_name={head.name}',
+                        f'entity_type={head.entity_type}',
+                        f'confidence={decision.confidence:.3f}' if decision is not None else 'confidence=existing',
+                    ],
+                )
+                return enriched
     for item in prepared_heads:
         if item.get('head') is not None:
-            return item
+            head = item['head']
+            decision = item.get('decision')
+            enriched = dict(item)
+            enriched['selection_explanation'] = PersonaSelectionExplanation(
+                persona_name=head.name,
+                source='prepared_head_fallback',
+                reason='The first valid spawned head was selected as the current primary persona.',
+                evidence=[
+                    f'entity_name={head.name}',
+                    f'entity_type={head.entity_type}',
+                    f'confidence={decision.confidence:.3f}' if decision is not None else 'confidence=existing',
+                ],
+            )
+            return enriched
     if analysis.primary_entity:
         bundle = load_persona(analysis.primary_entity)
         if bundle:
-            return {'decision': None, 'node': None, 'head': bundle}
+            return {
+                'decision': None,
+                'node': None,
+                'head': bundle,
+                'selection_explanation': PersonaSelectionExplanation(
+                    persona_name=bundle.name,
+                    source='existing_persona_lookup',
+                    reason='Existing persona head matched the primary entity inferred from the message.',
+                    evidence=[
+                        f'primary_entity={analysis.primary_entity}',
+                        f'entity_type={bundle.entity_type}',
+                    ],
+                ),
+            }
     return None

@@ -6,17 +6,26 @@ from typing import Any
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .chat_engine import generate_response
 from .file_ingestion import ingest_file, rebuild_artifacts, store_uploaded_file
 from .graph_localizer import localized_node_view
+from .observability import get_observability_store
 from .graph_store import GraphStore
 from .history_store import create_session, list_sessions, parse_session
+from .reliability import RuntimeFailure, operator_messages_from_status, runtime_status_snapshot
 from .runtime_config import get_runtime_config
 from .node_rethinker import rethink_graph_nodes
-from .persona_engine import formalize_persona, list_personas, load_persona
+from .persona_engine import (
+    formalize_persona,
+    list_persona_revisions,
+    list_personas,
+    load_persona,
+    restore_persona_revision,
+)
+from .memory_layers import list_persona_snapshots
 
 
 class SessionRequest(BaseModel):
@@ -66,6 +75,11 @@ class GraphMergeRequest(BaseModel):
     secondary_id: str
 
 
+class GraphNodeStateRequest(BaseModel):
+    lifecycle_state: str
+    reason: str = 'manual_review'
+
+
 class GraphRethinkRequest(BaseModel):
     node_ids: list[str] = Field(default_factory=list)
     query: str = ''
@@ -74,6 +88,10 @@ class GraphRethinkRequest(BaseModel):
     active_mode: bool = False
     language: str = 'en'
     preview_only: bool = False
+
+
+class GraphRestoreRequest(BaseModel):
+    snapshot_path: str = ''
 
 
 def _frontend_index_candidates() -> tuple[Path, Path, Path]:
@@ -92,7 +110,37 @@ def create_router() -> APIRouter:
 
     @router.get('/health')
     def health() -> dict[str, Any]:
-        return {'ok': True, 'runtime': 'persona-graph-agent'}
+        status = runtime_status_snapshot()
+        return {
+            'ok': True,
+            'runtime': 'persona-graph-agent',
+            'runtime_status': status,
+            'operator_messages': operator_messages_from_status(status),
+        }
+
+    @router.get('/debug/metrics')
+    def debug_metrics_endpoint() -> dict[str, Any]:
+        return {'ok': True, 'metrics': get_observability_store().snapshot()}
+
+    @router.get('/debug/traces')
+    def debug_traces_endpoint(limit: int = 20, session_id: str = '') -> dict[str, Any]:
+        return {
+            'ok': True,
+            'traces': get_observability_store().recent_traces(limit=max(1, min(int(limit or 20), 100)), session_id=session_id),
+        }
+
+    @router.get('/debug/graph-health')
+    def debug_graph_health_endpoint() -> dict[str, Any]:
+        return {'ok': True, 'graph_health': GraphStore().graph_diagnostics()}
+
+    @router.get('/debug/runtime-status')
+    def debug_runtime_status_endpoint() -> dict[str, Any]:
+        status = runtime_status_snapshot()
+        return {
+            'ok': True,
+            'runtime_status': status,
+            'operator_messages': operator_messages_from_status(status),
+        }
 
     @router.get('/sessions')
     def list_sessions_endpoint() -> dict[str, Any]:
@@ -165,6 +213,17 @@ def create_router() -> APIRouter:
     def graph_endpoint() -> dict[str, Any]:
         return GraphStore().load_graph()
 
+    @router.get('/graph/snapshots')
+    def graph_snapshots_endpoint(limit: int = 16) -> dict[str, Any]:
+        return {'ok': True, 'snapshots': GraphStore().list_snapshots(limit=max(1, min(int(limit or 16), 64)))}
+
+    @router.post('/graph/restore')
+    def graph_restore_endpoint(request: GraphRestoreRequest) -> dict[str, Any]:
+        result = GraphStore().restore_snapshot(request.snapshot_path)
+        if not result.get('ok'):
+            raise HTTPException(status_code=404, detail=result.get('reason') or 'snapshot_not_found')
+        return {'ok': True, 'result': result, 'graph': GraphStore().load_graph()}
+
     @router.get('/graph/subgraph')
     def subgraph_endpoint(query: str = '', limit: int = 8) -> dict[str, Any]:
         default_limit = get_runtime_config().settings.graph_subgraph_limit
@@ -228,6 +287,18 @@ def create_router() -> APIRouter:
             raise HTTPException(status_code=400, detail=result.get('reason') or 'merge_failed')
         return {'ok': True, 'result': result, 'graph': store.load_graph()}
 
+    @router.post('/graph/nodes/{node_id}/state')
+    def review_graph_node_endpoint(node_id: str, request: GraphNodeStateRequest) -> dict[str, Any]:
+        store = GraphStore()
+        result = store.review_node_state(
+            node_id,
+            lifecycle_state=request.lifecycle_state,
+            reason=request.reason,
+        )
+        if not result.get('ok'):
+            raise HTTPException(status_code=400, detail=result.get('reason') or 'review_failed')
+        return {'ok': True, 'result': result, 'graph': store.load_graph()}
+
     @router.post('/graph/rethink')
     def rethink_graph_endpoint(request: GraphRethinkRequest) -> dict[str, Any]:
         runtime = get_runtime_config().settings
@@ -274,6 +345,46 @@ def create_router() -> APIRouter:
                 'persona_form': bundle.persona_form,
                 'decision_explanation': bundle.decision_explanation,
             },
+            'baseline': bundle.baseline_definition.to_dict() if bundle.baseline_definition is not None else {},
+            'dynamic_state': bundle.dynamic_state.to_dict() if bundle.dynamic_state is not None else {},
+            'learned_patterns': bundle.learned_patterns.to_dict() if bundle.learned_patterns is not None else {},
+            'indicators': bundle.indicators.to_dict() if bundle.indicators is not None else {},
+            'revisions': dict(bundle.revision_meta),
+            'meta': bundle.meta,
+        }
+
+    @router.get('/personalities/{name}/revisions')
+    def personality_revisions_endpoint(name: str) -> dict[str, Any]:
+        bundle = load_persona(name)
+        if bundle is None:
+            raise HTTPException(status_code=404, detail='Head not found')
+        return {'ok': True, 'revisions': list_persona_revisions(name)}
+
+    @router.get('/personalities/{name}/snapshots')
+    def personality_snapshots_endpoint(name: str, limit: int = 12) -> dict[str, Any]:
+        bundle = load_persona(name)
+        if bundle is None:
+            raise HTTPException(status_code=404, detail='Head not found')
+        return {'ok': True, 'snapshots': list_persona_snapshots(name, limit=max(1, min(int(limit or 12), 64)))}
+
+    @router.post('/personalities/{name}/restore/{revision}')
+    def personality_restore_endpoint(name: str, revision: int) -> dict[str, Any]:
+        bundle = restore_persona_revision(name, revision)
+        if bundle is None:
+            raise HTTPException(status_code=404, detail='revision_not_found')
+        model = formalize_persona(bundle)
+        return {
+            'ok': True,
+            'name': bundle.name,
+            'entity_type': bundle.entity_type,
+            'emotion_vector': bundle.emotion_vector,
+            'formal_model': {
+                'T': model.T,
+                'E': model.E,
+                'R': model.R,
+                'M': model.M,
+            },
+            'revisions': dict(bundle.revision_meta),
             'meta': bundle.meta,
         }
 
@@ -290,12 +401,29 @@ def create_app() -> FastAPI:
     assets_dir, dist_index, fallback_index = _frontend_index_candidates()
     feature_flags = get_runtime_config().features
 
+    @app.exception_handler(RuntimeFailure)
+    async def runtime_failure_handler(_request: Request, exc: RuntimeFailure) -> JSONResponse:
+        payload = exc.to_dict()
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                'ok': False,
+                'error': payload,
+            },
+        )
+
     if feature_flags.enable_frontend_assets and assets_dir.exists() and not any(getattr(route, 'path', None) == '/assets' for route in app.routes):
         app.mount('/assets', StaticFiles(directory=assets_dir), name='assets')
 
     @app.get('/api/health')
     def api_health() -> dict[str, Any]:
-        return {'ok': True, 'surface': 'combined'}
+        status = runtime_status_snapshot()
+        return {
+            'ok': True,
+            'surface': 'combined',
+            'runtime_status': status,
+            'operator_messages': operator_messages_from_status(status),
+        }
 
     @app.get('/')
     def root() -> Any:

@@ -1,0 +1,53 @@
+{
+  "aliases": [
+    "Aram Petrosyan",
+    "Dr. Petrosyan"
+  ],
+  "relations": [
+    {
+      "type": "WORKS_IN",
+      "target": "Emergency medicine",
+      "weight": 0.92
+    },
+    {
+      "type": "SPECIALIZES_IN",
+      "target": "Triage",
+      "weight": 0.9
+    },
+    {
+      "type": "WORKS_WITH",
+      "target": "Rural clinics",
+      "weight": 0.82
+    },
+    {
+      "type": "LIVES_IN",
+      "target": "Yerevan",
+      "weight": 0.75
+    },
+    {
+      "type": "CARES_FOR",
+      "target": "Sister Anahit",
+      "weight": 0.6
+    },
+    {
+      "type": "KEEPS",
+      "target": "Blue field notebook",
+      "weight": 0.72
+    },
+    {
+      "type": "KEEPS",
+      "target": "Steel watch from father",
+      "weight": 0.78
+    },
+    {
+      "type": "LEARNED_FROM",
+      "target": "Night shifts in overcrowded emergency wards",
+      "weight": 0.74
+    },
+    {
+      "type": "VALUES",
+      "target": "Reversible decisions under uncertainty",
+      "weight": 0.84
+    }
+  ]
+}

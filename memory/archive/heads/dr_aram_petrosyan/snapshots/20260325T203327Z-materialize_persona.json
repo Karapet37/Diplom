@@ -1,0 +1,9 @@
+{
+  "recorded_at": "2026-03-25T20:33:27Z",
+  "reason": "materialize_persona",
+  "storage_state": {
+    "head_exists": false,
+    "files": {},
+    "index": []
+  }
+}

@@ -12,6 +12,14 @@ ENTITY_TYPES = (
     'PROFESSION',
 )
 
+GRAPH_NODE_LIFECYCLE_STATES = (
+    'active',
+    'weak',
+    'suspect',
+    'archived',
+    'merged',
+)
+
 HEAD_ENTITY_TYPES = (
     'PERSON',
     'FICTIONAL_CHARACTER',
@@ -148,6 +156,134 @@ class ReactionOutcome:
 
 
 @dataclass(slots=True)
+class PersonaBaselineDefinition:
+    name: str
+    slug: str
+    entity_type: str
+    traits: list[str] = field(default_factory=list)
+    aliases: list[str] = field(default_factory=list)
+    relations: list[dict[str, Any]] = field(default_factory=list)
+    knowledge: str = ''
+    revision: int = 0
+    updated_at: str = ''
+    source: str = ''
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'name': self.name,
+            'slug': self.slug,
+            'entity_type': self.entity_type,
+            'traits': list(self.traits),
+            'aliases': list(self.aliases),
+            'relations': [dict(item) for item in self.relations],
+            'knowledge': self.knowledge,
+            'revision': int(self.revision or 0),
+            'updated_at': self.updated_at,
+            'source': self.source,
+        }
+
+
+@dataclass(slots=True)
+class PersonaDynamicState:
+    emotion_vector: dict[str, float] = field(default_factory=dict)
+    last_situation: str = ''
+    last_response_style: str = ''
+    revision: int = 0
+    updated_at: str = ''
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'emotion_vector': dict(self.emotion_vector),
+            'last_situation': self.last_situation,
+            'last_response_style': self.last_response_style,
+            'revision': int(self.revision or 0),
+            'updated_at': self.updated_at,
+        }
+
+
+@dataclass(slots=True)
+class PersonaLearnedPatterns:
+    examples: list[str] = field(default_factory=list)
+    situation_reactions: list[dict[str, Any]] = field(default_factory=list)
+    log_tuples: list[dict[str, Any]] = field(default_factory=list)
+    persona_form: dict[str, Any] = field(default_factory=dict)
+    decision_explanation: str = ''
+    learned_traits: list[str] = field(default_factory=list)
+    revision: int = 0
+    updated_at: str = ''
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'examples': list(self.examples),
+            'situation_reactions': [dict(item) for item in self.situation_reactions],
+            'log_tuples': [dict(item) for item in self.log_tuples],
+            'persona_form': dict(self.persona_form),
+            'decision_explanation': self.decision_explanation,
+            'learned_traits': list(self.learned_traits),
+            'revision': int(self.revision or 0),
+            'updated_at': self.updated_at,
+        }
+
+
+@dataclass(slots=True)
+class PersonaIndicators:
+    confidence_score: float = 0.0
+    maturity_score: float = 0.0
+    maturity_level: str = 'bootstrap'
+    evidence_count: int = 0
+    learned_pattern_count: int = 0
+    adaptation_locked: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'confidence_score': round(float(self.confidence_score or 0.0), 6),
+            'maturity_score': round(float(self.maturity_score or 0.0), 6),
+            'maturity_level': self.maturity_level,
+            'evidence_count': int(self.evidence_count or 0),
+            'learned_pattern_count': int(self.learned_pattern_count or 0),
+            'adaptation_locked': bool(self.adaptation_locked),
+        }
+
+
+@dataclass(slots=True)
+class PersonaSelectionExplanation:
+    persona_name: str = ''
+    source: str = ''
+    reason: str = ''
+    evidence: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'persona_name': self.persona_name,
+            'source': self.source,
+            'reason': self.reason,
+            'evidence': list(self.evidence),
+        }
+
+
+@dataclass(slots=True)
+class PersonaResponseExplanation:
+    persona_name: str = ''
+    response_style: str = ''
+    reason: str = ''
+    situation_summary: str = ''
+    state_influences: list[str] = field(default_factory=list)
+    trait_influences: list[str] = field(default_factory=list)
+    learned_influences: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'persona_name': self.persona_name,
+            'response_style': self.response_style,
+            'reason': self.reason,
+            'situation_summary': self.situation_summary,
+            'state_influences': list(self.state_influences),
+            'trait_influences': list(self.trait_influences),
+            'learned_influences': list(self.learned_influences),
+        }
+
+
+@dataclass(slots=True)
 class PersonaSystemModel:
     T: dict[str, Any]
     E: dict[str, float]
@@ -161,6 +297,53 @@ class GraphQuality:
     redundancy: float
     connectivity: float
     score: float
+
+
+@dataclass(slots=True)
+class GraphHealthMetrics:
+    node_count: int = 0
+    edge_count: int = 0
+    active_node_count: int = 0
+    weak_node_count: int = 0
+    suspect_node_count: int = 0
+    archived_node_count: int = 0
+    merged_node_count: int = 0
+    duplicate_candidates: int = 0
+    duplicate_review_candidates: int = 0
+    duplicate_rate: float = 0.0
+    orphan_nodes: int = 0
+    orphan_rate: float = 0.0
+    average_relation_density: float = 0.0
+    low_value_nodes: int = 0
+    summary_nodes: int = 0
+    cluster_count: int = 0
+    quality: GraphQuality | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'node_count': int(self.node_count or 0),
+            'edge_count': int(self.edge_count or 0),
+            'active_node_count': int(self.active_node_count or 0),
+            'weak_node_count': int(self.weak_node_count or 0),
+            'suspect_node_count': int(self.suspect_node_count or 0),
+            'archived_node_count': int(self.archived_node_count or 0),
+            'merged_node_count': int(self.merged_node_count or 0),
+            'duplicate_candidates': int(self.duplicate_candidates or 0),
+            'duplicate_review_candidates': int(self.duplicate_review_candidates or 0),
+            'duplicate_rate': round(float(self.duplicate_rate or 0.0), 6),
+            'orphan_nodes': int(self.orphan_nodes or 0),
+            'orphan_rate': round(float(self.orphan_rate or 0.0), 6),
+            'average_relation_density': round(float(self.average_relation_density or 0.0), 6),
+            'low_value_nodes': int(self.low_value_nodes or 0),
+            'summary_nodes': int(self.summary_nodes or 0),
+            'cluster_count': int(self.cluster_count or 0),
+            'quality': {
+                'relevance': round(float((self.quality.relevance if self.quality else 0.0) or 0.0), 6),
+                'redundancy': round(float((self.quality.redundancy if self.quality else 0.0) or 0.0), 6),
+                'connectivity': round(float((self.quality.connectivity if self.quality else 0.0) or 0.0), 6),
+                'score': round(float((self.quality.score if self.quality else 0.0) or 0.0), 6),
+            },
+        }
 
 
 @dataclass(slots=True)
@@ -205,6 +388,11 @@ class HeadBundle:
     log_tuples: list[dict[str, Any]] = field(default_factory=list)
     persona_form: dict[str, Any] = field(default_factory=dict)
     decision_explanation: str = ''
+    baseline_definition: PersonaBaselineDefinition | None = None
+    dynamic_state: PersonaDynamicState | None = None
+    learned_patterns: PersonaLearnedPatterns | None = None
+    indicators: PersonaIndicators | None = None
+    revision_meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -217,6 +405,7 @@ class ContextPayload:
     selected_nodes: list[dict[str, Any]]
     selected_edges: list[dict[str, Any]]
     estimated_tokens: int
+    context_debug: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -228,6 +417,63 @@ class ContextPayload:
             'nodes': list(self.selected_nodes),
             'edges': list(self.selected_edges),
             'estimated_tokens': self.estimated_tokens,
+            'context_debug': dict(self.context_debug),
+        }
+
+
+@dataclass(slots=True)
+class ContextScoreBreakdown:
+    relevance: float = 0.0
+    recency: float = 0.0
+    importance: float = 0.0
+    confidence: float = 0.0
+    persona_alignment: float = 0.0
+    graph_connectivity: float = 0.0
+    total: float = 0.0
+
+    def to_dict(self) -> dict[str, float]:
+        return {
+            'relevance': round(float(self.relevance or 0.0), 6),
+            'recency': round(float(self.recency or 0.0), 6),
+            'importance': round(float(self.importance or 0.0), 6),
+            'confidence': round(float(self.confidence or 0.0), 6),
+            'persona_alignment': round(float(self.persona_alignment or 0.0), 6),
+            'graph_connectivity': round(float(self.graph_connectivity or 0.0), 6),
+            'total': round(float(self.total or 0.0), 6),
+        }
+
+
+@dataclass(slots=True)
+class ContextCandidate:
+    candidate_id: str
+    source: str
+    section: str
+    item_type: str
+    title: str
+    text: str
+    token_estimate: int
+    score: ContextScoreBreakdown = field(default_factory=ContextScoreBreakdown)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    reasons: list[str] = field(default_factory=list)
+    rank: int = 0
+    selected: bool = False
+    compressed: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'candidate_id': self.candidate_id,
+            'source': self.source,
+            'section': self.section,
+            'item_type': self.item_type,
+            'title': self.title,
+            'text': self.text,
+            'token_estimate': int(self.token_estimate or 0),
+            'score': self.score.to_dict(),
+            'metadata': dict(self.metadata),
+            'reasons': list(self.reasons),
+            'rank': int(self.rank or 0),
+            'selected': bool(self.selected),
+            'compressed': bool(self.compressed),
         }
 
 
@@ -294,12 +540,19 @@ class ChatTurnResult:
     classifications: list[ClassificationDecision]
     repair_status: dict[str, Any]
     proposal_requested: bool = False
+    trace_id: str = ''
     side_effects: ChatSideEffects = field(default_factory=ChatSideEffects)
+    persona_selection: PersonaSelectionExplanation = field(default_factory=PersonaSelectionExplanation)
+    persona_response: PersonaResponseExplanation = field(default_factory=PersonaResponseExplanation)
+    context_preview: dict[str, Any] = field(default_factory=dict)
+    runtime_status: dict[str, Any] = field(default_factory=dict)
+    operator_messages: list[str] = field(default_factory=list)
 
     def to_dict(self, *, include_side_effects: bool = True) -> dict[str, Any]:
         payload = {
             'assistant_reply': self.assistant_reply,
             'session_id': self.session_id,
+            'trace_id': self.trace_id,
             'session': dict(self.session),
             'persona_name': self.persona_name,
             'graph_context': self.graph_context,
@@ -316,6 +569,11 @@ class ChatTurnResult:
             ],
             'repair_status': dict(self.repair_status),
             'proposal_requested': self.proposal_requested,
+            'persona_selection': self.persona_selection.to_dict(),
+            'persona_response': self.persona_response.to_dict(),
+            'context_preview': dict(self.context_preview),
+            'runtime_status': dict(self.runtime_status),
+            'operator_messages': list(self.operator_messages),
         }
         if include_side_effects:
             payload['side_effects'] = self.side_effects.to_dict()

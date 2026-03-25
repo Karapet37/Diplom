@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .duplicate_resolver import normalize_name
+from .memory_layers import append_session_archive, load_session_archive
 from .runtime_config import get_runtime_config
 
 _ENTITY_PATTERNS = (
@@ -89,26 +90,24 @@ def create_session(session_id: str = '', title: str = '') -> dict[str, Any]:
     }
 
 
-def append_turn(session_id: str, user_message: str, assistant_message: str) -> Path:
-    path = session_text_path(session_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        path.touch()
+def _render_session_text(title: str, messages: list[dict[str, Any]]) -> str:
     blocks: list[str] = []
-    if str(user_message or '').strip():
-        blocks.append(f'[{_utc_now()}]\nuser: {str(user_message).strip()}')
-    if str(assistant_message or '').strip():
-        blocks.append(f'[{_utc_now()}]\nassistant: {str(assistant_message).strip()}')
-    if not blocks:
-        return path
-    current = path.read_text(encoding='utf-8') if path.exists() else ''
-    payload = (current.rstrip() + '\n\n' if current.strip() else '') + '\n\n'.join(blocks) + '\n'
-    path.write_text(payload, encoding='utf-8')
-    return path
+    if str(title or '').strip():
+        blocks.append(f'# {str(title).strip()}')
+    for item in list(messages or []):
+        role = str(item.get('role') or '').strip()
+        message = str(item.get('message') or '').strip()
+        timestamp = str(item.get('timestamp') or '').strip()
+        if not role or not message:
+            continue
+        if timestamp:
+            blocks.append(f'[{timestamp}]')
+        blocks.append(f'{role}: {message}')
+        blocks.append('')
+    return '\n'.join(blocks).strip() + ('\n' if blocks else '')
 
 
-def parse_session(session_id: str) -> dict[str, Any] | None:
-    path = session_text_path(session_id)
+def _parse_session_path(path: Path, *, session_id: str) -> dict[str, Any] | None:
     if not path.exists():
         return None
     raw = path.read_text(encoding='utf-8')
@@ -135,6 +134,93 @@ def parse_session(session_id: str) -> dict[str, Any] | None:
     return {'session_id': _safe_session_id(session_id), 'title': resolved_title, 'messages': messages, 'updated_at': updated_at, 'path': str(path)}
 
 
+def parse_active_session(session_id: str) -> dict[str, Any] | None:
+    return _parse_session_path(session_text_path(session_id), session_id=session_id)
+
+
+def _apply_session_retention(session_id: str) -> None:
+    config = get_runtime_config().memory
+    parsed = parse_active_session(session_id)
+    if not parsed:
+        return
+    messages = list(parsed.get('messages') or [])
+    archive = load_session_archive(session_id)
+    has_archive = bool(list(archive.get('archived_messages') or []))
+    threshold = config.session_keep_recent_messages if has_archive else config.session_archive_after_messages
+    if len(messages) <= threshold:
+        return
+    keep_count = min(max(config.session_keep_recent_messages, 0), len(messages))
+    cutoff = max(len(messages) - keep_count, 0)
+    archived_messages = messages[:cutoff]
+    active_messages = messages[cutoff:]
+    if not archived_messages or len(active_messages) >= len(messages):
+        return
+    append_session_archive(
+        session_id,
+        title=str(parsed.get('title') or ''),
+        messages=archived_messages,
+        reason='session_hot_window_trim',
+    )
+    session_text_path(session_id).write_text(
+        _render_session_text(str(parsed.get('title') or ''), active_messages),
+        encoding='utf-8',
+    )
+
+
+def apply_session_memory_policy(session_id: str) -> dict[str, Any]:
+    _apply_session_retention(session_id)
+    parsed = parse_session(session_id)
+    archive = load_session_archive(session_id)
+    return {
+        'session_id': _safe_session_id(session_id),
+        'active_message_count': int((parsed or {}).get('active_message_count') or 0),
+        'archived_message_count': len(list(archive.get('archived_messages') or [])),
+        'archive_events': list(archive.get('archive_events') or []),
+    }
+
+
+def append_turn(session_id: str, user_message: str, assistant_message: str) -> Path:
+    path = session_text_path(session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.touch()
+    blocks: list[str] = []
+    if str(user_message or '').strip():
+        blocks.append(f'[{_utc_now()}]\nuser: {str(user_message).strip()}')
+    if str(assistant_message or '').strip():
+        blocks.append(f'[{_utc_now()}]\nassistant: {str(assistant_message).strip()}')
+    if not blocks:
+        return path
+    current = path.read_text(encoding='utf-8') if path.exists() else ''
+    payload = (current.rstrip() + '\n\n' if current.strip() else '') + '\n\n'.join(blocks) + '\n'
+    path.write_text(payload, encoding='utf-8')
+    _apply_session_retention(session_id)
+    return path
+
+
+def parse_session(session_id: str, *, include_archived: bool = True) -> dict[str, Any] | None:
+    active = parse_active_session(session_id)
+    archive = load_session_archive(session_id) if include_archived else {'archived_messages': [], 'title': '', 'updated_at': ''}
+    if active is None and not list(archive.get('archived_messages') or []):
+        return None
+    active_messages = list(active.get('messages') or []) if active else []
+    archived_messages = [dict(item) for item in list(archive.get('archived_messages') or []) if isinstance(item, dict)]
+    messages = archived_messages + active_messages
+    title = str((active or {}).get('title') or archive.get('title') or '').strip()
+    if not title:
+        title = next((str(item.get('message') or '')[:60] for item in messages if str(item.get('role') or '').strip() == 'user'), 'New session')
+    updated_at = str((active or {}).get('updated_at') or archive.get('updated_at') or _utc_now()).strip()
+    return {
+        'session_id': _safe_session_id(session_id),
+        'title': title,
+        'messages': messages,
+        'updated_at': updated_at,
+        'path': str(session_text_path(session_id)),
+        'active_message_count': len(active_messages),
+        'archived_message_count': len(archived_messages),
+    }
+
+
 def list_sessions() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in sorted(sessions_dir().glob('*.txt'), key=lambda item: item.stat().st_mtime, reverse=True):
@@ -145,7 +231,7 @@ def list_sessions() -> list[dict[str, Any]]:
 
 
 def recent_dialogue(session_id: str, *, max_messages: int = 6, max_tokens_equivalent: int = 1200) -> str:
-    parsed = parse_session(session_id)
+    parsed = parse_active_session(session_id)
     if not parsed:
         return ''
     lines: list[str] = []
@@ -166,7 +252,7 @@ def _clean_entity_candidate(value: str) -> str:
 
 
 def infer_current_entity(session_id: str) -> str:
-    parsed = parse_session(session_id)
+    parsed = parse_active_session(session_id)
     if not parsed:
         return ''
     for item in reversed(list(parsed.get('messages') or [])):

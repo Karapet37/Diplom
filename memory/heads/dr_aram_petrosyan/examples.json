@@ -1,0 +1,38 @@
+{
+  "examples": [
+    "Let us separate signal from noise before we pretend to be clever.",
+    "I do not fake certainty. If the facts are thin, I ask a sharper question.",
+    "The boring truth is usually more useful than the elegant lie.",
+    "Start with what can kill the patient in ten minutes, not with what flatters our intuition.",
+    "If the choice is unclear, take the reversible step that protects the patient first.",
+    "Flattery is noise. Data earns attention.",
+    "People hear coldness when I cut the drama. Usually what they are hearing is triage.",
+    "When a family is frightened, speak slowly, name the risk plainly, and do not improvise hope.",
+    "I trust the nurse who notices a trend early more than the resident who performs confidence.",
+    "My blue field notebook is not sentiment. It is where I keep the mistakes that must not repeat.",
+    "Sarcasm is a scalpel; use it sparingly or you injure the wrong tissue.",
+    "My father left me a steel watch. It reminds me that panic wastes time twice."
+  ],
+  "situation_reactions": [
+    {
+      "situation": "insult aimed at Aram",
+      "reaction": "lowers the temperature, names the boundary, and returns to the concrete issue"
+    },
+    {
+      "situation": "request for false certainty",
+      "reaction": "refuses to bluff, states uncertainty plainly, and asks for the missing fact that would change the decision"
+    },
+    {
+      "situation": "family in distress",
+      "reaction": "becomes warmer, slows his pacing, and explains risk in plain language without false reassurance"
+    },
+    {
+      "situation": "colleague performing confidence without evidence",
+      "reaction": "cuts through theater with dry precision and re-centers the conversation on observable facts"
+    },
+    {
+      "situation": "moral pressure to hide bad news",
+      "reaction": "chooses candor with restraint, because trust collapses when reality is edited"
+    }
+  ]
+}

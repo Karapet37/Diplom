@@ -7,14 +7,44 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from .duplicate_resolver import merge_aliases, normalize_name, relevance_decay, score_node, should_merge
-from .models import ENTITY_TYPES, GraphQuality
+from .duplicate_resolver import (
+    canonical_name,
+    combined_similarity,
+    merge_aliases,
+    normalize_name,
+    relevance_decay,
+    score_node,
+    should_merge,
+    similarity_bucket,
+)
+from .memory_layers import (
+    append_graph_lifecycle_events,
+    list_graph_snapshots,
+    load_graph_lifecycle_log,
+    load_graph_snapshot,
+    record_graph_snapshot,
+)
+from .models import ENTITY_TYPES, GRAPH_NODE_LIFECYCLE_STATES, GraphHealthMetrics, GraphQuality
+from .observability import get_observability_store
+from .reliability import MutationRejectedFailure, RecoveryFailure, StorageWriteFailure
 from .runtime_config import get_runtime_config
 
 GRAPH_NODE_TYPES = set(ENTITY_TYPES)
+GRAPH_LIFECYCLE_STATES = set(GRAPH_NODE_LIFECYCLE_STATES)
+GRAPH_VISIBLE_SEARCH_STATES = {'active', 'weak'}
 QUALITY_ALPHA = 0.45
 QUALITY_BETA = 0.35
 QUALITY_GAMMA = 0.2
+RISKY_GRAPH_MUTATION_REASONS = {
+    'create_node',
+    'patch_node',
+    'review_node_state',
+    'delete_node',
+    'delete_edge',
+    'merge_nodes_manual',
+    'restore_graph_snapshot',
+    'connect_nodes',
+}
 
 
 def repo_root() -> Path:
@@ -117,7 +147,15 @@ class GraphStore:
         return [self._normalize_edge(dict(item)) for item in list(rows or []) if isinstance(item, dict)]
 
     def load_graph(self) -> dict[str, Any]:
-        return {'nodes': self.load_nodes(), 'edges': self.load_edges()}
+        nodes = self.load_nodes()
+        edges = self.load_edges()
+        diagnostics = self.graph_diagnostics(nodes, edges)
+        return {
+            'nodes': nodes,
+            'edges': edges,
+            'diagnostics': diagnostics,
+            'clusters': diagnostics.get('clusters') or [],
+        }
 
     def validate_graph(
         self,
@@ -145,25 +183,25 @@ class GraphStore:
     ) -> GraphQuality:
         node_rows = self.load_nodes() if nodes is None else [self._normalize_node(node) for node in nodes if isinstance(node, dict)]
         edge_rows = self.load_edges() if edges is None else [self._normalize_edge(edge) for edge in edges if isinstance(edge, dict)]
-        if not node_rows:
+        active_rows = self._visible_nodes(node_rows, states=GRAPH_VISIBLE_SEARCH_STATES)
+        if not active_rows:
             return GraphQuality(relevance=0.0, redundancy=0.0, connectivity=0.0, score=0.0)
 
         relevance = round(
-            min(sum(min(score_node(node), 1.0) for node in node_rows) / max(len(node_rows), 1), 1.0),
+            min(sum(min(score_node(node), 1.0) for node in active_rows) / max(len(active_rows), 1), 1.0),
             6,
         )
         low_value_ratio = sum(
-            1 for node in node_rows if float(node.get('importance') or 0.0) < 0.05 and int(node.get('frequency') or 0) < 2
-        ) / max(len(node_rows), 1)
-        merge_candidates = 0
-        for index, left in enumerate(node_rows):
-            for right in node_rows[index + 1 :]:
-                if should_merge(left, right):
-                    merge_candidates += 1
-        duplicate_ratio = min(merge_candidates / max(len(node_rows), 1), 1.0)
+            1 for node in active_rows if float(node.get('importance') or 0.0) < 0.05 and int(node.get('frequency') or 0) < 2
+        ) / max(len(active_rows), 1)
+        duplicate_metrics = self._duplicate_metrics(active_rows)
+        duplicate_ratio = min(
+            (duplicate_metrics['merge_count'] + duplicate_metrics['review_count']) / max(len(active_rows), 1),
+            1.0,
+        )
         redundancy = round(min((0.7 * duplicate_ratio) + (0.3 * low_value_ratio), 1.0), 6)
 
-        node_ids = {str(node.get('id') or '') for node in node_rows}
+        node_ids = {str(node.get('id') or '') for node in active_rows}
         valid_edges = [
             edge for edge in edge_rows if str(edge.get('from') or '') in node_ids and str(edge.get('to') or '') in node_ids
         ]
@@ -173,8 +211,8 @@ class GraphStore:
             for endpoint in (str(edge.get('from') or ''), str(edge.get('to') or ''))
             if endpoint
         }
-        connected_ratio = len(connected_nodes) / max(len(node_rows), 1)
-        edge_density = min(len(valid_edges) / max(len(node_rows) - 1, 1), 1.0)
+        connected_ratio = len(connected_nodes) / max(len(active_rows), 1)
+        edge_density = min(len(valid_edges) / max(len(active_rows) - 1, 1), 1.0)
         connectivity = round(min((0.5 * connected_ratio) + (0.5 * edge_density), 1.0), 6)
 
         score = round((QUALITY_ALPHA * relevance) - (QUALITY_BETA * redundancy) + (QUALITY_GAMMA * connectivity), 6)
@@ -185,6 +223,159 @@ class GraphStore:
             score=score,
         )
 
+    def graph_diagnostics(
+        self,
+        nodes: list[dict[str, Any]] | None = None,
+        edges: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        node_rows = self.load_nodes() if nodes is None else [self._normalize_node(node) for node in nodes if isinstance(node, dict)]
+        edge_rows = self.load_edges() if edges is None else [self._normalize_edge(edge) for edge in edges if isinstance(edge, dict)]
+        visible_nodes = self._visible_nodes(node_rows, states=GRAPH_VISIBLE_SEARCH_STATES)
+        review_pool = [
+            node
+            for node in node_rows
+            if self._normalize_lifecycle_state(node.get('lifecycle_state') or 'active') not in {'archived', 'merged'}
+        ]
+        node_ids = {str(node.get('id') or '') for node in visible_nodes}
+        valid_edges = [
+            edge for edge in edge_rows if str(edge.get('from') or '') in node_ids and str(edge.get('to') or '') in node_ids
+        ]
+        connected_nodes = {
+            endpoint
+            for edge in valid_edges
+            for endpoint in (str(edge.get('from') or ''), str(edge.get('to') or ''))
+            if endpoint
+        }
+        orphan_nodes = [node for node in visible_nodes if str(node.get('id') or '') and str(node.get('id') or '') not in connected_nodes]
+        duplicate_metrics = self._duplicate_metrics(review_pool)
+        review_marked_nodes = [
+            node
+            for node in review_pool
+            if str(dict(node.get('context') or {}).get('review_reason') or '').strip().lower() == 'duplicate_candidate'
+        ]
+        low_value_nodes = [
+            node
+            for node in visible_nodes
+            if float(node.get('importance') or 0.0) < 0.05 and int(node.get('frequency') or 0) < 2
+        ]
+        lifecycle_counts = self._lifecycle_counts(node_rows)
+        archive_counts = self._archived_lifecycle_counts()
+        cluster_summaries = self._cluster_summaries(node_rows)
+        metrics = GraphHealthMetrics(
+            node_count=len(node_rows),
+            edge_count=len(edge_rows),
+            active_node_count=lifecycle_counts['active'],
+            weak_node_count=lifecycle_counts['weak'],
+            suspect_node_count=lifecycle_counts['suspect'],
+            archived_node_count=archive_counts['archived'],
+            merged_node_count=archive_counts['merged'],
+            duplicate_candidates=duplicate_metrics['merge_count'],
+            duplicate_review_candidates=max(duplicate_metrics['review_count'], len(review_marked_nodes)),
+            duplicate_rate=min(
+                (duplicate_metrics['merge_count'] + max(duplicate_metrics['review_count'], len(review_marked_nodes))) / max(len(review_pool), 1),
+                1.0,
+            ),
+            orphan_nodes=len(orphan_nodes),
+            orphan_rate=min(len(orphan_nodes) / max(len(visible_nodes), 1), 1.0),
+            average_relation_density=min(len(valid_edges) / max(len(visible_nodes), 1), 1.0) if visible_nodes else 0.0,
+            low_value_nodes=len(low_value_nodes),
+            summary_nodes=sum(1 for node in node_rows if str(node.get('id') or '').startswith('summary:')),
+            cluster_count=len(cluster_summaries),
+            quality=self.graph_quality(node_rows, edge_rows),
+        )
+        payload = metrics.to_dict()
+        payload.update({
+            'duplicate_candidate_samples': duplicate_metrics['merge_samples'][:10],
+            'duplicate_review_samples': (
+                duplicate_metrics['review_samples'][:10]
+                or [
+                    {
+                        'left_id': str(node.get('id') or ''),
+                        'left_name': str(node.get('name') or ''),
+                        'right_id': str(dict(node.get('context') or {}).get('review_target_id') or ''),
+                        'right_name': '',
+                        'similarity': float(dict(node.get('context') or {}).get('review_similarity') or 0.0),
+                        'bucket': 'review',
+                    }
+                    for node in review_marked_nodes[:10]
+                ]
+            ),
+            'orphan_node_samples': [
+                {
+                    'id': str(node.get('id') or ''),
+                    'name': str(node.get('name') or ''),
+                    'type': str(node.get('type') or ''),
+                }
+                for node in orphan_nodes[:10]
+            ],
+            'clusters': cluster_summaries,
+        })
+        return payload
+
+    def snapshot_graph(self, *, reason: str = 'manual') -> dict[str, Any]:
+        nodes = self.load_nodes()
+        edges = self.load_edges()
+        diagnostics = self.graph_diagnostics(nodes, edges)
+        path = record_graph_snapshot(nodes=nodes, edges=edges, reason=reason, diagnostics=diagnostics)
+        return {
+            'ok': True,
+            'path': str(path),
+            'node_count': len(nodes),
+            'edge_count': len(edges),
+            'reason': reason,
+        }
+
+    def list_snapshots(self, *, limit: int = 16) -> list[dict[str, Any]]:
+        return list_graph_snapshots(limit=limit)
+
+    def restore_snapshot(self, snapshot_path: str = '') -> dict[str, Any]:
+        candidates = self.list_snapshots(limit=1) if not str(snapshot_path or '').strip() else []
+        target_path = str(snapshot_path or (candidates[0]['path'] if candidates else '')).strip()
+        payload = load_graph_snapshot(target_path)
+        if not isinstance(payload, dict):
+            return {'ok': False, 'reason': 'snapshot_not_found', 'snapshot_path': target_path}
+        current_snapshot = self.snapshot_graph(reason='pre-restore_graph_snapshot')
+        nodes = [self._normalize_node(dict(item)) for item in list(payload.get('nodes') or []) if isinstance(item, dict)]
+        edges = [self._normalize_edge(dict(item)) for item in list(payload.get('edges') or []) if isinstance(item, dict)]
+        result = self.save_graph(nodes, edges, reason='restore_graph_snapshot', apply_hygiene=False, snapshot_before_write=False)
+        result['restored_snapshot_path'] = target_path
+        result['pre_restore_snapshot_path'] = current_snapshot.get('path') or ''
+        return result
+
+    def _should_snapshot_before_save(self, reason: str, *, apply_hygiene: bool) -> bool:
+        clean = str(reason or '').strip()
+        return clean in RISKY_GRAPH_MUTATION_REASONS or (apply_hygiene and clean == 'graph_hygiene')
+
+    def _write_graph_bundle(
+        self,
+        *,
+        old_nodes: list[dict[str, Any]],
+        old_edges: list[dict[str, Any]],
+        new_nodes: list[dict[str, Any]],
+        new_edges: list[dict[str, Any]],
+        reason: str,
+    ) -> None:
+        try:
+            write_json(graph_nodes_path(), new_nodes)
+            write_json(graph_edges_path(), new_edges)
+        except Exception as exc:
+            try:
+                write_json(graph_nodes_path(), old_nodes)
+                write_json(graph_edges_path(), old_edges)
+            except Exception as rollback_exc:
+                raise RecoveryFailure(
+                    f'Graph write failed and rollback did not complete for reason={reason}.',
+                    details={
+                        'reason': reason,
+                        'write_error': str(exc),
+                        'rollback_error': str(rollback_exc),
+                    },
+                ) from rollback_exc
+            raise StorageWriteFailure(
+                f'Graph write failed for reason={reason}. Previous graph state was restored.',
+                details={'reason': reason, 'write_error': str(exc)},
+            ) from exc
+
     def save_graph(
         self,
         nodes: list[dict[str, Any]],
@@ -192,6 +383,7 @@ class GraphStore:
         *,
         reason: str = 'sync',
         apply_hygiene: bool = False,
+        snapshot_before_write: bool | None = None,
     ) -> dict[str, Any]:
         existing_nodes = self.load_nodes()
         existing_edges = self.load_edges()
@@ -199,6 +391,12 @@ class GraphStore:
         state = self._prepare_graph_state(nodes, edges, apply_hygiene=apply_hygiene)
         quality_after = self.graph_quality(state['nodes'], state['edges'])
         if not state['nodes'] and existing_nodes and reason != 'clear':
+            get_observability_store().record_graph_write(
+                reason=reason,
+                ok=False,
+                node_count=len(existing_nodes),
+                edge_count=len(existing_edges),
+            )
             return {
                 'ok': False,
                 'reason': 'skipped_empty_overwrite',
@@ -209,8 +407,25 @@ class GraphStore:
                 'quality_before': asdict(quality_before),
                 'quality_after': asdict(quality_after),
             }
-        write_json(graph_nodes_path(), state['nodes'])
-        write_json(graph_edges_path(), state['edges'])
+        do_snapshot = self._should_snapshot_before_save(reason, apply_hygiene=apply_hygiene) if snapshot_before_write is None else bool(snapshot_before_write)
+        snapshot_info: dict[str, Any] = {}
+        if do_snapshot and (existing_nodes or existing_edges):
+            snapshot_info = self.snapshot_graph(reason=f'pre-{reason}')
+        self._write_graph_bundle(
+            old_nodes=existing_nodes,
+            old_edges=existing_edges,
+            new_nodes=state['nodes'],
+            new_edges=state['edges'],
+            reason=reason,
+        )
+        if state.get('lifecycle_events'):
+            append_graph_lifecycle_events(list(state.get('lifecycle_events') or []), reason=reason)
+        get_observability_store().record_graph_write(
+            reason=reason,
+            ok=True,
+            node_count=len(state['nodes']),
+            edge_count=len(state['edges']),
+        )
         return {
             'ok': True,
             'reason': reason,
@@ -221,8 +436,12 @@ class GraphStore:
             'merged_nodes': state['merged_nodes'],
             'removed_nodes': state['removed_nodes'],
             'summary_nodes': state['summary_nodes'],
+            'lifecycle_events': list(state.get('lifecycle_events') or []),
             'quality_before': asdict(quality_before),
             'quality_after': asdict(quality_after),
+            'diagnostics': self.graph_diagnostics(state['nodes'], state['edges']),
+            'snapshot_path': str(snapshot_info.get('path') or ''),
+            'rollback_available': bool(snapshot_info.get('path')),
         }
 
     def entity_exists(self, name: str) -> bool:
@@ -256,6 +475,7 @@ class GraphStore:
         importance: float = 0.7,
         translation_line: str = '',
         context: dict[str, Any] | None = None,
+        commit_reason: str = 'upsert_entity',
     ) -> dict[str, Any]:
         nodes = self.load_nodes()
         edges = self.load_edges()
@@ -273,7 +493,7 @@ class GraphStore:
             context=context,
         )
         node = self._upsert_node(nodes, candidate)
-        self._commit(nodes, edges, reason='upsert_entity')
+        self._commit(nodes, edges, reason=commit_reason)
         return node
 
     def create_node(
@@ -300,6 +520,7 @@ class GraphStore:
             importance=importance,
             translation_line=translation_line,
             context={'source': source, 'edited': True},
+            commit_reason='create_node',
         )
 
     def patch_node(
@@ -310,6 +531,7 @@ class GraphStore:
         facts: list[str] | None = None,
         translation_line: str | None = None,
         context_patch: dict[str, Any] | None = None,
+        lifecycle_state: str | None = None,
     ) -> dict[str, Any]:
         target = str(node_id or '').strip()
         if not target:
@@ -328,12 +550,52 @@ class GraphStore:
                 node['translation_line'] = str(translation_line or '').strip()
             if context_patch:
                 node['context'] = {**dict(node.get('context') or {}), **dict(context_patch or {})}
+            if lifecycle_state is not None:
+                node['lifecycle_state'] = self._normalize_lifecycle_state(lifecycle_state)
             break
         if not found:
             return {'ok': False, 'reason': 'node_not_found'}
         result = self.save_graph(nodes, self.load_edges(), reason='patch_node', apply_hygiene=False)
         result['node_id'] = target
         return result
+
+    def review_node_state(self, node_id: str, *, lifecycle_state: str, reason: str = 'manual_review') -> dict[str, Any]:
+        target = str(node_id or '').strip()
+        next_state = self._normalize_lifecycle_state(lifecycle_state)
+        if not target:
+            return {'ok': False, 'reason': 'missing_node_id'}
+        nodes = self.load_nodes()
+        node = next((item for item in nodes if str(item.get('id') or '') == target), None)
+        if node is None:
+            return {'ok': False, 'reason': 'node_not_found'}
+        if next_state == 'archived':
+            next_nodes = [item for item in nodes if str(item.get('id') or '') != target]
+            next_edges = [
+                edge
+                for edge in self.load_edges()
+                if str(edge.get('from') or '') != target and str(edge.get('to') or '') != target
+            ]
+            append_graph_lifecycle_events(
+                [
+                    {
+                        'node_id': target,
+                        'name': str(node.get('name') or ''),
+                        'state': 'archived',
+                        'source': 'manual_review',
+                        'detail': str(reason or 'manual_review'),
+                    }
+                ],
+                reason='review_node_state',
+            )
+            result = self.save_graph(next_nodes, next_edges, reason='clear' if not next_nodes else 'review_node_state', apply_hygiene=False)
+            result['node_id'] = target
+            result['lifecycle_state'] = 'archived'
+            return result
+        return self.patch_node(
+            target,
+            context_patch={'review_reason': str(reason or 'manual_review')},
+            lifecycle_state=next_state,
+        )
 
     def sync_head(
         self,
@@ -417,14 +679,36 @@ class GraphStore:
         edges = self.load_edges()
         touched_nodes = 0
         touched_edges = 0
+        quarantined_nodes = 0
         name_to_id: dict[str, str] = {}
+        lifecycle_events: list[dict[str, Any]] = []
+        graph_policy = get_runtime_config().graph
 
         for entity in list(extraction.get('entities') or []):
             if not isinstance(entity, dict):
                 continue
-            candidate = self._normalize_node({**entity, 'context': {**dict(entity.get('context') or {}), 'source': source}})
+            confidence = float(entity.get('confidence') or 0.0)
+            context = {**dict(entity.get('context') or {}), 'source': source}
+            if confidence < graph_policy.extraction_quarantine_confidence:
+                context = {
+                    **context,
+                    'review_status': 'quarantine',
+                    'review_reason': 'low_confidence_extraction',
+                }
+                quarantined_nodes += 1
+            candidate = self._normalize_node({**entity, 'context': context})
             current = self._upsert_node(nodes, candidate)
             name_to_id[normalize_name(str(entity.get('name') or ''))] = str(current.get('id') or '')
+            if str(current.get('lifecycle_state') or '') == 'suspect':
+                lifecycle_events.append(
+                    {
+                        'node_id': str(current.get('id') or ''),
+                        'name': str(current.get('name') or ''),
+                        'state': 'suspect',
+                        'source': source,
+                        'detail': str(dict(current.get('context') or {}).get('review_reason') or 'review'),
+                    }
+                )
             touched_nodes += 1
 
         edge_keys = {_edge_key(edge) for edge in edges}
@@ -455,7 +739,15 @@ class GraphStore:
             touched_edges += 1
 
         result = self._commit(nodes, edges, reason='merge_extraction')
-        result.update({'touched_nodes': touched_nodes, 'touched_edges': touched_edges})
+        if lifecycle_events:
+            append_graph_lifecycle_events(lifecycle_events, reason='merge_extraction')
+        result.update(
+            {
+                'touched_nodes': touched_nodes,
+                'touched_edges': touched_edges,
+                'quarantined_nodes': quarantined_nodes,
+            }
+        )
         return result
 
     def link_head_relation(
@@ -515,7 +807,8 @@ class GraphStore:
         if not target:
             return {'ok': False, 'reason': 'missing_node_id'}
         nodes = self.load_nodes()
-        if not any(str(node.get('id') or '') == target for node in nodes):
+        node = next((item for item in nodes if str(item.get('id') or '') == target), None)
+        if node is None:
             return {'ok': False, 'reason': 'node_not_found'}
         next_nodes = [node for node in nodes if str(node.get('id') or '') != target]
         next_edges = [
@@ -523,6 +816,18 @@ class GraphStore:
             for edge in self.load_edges()
             if str(edge.get('from') or '') != target and str(edge.get('to') or '') != target
         ]
+        append_graph_lifecycle_events(
+            [
+                {
+                    'node_id': target,
+                    'name': str(node.get('name') or ''),
+                    'state': 'archived',
+                    'source': 'manual_delete',
+                    'detail': 'delete_node',
+                }
+            ],
+            reason='delete_node',
+        )
         reason = 'clear' if not next_nodes else 'delete_node'
         result = self.save_graph(next_nodes, next_edges, reason=reason, apply_hygiene=False)
         result['deleted_node_id'] = target
@@ -573,6 +878,19 @@ class GraphStore:
                 continue
             seen_edges.add(key)
             next_edges.append(updated)
+        append_graph_lifecycle_events(
+            [
+                {
+                    'node_id': right,
+                    'name': str(secondary.get('name') or ''),
+                    'target_id': left,
+                    'state': 'merged',
+                    'source': 'manual_merge',
+                    'detail': str(primary.get('name') or ''),
+                }
+            ],
+            reason='merge_nodes_manual',
+        )
         result = self.save_graph(next_nodes, next_edges, reason='merge_nodes_manual', apply_hygiene=False)
         result['merged_into'] = left
         result['merged_from'] = right
@@ -580,7 +898,7 @@ class GraphStore:
 
     def search_nodes(self, query: str, *, limit: int = 8) -> list[dict[str, Any]]:
         tokens = {normalize_name(token) for token in str(query or '').split() if normalize_name(token)}
-        nodes = self.load_nodes()
+        nodes = self._visible_nodes(self.load_nodes(), states=GRAPH_VISIBLE_SEARCH_STATES)
         if not tokens:
             ranked = sorted(nodes, key=score_node, reverse=True)
             return ranked[:limit]
@@ -602,8 +920,9 @@ class GraphStore:
     def subgraph(self, query: str, *, limit: int = 8, depth: int = 1) -> dict[str, Any]:
         seeds = self.search_nodes(query, limit=limit)
         if not seeds:
-            return {'query': query, 'nodes': [], 'edges': [], 'seed_node_ids': []}
-        node_map = {str(node.get('id') or ''): node for node in self.load_nodes()}
+            return {'query': query, 'nodes': [], 'edges': [], 'seed_node_ids': [], 'diagnostics': self.graph_diagnostics([], [])}
+        visible_nodes = self._visible_nodes(self.load_nodes(), states=GRAPH_VISIBLE_SEARCH_STATES)
+        node_map = {str(node.get('id') or ''): node for node in visible_nodes}
         seed_ids = {str(node.get('id') or '') for node in seeds}
         selected_ids = set(seed_ids)
         selected_edges: list[dict[str, Any]] = []
@@ -613,7 +932,7 @@ class GraphStore:
             for edge in self.load_edges():
                 src = str(edge.get('from') or '')
                 dst = str(edge.get('to') or '')
-                if src in frontier or dst in frontier:
+                if (src in frontier or dst in frontier) and src in node_map and dst in node_map:
                     selected_edges.append(edge)
                     if src:
                         next_frontier.add(src)
@@ -639,6 +958,7 @@ class GraphStore:
             'nodes': selected_nodes[: limit * 2],
             'edges': selected_edges[: limit * 3],
             'seed_node_ids': sorted(seed_ids),
+            'diagnostics': self.graph_diagnostics(selected_nodes[: limit * 2], selected_edges[: limit * 3]),
         }
 
     def answerable_node_view(self, node_id: str) -> dict[str, Any] | None:
@@ -663,6 +983,8 @@ class GraphStore:
                 'name': node.get('name'),
                 'type': node.get('type'),
                 'aliases': node.get('aliases') or [],
+                'lifecycle_state': node.get('lifecycle_state'),
+                'cluster_label': node.get('cluster_label') or '',
             },
             'what_is_it_like': {
                 'description': node.get('description'),
@@ -671,6 +993,10 @@ class GraphStore:
                 'confidence': node.get('confidence'),
                 'frequency': node.get('frequency'),
                 'folder': node.get('folder'),
+                'translation_line': node.get('translation_line') or '',
+                'lifecycle_state': node.get('lifecycle_state'),
+                'cluster_key': node.get('cluster_key') or '',
+                'cluster_label': node.get('cluster_label') or '',
                 'context': node.get('context') or {},
             },
             'how_it_acts': edges,
@@ -723,6 +1049,7 @@ class GraphStore:
             'merged_nodes': 0,
             'removed_nodes': 0,
             'summary_nodes': 0,
+            'lifecycle_events': [],
             'quality_before': None,
             'quality_after': None,
         }
@@ -731,10 +1058,14 @@ class GraphStore:
         state['warnings'].extend(warnings)
         if apply_hygiene:
             state['quality_before'] = asdict(self.graph_quality(state['nodes'], state['edges']))
-            state['nodes'], state['edges'], merged, removed, summaries, chosen_quality = self._apply_hygiene_in_memory(state['nodes'], state['edges'])
+            state['nodes'], state['edges'], merged, removed, summaries, lifecycle_events, chosen_quality = self._apply_hygiene_in_memory(
+                state['nodes'],
+                state['edges'],
+            )
             state['merged_nodes'] = merged
             state['removed_nodes'] = removed
             state['summary_nodes'] = summaries
+            state['lifecycle_events'] = lifecycle_events
             state['quality_after'] = asdict(chosen_quality)
             state['nodes'], state['edges'], errors, warnings = self._validate_graph_state(state['nodes'], state['edges'])
             state['errors'].extend(errors)
@@ -783,16 +1114,242 @@ class GraphStore:
         self,
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, int, int, GraphQuality]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, int, int, list[dict[str, Any]], GraphQuality]:
         base_quality = self.graph_quality(nodes, edges)
-        decayed = [self._normalize_node({**node, 'importance': relevance_decay(float(node.get('importance') or 0.0))}) for node in nodes]
-        merged_nodes, merged_edges, merged = self._merge_duplicates(decayed, edges)
-        survivor_nodes, survivor_edges, removed = self._garbage_collect(merged_nodes, merged_edges)
+        decayed = [self._decay_node(node) for node in nodes]
+        merged_nodes, merged_edges, merged, merged_events = self._merge_duplicates(decayed, edges)
+        reviewed_nodes = self._mark_duplicate_review_candidates(merged_nodes)
+        clustered_nodes = self._assign_cluster_labels(reviewed_nodes, merged_edges)
+        survivor_nodes, survivor_edges, removed, archived_events = self._garbage_collect(clustered_nodes, merged_edges)
         summarized_nodes, summarized_edges, summaries = self._create_summary_nodes(survivor_nodes, survivor_edges)
         candidate_quality = self.graph_quality(summarized_nodes, summarized_edges)
-        if candidate_quality.score >= base_quality.score:
-            return summarized_nodes, summarized_edges, merged, removed, summaries, candidate_quality
-        return list(nodes), list(edges), 0, 0, 0, base_quality
+        structural_changes = bool(merged or removed or summaries or merged_events or archived_events) or any(
+            (
+                str(before.get('lifecycle_state') or 'active') != str(after.get('lifecycle_state') or 'active')
+                or str(before.get('cluster_key') or '') != str(after.get('cluster_key') or '')
+                or str(before.get('cluster_label') or '') != str(after.get('cluster_label') or '')
+            )
+            for before, after in zip(
+                sorted(nodes, key=lambda item: str(item.get('id') or '')),
+                sorted(summarized_nodes, key=lambda item: str(item.get('id') or '')),
+                strict=False,
+            )
+        )
+        if candidate_quality.score >= base_quality.score or structural_changes:
+            return summarized_nodes, summarized_edges, merged, removed, summaries, merged_events + archived_events, candidate_quality
+        return list(nodes), list(edges), 0, 0, 0, [], base_quality
+
+    def _normalize_lifecycle_state(self, value: str) -> str:
+        token = str(value or '').strip().lower()
+        return token if token in GRAPH_LIFECYCLE_STATES else 'active'
+
+    def _visible_nodes(self, nodes: list[dict[str, Any]], *, states: set[str] | None = None) -> list[dict[str, Any]]:
+        allowed = states or GRAPH_VISIBLE_SEARCH_STATES
+        return [node for node in nodes if self._normalize_lifecycle_state(node.get('lifecycle_state') or 'active') in allowed]
+
+    def _decay_node(self, node: dict[str, Any]) -> dict[str, Any]:
+        frequency = max(int(node.get('frequency') or 1), 1)
+        factor = 0.992 if frequency >= 3 else 0.975
+        next_importance = relevance_decay(float(node.get('importance') or 0.0), factor=factor)
+        next_confidence = float(node.get('confidence') or 0.0)
+        if frequency <= 2 and next_confidence > 0.0:
+            next_confidence = round(max(next_confidence - 0.015, 0.0), 6)
+        return self._normalize_node(
+            {
+                **node,
+                'importance': next_importance,
+                'confidence': next_confidence,
+            }
+        )
+
+    def _determine_lifecycle_state(self, node: dict[str, Any]) -> str:
+        graph_policy = get_runtime_config().graph
+        context = dict(node.get('context') or {})
+        requested = str(node.get('lifecycle_state') or '').strip().lower()
+        manual_override = str(context.get('review_reason') or '').strip().lower() == 'manual_review'
+        importance = float(node.get('importance') or 0.0)
+        confidence = float(node.get('confidence') or 0.0)
+        frequency = max(int(node.get('frequency') or 1), 1)
+        if requested == 'merged':
+            return 'merged'
+        if requested == 'archived':
+            return 'archived'
+        if requested == 'suspect' and manual_override:
+            return 'suspect'
+        if str(context.get('review_status') or '').strip().lower() in {'quarantine', 'review'}:
+            return 'suspect'
+        if requested == 'weak' and manual_override:
+            return 'weak'
+        if requested == 'active' and manual_override:
+            return 'active'
+        source = str(context.get('source') or '').strip().lower()
+        if confidence < graph_policy.suspect_confidence_threshold and source in {'session', 'extraction', 'rebuild', 'file', 'upload', 'document'}:
+            return 'suspect'
+        if frequency <= 2 and (
+            importance < graph_policy.weak_importance_threshold or confidence < graph_policy.weak_confidence_threshold
+        ):
+            return 'weak'
+        return 'active'
+
+    def _duplicate_metrics(self, nodes: list[dict[str, Any]]) -> dict[str, Any]:
+        merge_samples: list[dict[str, Any]] = []
+        review_samples: list[dict[str, Any]] = []
+        merge_count = 0
+        review_count = 0
+        for index, left in enumerate(nodes):
+            for right in nodes[index + 1 :]:
+                left_tokens = {token for token in normalize_name(str(left.get('name') or '')).split() if token}
+                right_tokens = {token for token in normalize_name(str(right.get('name') or '')).split() if token}
+                if not (left_tokens & right_tokens):
+                    continue
+                score = combined_similarity(left, right)
+                bucket = similarity_bucket(score)
+                if bucket not in {'merge', 'review', 'exactish'}:
+                    continue
+                sample = {
+                    'left_id': str(left.get('id') or ''),
+                    'left_name': str(left.get('name') or ''),
+                    'right_id': str(right.get('id') or ''),
+                    'right_name': str(right.get('name') or ''),
+                    'similarity': round(float(score or 0.0), 4),
+                    'bucket': bucket,
+                }
+                if bucket in {'merge', 'exactish'} and should_merge(left, right):
+                    merge_count += 1
+                    merge_samples.append(sample)
+                elif bucket == 'review':
+                    review_count += 1
+                    review_samples.append(sample)
+        return {
+            'merge_count': merge_count,
+            'review_count': review_count,
+            'merge_samples': merge_samples,
+            'review_samples': review_samples,
+        }
+
+    def _lifecycle_counts(self, nodes: list[dict[str, Any]]) -> dict[str, int]:
+        counts = {state: 0 for state in GRAPH_NODE_LIFECYCLE_STATES}
+        for node in nodes:
+            counts[self._normalize_lifecycle_state(node.get('lifecycle_state') or 'active')] += 1
+        return counts
+
+    def _archived_lifecycle_counts(self) -> dict[str, int]:
+        payload = load_graph_lifecycle_log()
+        archived_ids: set[str] = set()
+        merged_ids: set[str] = set()
+        for entry in list(payload.get('entries') or []):
+            for event in list(entry.get('events') or []):
+                state = str(event.get('state') or '').strip().lower()
+                node_id = str(event.get('node_id') or event.get('name') or '').strip()
+                if not node_id:
+                    continue
+                if state == 'archived':
+                    archived_ids.add(node_id)
+                elif state == 'merged':
+                    merged_ids.add(node_id)
+        return {
+            'archived': len(archived_ids),
+            'merged': len(merged_ids),
+        }
+
+    def _mark_duplicate_review_candidates(self, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        reviewed = [self._normalize_node(node) for node in nodes]
+        for index, left in enumerate(reviewed):
+            for right in reviewed[index + 1 :]:
+                left_tokens = {token for token in normalize_name(str(left.get('name') or '')).split() if token}
+                right_tokens = {token for token in normalize_name(str(right.get('name') or '')).split() if token}
+                if not (left_tokens & right_tokens):
+                    continue
+                score = combined_similarity(left, right)
+                if similarity_bucket(score) != 'review':
+                    continue
+                weaker, stronger = sorted(
+                    [left, right],
+                    key=lambda item: (
+                        float(item.get('confidence') or 0.0),
+                        float(item.get('importance') or 0.0),
+                        int(item.get('frequency') or 0),
+                    ),
+                )
+                weaker['context'] = {
+                    **dict(weaker.get('context') or {}),
+                    'review_status': 'review',
+                    'review_reason': 'duplicate_candidate',
+                    'review_target_id': str(stronger.get('id') or ''),
+                    'review_similarity': round(float(score or 0.0), 4),
+                }
+                weaker['lifecycle_state'] = 'suspect'
+        return [self._normalize_node(node) for node in reviewed]
+
+    def _assign_cluster_labels(self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if len(nodes) < get_runtime_config().graph.clustering_min_nodes:
+            return [self._normalize_node({**node, 'cluster_key': '', 'cluster_label': ''}) for node in nodes]
+        min_component_size = get_runtime_config().graph.clustering_min_component_size
+        node_map = {str(node.get('id') or ''): self._normalize_node(node) for node in nodes}
+        adjacency: dict[str, set[str]] = {node_id: set() for node_id in node_map}
+        for edge in edges:
+            src = str(edge.get('from') or '')
+            dst = str(edge.get('to') or '')
+            if src in adjacency and dst in adjacency:
+                adjacency[src].add(dst)
+                adjacency[dst].add(src)
+        visited: set[str] = set()
+        for node_id in sorted(node_map):
+            if node_id in visited:
+                continue
+            stack = [node_id]
+            component: list[str] = []
+            while stack:
+                current = stack.pop()
+                if current in visited:
+                    continue
+                visited.add(current)
+                component.append(current)
+                stack.extend(sorted(adjacency.get(current) or []))
+            ranked_component = sorted(
+                component,
+                key=lambda item: (
+                    score_node(node_map[item]),
+                    str(node_map[item].get('name') or ''),
+                ),
+                reverse=True,
+            )
+            if len(component) < min_component_size:
+                for item in component:
+                    node_map[item] = self._normalize_node({**node_map[item], 'cluster_key': '', 'cluster_label': ''})
+                continue
+            anchor = node_map[ranked_component[0]]
+            cluster_key = f"cluster:{_slug(anchor.get('name') or anchor.get('id') or 'group')}"
+            cluster_label = str(anchor.get('name') or anchor.get('id') or '').strip()
+            for item in component:
+                node_map[item] = self._normalize_node(
+                    {
+                        **node_map[item],
+                        'cluster_key': cluster_key,
+                        'cluster_label': cluster_label,
+                    }
+                )
+        return [node_map[str(node.get('id') or '')] for node in nodes if str(node.get('id') or '') in node_map]
+
+    def _cluster_summaries(self, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        groups: dict[str, dict[str, Any]] = {}
+        for node in nodes:
+            cluster_key = str(node.get('cluster_key') or '').strip()
+            cluster_label = str(node.get('cluster_label') or '').strip()
+            if not cluster_key or not cluster_label:
+                continue
+            group = groups.setdefault(cluster_key, {'cluster_key': cluster_key, 'cluster_label': cluster_label, 'size': 0, 'states': set()})
+            group['size'] += 1
+            group['states'].add(str(node.get('lifecycle_state') or 'active'))
+        return [
+            {
+                'cluster_key': key,
+                'cluster_label': value['cluster_label'],
+                'size': value['size'],
+                'states': sorted(value['states']),
+            }
+            for key, value in sorted(groups.items(), key=lambda item: (-item[1]['size'], item[1]['cluster_label']))
+        ]
 
     def _lexical_score(self, node: dict[str, Any], tokens: set[str], related_names: list[str]) -> float:
         fields = [
@@ -849,11 +1406,16 @@ class GraphStore:
         return str(self._upsert_node(nodes, candidate).get('id') or '')
 
     def _merge_node(self, existing: dict[str, Any], candidate: dict[str, Any]) -> None:
+        previous_existing_name = str(existing.get('name') or '')
+        candidate_name = str(candidate.get('name') or '')
+        canonical = canonical_name(previous_existing_name, candidate_name)
+        if canonical:
+            existing['name'] = canonical
         existing['aliases'] = merge_aliases(
             list(existing.get('aliases') or []),
-            [str(existing.get('name') or '')],
+            [previous_existing_name],
             list(candidate.get('aliases') or []),
-            [str(candidate.get('name') or '')],
+            [candidate_name],
         )
         existing['facts'] = list(
             dict.fromkeys(
@@ -879,11 +1441,19 @@ class GraphStore:
         existing['confidence'] = round(max(float(existing.get('confidence') or 0.0), float(candidate.get('confidence') or 0.0)), 6)
         existing['frequency'] = int(existing.get('frequency') or 0) + max(int(candidate.get('frequency') or 1), 1)
         existing['context'] = {**dict(existing.get('context') or {}), **dict(candidate.get('context') or {})}
+        existing['cluster_key'] = str(existing.get('cluster_key') or candidate.get('cluster_key') or '').strip()
+        existing['cluster_label'] = str(existing.get('cluster_label') or candidate.get('cluster_label') or '').strip()
+        existing['lifecycle_state'] = self._determine_lifecycle_state(existing)
 
-    def _merge_duplicates(self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+    def _merge_duplicates(
+        self,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, list[dict[str, Any]]]:
         merged = 0
         remaining: list[dict[str, Any]] = []
         replacements: dict[str, str] = {}
+        lifecycle_events: list[dict[str, Any]] = []
         for node in nodes:
             target = next((item for item in remaining if should_merge(item, node)), None)
             if target is None:
@@ -891,6 +1461,16 @@ class GraphStore:
                 continue
             merged += 1
             replacements[str(node.get('id') or '')] = str(target.get('id') or '')
+            lifecycle_events.append(
+                {
+                    'node_id': str(node.get('id') or ''),
+                    'name': str(node.get('name') or ''),
+                    'target_id': str(target.get('id') or ''),
+                    'state': 'merged',
+                    'source': str(dict(node.get('context') or {}).get('source') or 'hygiene'),
+                    'detail': str(target.get('name') or ''),
+                }
+            )
             self._merge_node(target, node)
 
         normalized_edges: list[dict[str, Any]] = []
@@ -904,13 +1484,40 @@ class GraphStore:
                 continue
             seen_edges.add(key)
             normalized_edges.append(updated)
-        return remaining, normalized_edges, merged
+        return remaining, normalized_edges, merged, lifecycle_events
 
-    def _garbage_collect(self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
-        survivors = [node for node in nodes if not (float(node.get('importance') or 0.0) < 0.05 and int(node.get('frequency') or 0) < 2)]
-        removed_ids = {str(node.get('id') or '') for node in nodes if node not in survivors}
+    def _garbage_collect(
+        self,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, list[dict[str, Any]]]:
+        graph_policy = get_runtime_config().graph
+        survivors: list[dict[str, Any]] = []
+        archived_events: list[dict[str, Any]] = []
+        for node in nodes:
+            importance = float(node.get('importance') or 0.0)
+            confidence = float(node.get('confidence') or 0.0)
+            frequency = int(node.get('frequency') or 0)
+            if (
+                str(node.get('lifecycle_state') or '') != 'suspect'
+                and importance <= graph_policy.archive_importance_threshold
+                and confidence <= graph_policy.archive_confidence_threshold
+                and frequency < 2
+            ):
+                archived_events.append(
+                    {
+                        'node_id': str(node.get('id') or ''),
+                        'name': str(node.get('name') or ''),
+                        'state': 'archived',
+                        'source': str(dict(node.get('context') or {}).get('source') or 'hygiene'),
+                        'detail': 'low_value_decay',
+                    }
+                )
+                continue
+            survivors.append(self._normalize_node(node))
+        removed_ids = {str(node.get('id') or '') for node in nodes if all(str(node.get('id') or '') != str(item.get('id') or '') for item in survivors)}
         filtered_edges = [edge for edge in edges if str(edge.get('from') or '') not in removed_ids and str(edge.get('to') or '') not in removed_ids]
-        return survivors, filtered_edges, len(removed_ids)
+        return survivors, filtered_edges, len(removed_ids), archived_events
 
     def _create_summary_nodes(self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
         if len(nodes) < 32:
@@ -968,7 +1575,7 @@ class GraphStore:
             for item in list(node.get('facts') or [])
             if str(item).strip()
         ]
-        return {
+        normalized = {
             'id': str(node.get('id') or f'{node_type.lower()}:{_slug(node.get("name") or "item")}').strip(),
             'name': str(node.get('name') or node.get('id') or '').strip(),
             'type': node_type,
@@ -981,7 +1588,11 @@ class GraphStore:
             'confidence': round(min(max(float(node.get('confidence') or 0.5), 0.0), 1.0), 6),
             'frequency': max(int(node.get('frequency') or 1), 1),
             'context': dict(node.get('context') or {}),
+            'cluster_key': str(node.get('cluster_key') or '').strip(),
+            'cluster_label': str(node.get('cluster_label') or '').strip(),
         }
+        normalized['lifecycle_state'] = self._determine_lifecycle_state({**normalized, 'lifecycle_state': node.get('lifecycle_state')})
+        return normalized
 
     def _normalize_edge(self, edge: dict[str, Any]) -> dict[str, Any]:
         return {

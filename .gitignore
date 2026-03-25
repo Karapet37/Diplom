@@ -1,5 +1,6 @@
 # Environment and local tooling
 .env
+.env.local
 .venv/
 .idea/
 .vscode/
@@ -40,6 +41,8 @@ memory/personalities/proposals/*.json
 !memory/personalities/proposals/.gitkeep
 memory/graph_history/**
 !memory/graph_history/.gitkeep
+runtime/**
+!runtime/.gitkeep
 
 # Generated exports and reports
 reports/

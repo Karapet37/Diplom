@@ -10,7 +10,9 @@ from .graph_store import GraphStore
 from .llm import call_json_model_for_role
 from .message_analyzer import analyze_message
 from .models import GraphModelToolPolicy, MessageEntity
+from .observability import get_observability_store
 from .prompt_builder import build_node_rethink_prompt, render_graph_context
+from .reliability import MutationRejectedFailure, RecoveryFailure
 from .runtime_config import get_runtime_config
 
 DEFAULT_RETHINK_LIMIT = 6
@@ -593,21 +595,68 @@ def rethink_node(
             'context_budget': resolved_context_budget,
         }
 
-    _apply_node_improvement(
-        graph_store,
-        node_id=str(node.get('id') or ''),
-        improvement=improvement,
-        suggestions=suggestions,
-        context_budget=resolved_context_budget,
-    )
-    refreshed_source = graph_store.get_node_by_id(str(node.get('id') or '')) or node
-    link_report = _apply_link_suggestions(graph_store, source_node=refreshed_source, suggestions=suggestions, policy=tool_policy)
-    localization = ensure_node_localization(
-        str(node.get('id') or ''),
-        language=language,
-        store=graph_store,
-        policy=tool_policy,
-    ) if tool_policy.allow_translation else {'ok': False}
+    rollback_snapshot = graph_store.snapshot_graph(reason=f'pre-rethink-node:{str(node.get("id") or "")}')
+    link_report: dict[str, Any] = {'applied': [], 'skipped': []}
+    try:
+        _apply_node_improvement(
+            graph_store,
+            node_id=str(node.get('id') or ''),
+            improvement=improvement,
+            suggestions=suggestions,
+            context_budget=resolved_context_budget,
+        )
+        refreshed_source = graph_store.get_node_by_id(str(node.get('id') or '')) or node
+        link_report = _apply_link_suggestions(graph_store, source_node=refreshed_source, suggestions=suggestions, policy=tool_policy)
+    except Exception as exc:
+        try:
+            rollback_result = graph_store.restore_snapshot(str(rollback_snapshot.get('path') or ''))
+        except Exception as rollback_exc:
+            raise RecoveryFailure(
+                f'Rethink apply failed for node {node_id} and rollback did not complete.',
+                details={
+                    'node_id': str(node_id or ''),
+                    'error': str(exc),
+                    'rollback_error': str(rollback_exc),
+                    'rollback_snapshot_path': str(rollback_snapshot.get('path') or ''),
+                },
+            ) from rollback_exc
+        if not rollback_result.get('ok'):
+            raise RecoveryFailure(
+                f'Rethink apply failed for node {node_id} and rollback snapshot could not be restored.',
+                details={
+                    'node_id': str(node_id or ''),
+                    'error': str(exc),
+                    'rollback_result': rollback_result,
+                    'rollback_snapshot_path': str(rollback_snapshot.get('path') or ''),
+                },
+            ) from exc
+        raise MutationRejectedFailure(
+            f'Rethink apply failed for node {node_id}. Previous graph state was restored.',
+            details={
+                'node_id': str(node_id or ''),
+                'error': str(exc),
+                'rollback_snapshot_path': str(rollback_snapshot.get('path') or ''),
+                'rollback_result': rollback_result,
+            },
+        ) from exc
+
+    try:
+        localization = (
+            ensure_node_localization(
+                str(node.get('id') or ''),
+                language=language,
+                store=graph_store,
+                policy=tool_policy,
+            )
+            if tool_policy.allow_translation
+            else {'ok': False}
+        )
+    except Exception as exc:
+        localization = {
+            'ok': False,
+            'reason': 'translation_unavailable',
+            'error': str(exc),
+        }
 
     return {
         'ok': True,
@@ -620,6 +669,7 @@ def rethink_node(
         'skipped_suggestions': link_report['skipped'],
         'context_budget': resolved_context_budget,
         'localization': localization,
+        'rollback_snapshot_path': str(rollback_snapshot.get('path') or ''),
     }
 
 
@@ -637,57 +687,117 @@ def rethink_graph_nodes(
     graph_store = store or GraphStore()
     resolved_context_budget = int(context_budget or _default_rethink_context_budget())
     tool_policy = _tool_policy(None, context_budget=resolved_context_budget)
-    repair_report = {'ok': True, 'merged': 0, 'retyped': 0, 'patched': 0, 'redirects': {}}
-    if not preview_only:
-        repair_report = repair_graph_semantics(graph_store)
-    candidates: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
+    observability = get_observability_store()
+    trace = observability.start_trace(
+        request_type='rethink',
+        route='/api/cognitive/graph/rethink',
+        request_meta={
+            'preview_only': bool(preview_only),
+            'active_mode': bool(active_mode),
+            'query': str(query or '').strip(),
+            'limit': int(limit or DEFAULT_RETHINK_LIMIT),
+            'context_budget': resolved_context_budget,
+        },
+    )
+    try:
+        repair_report = {'ok': True, 'merged': 0, 'retyped': 0, 'patched': 0, 'redirects': {}}
+        if not preview_only:
+            repair_report = observability.time_stage(
+                trace,
+                'semantic_repair',
+                lambda: repair_graph_semantics(graph_store),
+                meta_builder=lambda payload: {
+                    'merged': int(payload.get('merged') or 0),
+                    'retyped': int(payload.get('retyped') or 0),
+                    'patched': int(payload.get('patched') or 0),
+                },
+            )
 
-    for raw_node_id in list(node_ids or []):
-        node_id = str(repair_report.get('redirects', {}).get(raw_node_id, raw_node_id))
-        node = graph_store.get_node_by_id(node_id)
-        if node is None:
-            continue
-        token = str(node.get('id') or '')
-        if token and token not in seen_ids and not token.startswith('summary:'):
-            seen_ids.add(token)
-            candidates.append(node)
+        def _select_candidates() -> list[dict[str, Any]]:
+            selected: list[dict[str, Any]] = []
+            seen_ids: set[str] = set()
+            for raw_node_id in list(node_ids or []):
+                node_id = str(repair_report.get('redirects', {}).get(raw_node_id, raw_node_id))
+                node = graph_store.get_node_by_id(node_id)
+                if node is None:
+                    continue
+                token = str(node.get('id') or '')
+                if token and token not in seen_ids and not token.startswith('summary:'):
+                    seen_ids.add(token)
+                    selected.append(node)
 
-    if not candidates and str(query or '').strip():
-        for node in graph_store.search_nodes(query, limit=max(int(limit or DEFAULT_RETHINK_LIMIT), 1)):
-            token = str(node.get('id') or '')
-            if token and token not in seen_ids and not token.startswith('summary:'):
-                seen_ids.add(token)
-                candidates.append(node)
+            if not selected and str(query or '').strip():
+                for node in graph_store.search_nodes(query, limit=max(int(limit or DEFAULT_RETHINK_LIMIT), 1)):
+                    token = str(node.get('id') or '')
+                    if token and token not in seen_ids and not token.startswith('summary:'):
+                        seen_ids.add(token)
+                        selected.append(node)
 
-    if active_mode and len(candidates) < max(int(limit or DEFAULT_RETHINK_LIMIT), 1):
-        ranked = sorted(graph_store.load_nodes(), key=lambda item: float(item.get('importance') or 0.0), reverse=True)
-        for node in ranked:
-            token = str(node.get('id') or '')
-            if not token or token in seen_ids or token.startswith('summary:'):
-                continue
-            seen_ids.add(token)
-            candidates.append(node)
-            if len(candidates) >= max(int(limit or DEFAULT_RETHINK_LIMIT), 1):
-                break
+            if active_mode and len(selected) < max(int(limit or DEFAULT_RETHINK_LIMIT), 1):
+                ranked = sorted(graph_store.load_nodes(), key=lambda item: float(item.get('importance') or 0.0), reverse=True)
+                for node in ranked:
+                    token = str(node.get('id') or '')
+                    if not token or token in seen_ids or token.startswith('summary:'):
+                        continue
+                    seen_ids.add(token)
+                    selected.append(node)
+                    if len(selected) >= max(int(limit or DEFAULT_RETHINK_LIMIT), 1):
+                        break
+            return selected
 
-    results = [
-        rethink_node(
-            str(node.get('id') or ''),
-            language=language,
-            store=graph_store,
-            context_budget=resolved_context_budget,
-            policy=tool_policy,
-            preview_only=preview_only,
+        candidates = observability.time_stage(
+            trace,
+            'candidate_selection',
+            _select_candidates,
+            meta_builder=lambda rows: {'candidate_count': len(rows)},
         )
-        for node in candidates[: max(int(limit or DEFAULT_RETHINK_LIMIT), 1)]
-    ]
-    return {
-        'ok': True,
-        'preview_only': bool(preview_only),
-        'active_mode': bool(active_mode),
-        'processed': len(results),
-        'results': results,
-        'repair': repair_report,
-        'graph': graph_store.load_graph(),
-    }
+        results = observability.time_stage(
+            trace,
+            'rethink_batch',
+            lambda: [
+                rethink_node(
+                    str(node.get('id') or ''),
+                    language=language,
+                    store=graph_store,
+                    context_budget=resolved_context_budget,
+                    policy=tool_policy,
+                    preview_only=preview_only,
+                )
+                for node in candidates[: max(int(limit or DEFAULT_RETHINK_LIMIT), 1)]
+            ],
+            meta_builder=lambda rows: {'processed': len(rows), 'preview_only': bool(preview_only)},
+        )
+        observability.record_rethink_outcome(preview_only=bool(preview_only), processed=len(results), results=results)
+        observability.finish_trace(
+            trace,
+            status='ok',
+            fallback_used=False,
+            fallback_reason='',
+            context_tokens=resolved_context_budget,
+            persona_name='',
+            current_entity='',
+            response_meta={'processed': len(results), 'preview_only': bool(preview_only)},
+        )
+        return {
+            'ok': True,
+            'trace_id': trace.request_id,
+            'preview_only': bool(preview_only),
+            'active_mode': bool(active_mode),
+            'processed': len(results),
+            'results': results,
+            'repair': repair_report,
+            'graph': graph_store.load_graph(),
+        }
+    except Exception as exc:
+        observability.record_rethink_outcome(preview_only=bool(preview_only), processed=0, results=[])
+        observability.finish_trace(
+            trace,
+            status='error',
+            fallback_used=False,
+            fallback_reason='',
+            context_tokens=resolved_context_budget,
+            persona_name='',
+            current_entity='',
+            response_meta={'error': str(exc)},
+        )
+        raise

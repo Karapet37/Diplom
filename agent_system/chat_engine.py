@@ -13,11 +13,23 @@ from .graph_store import GraphStore, normalize_personality_name, personality_pro
 from .head_caller import prepare_heads, select_primary_head
 from .history_store import append_turn, create_session, infer_current_entity, parse_session
 from .llm import fallback_chat_reply, generate_chat_reply
-from .message_analyzer import analyze_message
-from .models import BackgroundRebuildDecision, ChatSideEffects, ChatTurnRequest, ChatTurnResult, Situation
-from .persona_engine import adjust_emotion_vector, record_situation_reaction
+from .message_analyzer import analyze_message_state
+from .models import (
+    BackgroundRebuildDecision,
+    ChatSideEffects,
+    ChatTurnRequest,
+    ChatTurnResult,
+    MessageAnalysis,
+    PersonaResponseExplanation,
+    PersonaSelectionExplanation,
+    Situation,
+)
+from .observability import get_observability_store
+from .persona_engine import adjust_emotion_vector, explain_response_style, load_persona, record_situation_reaction
 from .prompt_builder import build_chat_prompt
+from .reliability import operator_messages_from_status, runtime_status_snapshot
 from .runtime_config import get_runtime_config
+from .situation_engine import model_situation
 
 _BACKGROUND_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix='agent-system-rebuild')
 _REPAIR_STATUS_LOCK = Lock()
@@ -76,6 +88,7 @@ def _schedule_background_extraction(session_id: str, personality_name: str = '')
         try:
             result = rebuild_artifacts(session_id, personality_name=personality_name)
         except Exception as exc:
+            get_observability_store().record_rebuild_status('error')
             _set_repair_status(
                 session_id,
                 {
@@ -86,6 +99,7 @@ def _schedule_background_extraction(session_id: str, personality_name: str = '')
                 },
             )
             return
+        get_observability_store().record_rebuild_status('ok' if result.get('ok') else 'degraded')
         _set_repair_status(
             session_id,
             {
@@ -130,6 +144,7 @@ def _record_persona_reaction(persona_name: str, situation: Situation, assistant_
 
 def _apply_rebuild_schedule(session_id: str, *, personality_name: str, side_effects: ChatSideEffects) -> dict[str, Any]:
     should_schedule, reason = _should_schedule_background_extraction(session_id, personality_name=personality_name)
+    observability = get_observability_store()
     side_effects.rebuild = BackgroundRebuildDecision(
         session_id=session_id,
         personality_name=personality_name,
@@ -137,8 +152,10 @@ def _apply_rebuild_schedule(session_id: str, *, personality_name: str, side_effe
         reason=reason,
     )
     if should_schedule:
+        observability.record_rebuild_schedule(scheduled=True, reason=reason, status='pending')
         _schedule_background_extraction(session_id, personality_name=personality_name)
     else:
+        observability.record_rebuild_schedule(scheduled=False, reason=reason, status='skipped')
         _set_repair_status(
             session_id,
             {
@@ -157,61 +174,250 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
     clean_session_id = str(session.get('session_id') or request.session_id or '')
     graph_store = GraphStore()
     side_effects = ChatSideEffects()
-    _write_concept_graph_from_message(clean_message, graph_store=graph_store, side_effects=side_effects)
-    current_entity = infer_current_entity(clean_session_id)
-    analysis = analyze_message(
-        message=clean_message,
+    observability = get_observability_store()
+    trace = observability.start_trace(
+        request_type='chat',
+        route='/api/cognitive/chat/respond',
         session_id=clean_session_id,
-        selected_head=request.selected_persona,
-        current_entity=current_entity,
-        explicit_context=request.explicit_context,
-        known_entities=graph_store.load_nodes(),
+        request_meta={
+            'language': request.language,
+            'message_chars': len(clean_message),
+            'selected_persona': str(request.selected_persona or '').strip(),
+        },
     )
-    classifications = [DEFAULT_CLASSIFIER.classify(extract_features(entity, analysis)) for entity in analysis.entities]
-    prepared_heads = prepare_heads(analysis=analysis, classifications=classifications, graph_store=graph_store)
-    primary = select_primary_head(analysis=analysis, prepared_heads=prepared_heads)
-    primary_name = ''
-    if primary and primary.get('head') is not None:
-        primary_name = normalize_personality_name(primary['head'].name)
-        _apply_emotion_update(primary_name, analysis.situation, side_effects=side_effects)
+    try:
+        observability.time_stage(
+            trace,
+            'graph_prewrite',
+            lambda: _write_concept_graph_from_message(clean_message, graph_store=graph_store, side_effects=side_effects),
+            meta_builder=lambda _result: {'graph_write_sources': list(side_effects.graph_write_sources)},
+        )
+        current_entity = infer_current_entity(clean_session_id)
+        known_nodes = graph_store.load_nodes()
+        prepared = observability.time_stage(
+            trace,
+            'analysis',
+            lambda: analyze_message_state(
+                message=clean_message,
+                session_id=clean_session_id,
+                selected_head=request.selected_persona,
+                current_entity=current_entity,
+                explicit_context=request.explicit_context,
+                known_entities=known_nodes,
+            ),
+            meta_builder=lambda payload: {
+                'entity_count': len(list(payload.get('entities') or [])),
+                'tone': payload['user_state'].tone,
+                'intent': payload['user_state'].intent,
+            },
+        )
+        situation = observability.time_stage(
+            trace,
+            'situation_building',
+            lambda: model_situation(
+                message=str(prepared['message'] or ''),
+                primary_entity=str(prepared['primary_entity'] or ''),
+                selected_head=str(prepared['selected_head'] or ''),
+                user_state=prepared['user_state'],
+            ),
+            meta_builder=lambda item: {
+                'type': item.type,
+                'target': item.target,
+                'severity': item.severity,
+            },
+        )
+        analysis = MessageAnalysis(
+            message=str(prepared['message'] or ''),
+            session_id=clean_session_id,
+            selected_head=str(prepared['selected_head'] or ''),
+            primary_entity=str(prepared['primary_entity'] or ''),
+            current_entity=str(prepared['current_entity'] or ''),
+            explicit_context=str(prepared['explicit_context'] or ''),
+            entities=list(prepared['entities'] or []),
+            user_state=prepared['user_state'],
+            situation=situation,
+        )
+        features = observability.time_stage(
+            trace,
+            'feature_extraction',
+            lambda: [extract_features(entity, analysis) for entity in analysis.entities],
+            meta_builder=lambda rows: {'entity_count': len(rows)},
+        )
+        classifications = observability.time_stage(
+            trace,
+            'classification',
+            lambda: [DEFAULT_CLASSIFIER.classify(feature_row) for feature_row in features],
+            meta_builder=lambda rows: {'classified_entities': len(rows)},
+        )
 
-    built = build_context(
-        question=clean_message,
-        session_id=clean_session_id,
-        selected_persona=primary_name,
-        explicit_context=request.explicit_context,
-        situation=analysis.situation,
-        store=graph_store,
-    )
-    prompt = build_chat_prompt(
-        question=clean_message,
-        persona_block=built.get('persona_block') or '',
-        graph_context=built.get('graph_context') or '',
-        recent_dialogue=built.get('recent_dialogue') or '',
-        language=request.language,
-    )
-    if not any(str(part or '').strip() for part in (built.get('persona_block'), built.get('graph_context'), built.get('recent_dialogue'))):
-        assistant_reply = fallback_chat_reply(language=request.language, persona_selected=bool(primary_name))
-    else:
-        assistant_reply = generate_chat_reply(prompt, language=request.language, persona_selected=bool(primary_name))
+        def _resolve_heads() -> tuple[list[dict[str, Any]], dict[str, Any] | None, str]:
+            prepared_heads = prepare_heads(analysis=analysis, classifications=classifications, graph_store=graph_store)
+            primary = select_primary_head(analysis=analysis, prepared_heads=prepared_heads)
+            primary_name = ''
+            if primary and primary.get('head') is not None:
+                primary_name = normalize_personality_name(primary['head'].name)
+            return prepared_heads, primary, primary_name
 
-    _write_session_history(clean_session_id, clean_message, assistant_reply, side_effects=side_effects)
-    _record_persona_reaction(primary_name, analysis.situation, assistant_reply, side_effects=side_effects)
-    repair_status = _apply_rebuild_schedule(clean_session_id, personality_name=primary_name, side_effects=side_effects)
+        prepared_heads, primary, primary_name = observability.time_stage(
+            trace,
+            'head_selection',
+            _resolve_heads,
+            meta_builder=lambda rows: {
+                'prepared_heads': len(rows[0]),
+                'primary_name': rows[2],
+            },
+        )
+        observability.time_stage(
+            trace,
+            'persona_update',
+            lambda: _apply_emotion_update(primary_name, analysis.situation, side_effects=side_effects),
+            meta_builder=lambda _result: {
+                'updated': bool(primary_name),
+                'persona_updates': list(side_effects.persona_updates),
+            },
+        )
+        active_persona_bundle = load_persona(primary_name) if primary_name else None
+        selection_explanation = (
+            primary.get('selection_explanation')
+            if primary and isinstance(primary.get('selection_explanation'), PersonaSelectionExplanation)
+            else PersonaSelectionExplanation(persona_name=primary_name)
+        )
+        response_explanation = (
+            explain_response_style(active_persona_bundle, analysis.situation)
+            if active_persona_bundle is not None
+            else PersonaResponseExplanation(persona_name=primary_name)
+        )
+        built = observability.time_stage(
+            trace,
+            'context_building',
+            lambda: build_context(
+                question=clean_message,
+                session_id=clean_session_id,
+                selected_persona=primary_name,
+                explicit_context=request.explicit_context,
+                situation=analysis.situation,
+                store=graph_store,
+            ),
+            meta_builder=lambda payload: {
+                'estimated_tokens': int(payload.get('estimated_tokens') or 0),
+                'selected_items': len(list(dict(payload.get('context_debug') or {}).get('selected_items') or [])),
+                'source_counts': dict(dict(payload.get('context_debug') or {}).get('source_counts') or {}),
+                'packed_candidate_counts': dict(dict(dict(payload.get('context_debug') or {}).get('stages') or {}).get('pack_context') or {}),
+            },
+        )
+        prompt = build_chat_prompt(
+            question=clean_message,
+            persona_block=built.get('persona_block') or '',
+            graph_context=built.get('graph_context') or '',
+            recent_dialogue=built.get('recent_dialogue') or '',
+            language=request.language,
+        )
 
-    return ChatTurnResult(
-        assistant_reply=assistant_reply,
-        session_id=clean_session_id,
-        session=parse_session(clean_session_id) or session,
-        persona_name=built.get('persona_name') or primary_name,
-        graph_context=built.get('graph_context') or '',
-        current_entity=built.get('current_entity') or primary_name,
-        analysis=analysis,
-        classifications=classifications,
-        repair_status=repair_status,
-        proposal_requested=False,
-        side_effects=side_effects,
-    )
+        def _generate_reply() -> tuple[str, bool, str, dict[str, Any]]:
+            fallback_text = fallback_chat_reply(language=request.language, persona_selected=bool(primary_name))
+            grounded = any(str(part or '').strip() for part in (built.get('persona_block'), built.get('graph_context'), built.get('recent_dialogue')))
+            if not grounded:
+                return fallback_text, True, 'no_grounding', {}
+            reply = generate_chat_reply(prompt, language=request.language, persona_selected=bool(primary_name))
+            used_fallback = str(reply or '').strip() == fallback_text
+            status = runtime_status_snapshot() if used_fallback else {}
+            fallback_reason = ''
+            if used_fallback:
+                fallback_reason = 'dependency_unavailable' if str(dict(status or {}).get('mode') or '') == 'degraded' else 'model_fallback'
+            return reply, used_fallback, fallback_reason, status
+
+        assistant_reply, fallback_used, fallback_reason, runtime_status = observability.time_stage(
+            trace,
+            'llm_call',
+            _generate_reply,
+            meta_builder=lambda result: {
+                'fallback_used': bool(result[1]),
+                'fallback_reason': str(result[2] or ''),
+                'runtime_mode': str(dict(result[3] or {}).get('mode') or 'full'),
+            },
+        )
+        operator_messages = operator_messages_from_status(runtime_status)
+        if fallback_reason == 'no_grounding':
+            operator_messages = [
+                'Fallback reply was returned because the bounded context contained no grounded items.',
+                *operator_messages,
+            ]
+        elif fallback_reason == 'model_fallback':
+            operator_messages = [
+                'Fallback reply was returned because the model produced no safe usable text.',
+                *operator_messages,
+            ]
+        elif fallback_reason == 'dependency_unavailable':
+            operator_messages = [
+                'Fallback reply was returned because the local chat provider is unavailable.',
+                *operator_messages,
+            ]
+        repair_status = observability.time_stage(
+            trace,
+            'storage_writes',
+            lambda: (
+                _write_session_history(clean_session_id, clean_message, assistant_reply, side_effects=side_effects),
+                _record_persona_reaction(primary_name, analysis.situation, assistant_reply, side_effects=side_effects),
+                _apply_rebuild_schedule(clean_session_id, personality_name=primary_name, side_effects=side_effects),
+            )[-1],
+            meta_builder=lambda payload: {
+                'history_write_path': side_effects.history_write_path,
+                'persona_updates': list(side_effects.persona_updates),
+                'repair_status': str(payload.get('status') or ''),
+            },
+        )
+        observability.finish_trace(
+            trace,
+            status='ok',
+            fallback_used=fallback_used,
+            fallback_reason=fallback_reason,
+            context_tokens=int(built.get('estimated_tokens') or 0),
+            persona_name=built.get('persona_name') or primary_name,
+            current_entity=built.get('current_entity') or primary_name,
+            response_meta={
+                'classification_count': len(classifications),
+                'repair_status': str(repair_status.get('status') or ''),
+                'runtime_mode': str(dict(runtime_status or {}).get('mode') or 'full'),
+            },
+        )
+        return ChatTurnResult(
+            assistant_reply=assistant_reply,
+            session_id=clean_session_id,
+            trace_id=trace.request_id,
+            session=parse_session(clean_session_id) or session,
+            persona_name=built.get('persona_name') or primary_name,
+            graph_context=built.get('graph_context') or '',
+            current_entity=built.get('current_entity') or primary_name,
+            analysis=analysis,
+            classifications=classifications,
+            repair_status=repair_status,
+            proposal_requested=False,
+            side_effects=side_effects,
+            persona_selection=selection_explanation,
+            persona_response=response_explanation,
+            context_preview={
+                'estimated_tokens': int(built.get('estimated_tokens') or 0),
+                'graph_context': built.get('graph_context') or '',
+                'current_entity': built.get('current_entity') or primary_name,
+                'persona_name': built.get('persona_name') or primary_name,
+                'source_counts': dict(dict(built.get('context_debug') or {}).get('source_counts') or {}),
+                'selected_items': list(dict(built.get('context_debug') or {}).get('selected_items') or []),
+            },
+            runtime_status=dict(runtime_status or {}),
+            operator_messages=list(dict.fromkeys(operator_messages)),
+        )
+    except Exception as exc:
+        observability.finish_trace(
+            trace,
+            status='error',
+            fallback_used=False,
+            fallback_reason='',
+            context_tokens=0,
+            persona_name='',
+            current_entity='',
+            response_meta={'error': str(exc)},
+        )
+        raise
 
 
 def generate_response(

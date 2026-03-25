@@ -7,6 +7,7 @@ services:
     env_file:
       - .env
     environment:
+      COGNITIVE_RUNTIME_PROFILE: "server"
       WEB_HOST: "0.0.0.0"
       WEB_PORT: "8008"
       AUTH_ENABLE: "${AUTH_ENABLE:-0}"
@@ -20,7 +21,7 @@ services:
       RATE_LIMIT_PER_MINUTE: "${RATE_LIMIT_PER_MINUTE:-240}"
       PRIVACY_NOISE_ENABLE: "${PRIVACY_NOISE_ENABLE:-0}"
       PRIVACY_NOISE_INTENSITY: "${PRIVACY_NOISE_INTENSITY:-0.05}"
-    command: ["python", "start.py", "--web-api", "--host", "0.0.0.0", "--port", "8008"]
+    command: ["python", "start.py", "--profile", "server"]
     expose:
       - "8008"
     read_only: true

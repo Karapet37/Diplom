@@ -1,5 +1,15 @@
-import React, { useMemo, useRef, useState } from "react";
-import { deterministicLayout, edgeTypeOf, edgeWeightOf, getNodeGloss, getNodeLabel, styleForType } from "../../lib/graphView";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  deterministicLayoutWithOptions,
+  edgeTypeOf,
+  edgeWeightOf,
+  getNodeClusterLabel,
+  getNodeGloss,
+  getNodeLabel,
+  getNodeLifecycleState,
+  getNodeTranslationLine,
+  styleForType,
+} from "../../lib/graphView";
 
 function nodeRadius(node, degreeMap) {
   const degree = Number(degreeMap.get(String(node.id)) || 0);
@@ -37,22 +47,35 @@ export function GraphWorkspace({
   onSelectNode,
   onSelectEdge,
   onClearSelection,
+  onOpenBranch,
+  rootNodeId,
+  windowTitle,
+  windowSubtitle,
+  onCloseWindow,
+  isBranchWindow = false,
+  diagnostics = null,
+  layoutSpread = 1.34,
+  showEdgeLabels = true,
   t,
 }) {
   const svgRef = useRef(null);
+  const surfaceRef = useRef(null);
   const dragRef = useRef(null);
+  const lastTouchRef = useRef({ nodeId: "", at: 0 });
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const [hoverLabel, setHoverLabel] = useState("");
-  const width = 1180;
-  const height = 780;
+  const width = isBranchWindow ? 1400 : 1760;
+  const height = isBranchWindow ? 920 : 1160;
 
   const buildHoverText = (node) => {
     const label = getNodeLabel(node);
+    const translation = String(getNodeTranslationLine(node) || "").trim();
     const gloss = String(getNodeGloss(node) || "").trim();
-    if (!gloss) {
+    if (!gloss && !translation) {
       return label;
     }
-    return `${label} - ${gloss.slice(0, 120)}`;
+    const detail = translation || gloss;
+    return `${label} - ${detail.slice(0, 160)}`;
   };
 
   const degreeMap = useMemo(() => {
@@ -73,16 +96,40 @@ export function GraphWorkspace({
     return map;
   }, [nodes, edges]);
 
-  const positions = useMemo(() => deterministicLayout(nodes, edges, width, height), [nodes, edges]);
+  const positions = useMemo(
+    () => deterministicLayoutWithOptions(
+      nodes,
+      edges,
+      width,
+      height,
+      { centerNodeId: rootNodeId, spread: Math.max(0.82, Number(layoutSpread || 1)) * (isBranchWindow ? 0.9 : 1) }
+    ),
+    [edges, height, isBranchWindow, layoutSpread, nodes, rootNodeId, width],
+  );
 
   const onWheel = (event) => {
     event.preventDefault();
+    event.stopPropagation();
     const delta = event.deltaY > 0 ? -0.08 : 0.08;
     setViewport((current) => ({
       ...current,
       scale: Math.min(2.4, Math.max(0.55, Number((current.scale + delta).toFixed(3)))),
     }));
   };
+
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!surface) {
+      return undefined;
+    }
+    const handleWheel = (event) => {
+      onWheel(event);
+    };
+    surface.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      surface.removeEventListener("wheel", handleWheel);
+    };
+  }, []);
 
   const onPointerDown = (event) => {
     if (event.target.dataset.kind === "node" || event.target.dataset.kind === "edge") {
@@ -108,6 +155,30 @@ export function GraphWorkspace({
     dragRef.current = null;
   };
 
+  const handleBranchOpen = (node, event) => {
+    if (!onOpenBranch || !node) {
+      return;
+    }
+    if (event) {
+      event.stopPropagation();
+    }
+    onOpenBranch(node, rootNodeId || "");
+  };
+
+  const handleNodePointerUp = (node, event) => {
+    if (!onOpenBranch || event.pointerType !== "touch") {
+      return;
+    }
+    const now = Date.now();
+    const nodeId = String(node?.id || "");
+    if (lastTouchRef.current.nodeId === nodeId && now - lastTouchRef.current.at <= 320) {
+      handleBranchOpen(node, event);
+      lastTouchRef.current = { nodeId: "", at: 0 };
+      return;
+    }
+    lastTouchRef.current = { nodeId, at: now };
+  };
+
   const { loopNodeIds, twoCycleKeys } = loops;
   const highlightedNodes = highlightedNodeIds || new Set();
   const highlightedEdges = highlightedEdgeKeys || new Set();
@@ -118,15 +189,31 @@ export function GraphWorkspace({
       <header className="panel-heading compact">
         <div>
           <p className="eyebrow">{t("graph_body")}</p>
-          <h2>{t("graph_workspace")}</h2>
+          <h2>{windowTitle || t("graph_workspace")}</h2>
+          {windowSubtitle ? <span className="graph-window-subtitle">{windowSubtitle}</span> : null}
         </div>
         <div className="graph-legend">
+          <button type="button" className="button-secondary graph-mini-button" onClick={() => setViewport((current) => ({ ...current, scale: Math.max(0.55, Number((current.scale - 0.12).toFixed(3))) }))}>-</button>
+          <button type="button" className="button-secondary graph-mini-button" onClick={() => setViewport({ x: 0, y: 0, scale: 1 })}>{t("graph_reset_view")}</button>
+          <button type="button" className="button-secondary graph-mini-button" onClick={() => setViewport((current) => ({ ...current, scale: Math.min(2.4, Number((current.scale + 0.12).toFixed(3))) }))}>+</button>
           <span>{t("graph_drag")}</span>
           <span>{t("graph_zoom")}</span>
+          <span>{`${nodes.length} n / ${edges.length} e`}</span>
+          {diagnostics ? (
+            <span>
+              {(diagnostics.active_node_count || 0)}
+              {" active / "}
+              {(diagnostics.weak_node_count || 0)}
+              {" weak / "}
+              {(diagnostics.suspect_node_count || 0)}
+              {" suspect"}
+            </span>
+          ) : null}
+          {isBranchWindow && onCloseWindow ? <button type="button" className="button-secondary" onClick={onCloseWindow}>×</button> : null}
           {hoverLabel ? <strong>{hoverLabel}</strong> : null}
         </div>
       </header>
-      <div className="graph-surface" onWheel={onWheel} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerUp}>
+      <div ref={surfaceRef} className="graph-surface" onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerUp}>
         {!nodes.length ? (
           <div className="empty-state large">
             <h3>{t("graph_empty_title")}</h3>
@@ -153,13 +240,14 @@ export function GraphWorkspace({
             <g transform={`translate(${viewport.x} ${viewport.y}) scale(${viewport.scale})`}>
               {edges.map((edge) => {
                 const key = edge.edge_key || `${edge.src_id || edge.from}|${edgeTypeOf(edge)}|${edge.dst_id || edge.to}`;
+                const edgeId = edge.id || key;
                 const from = positions[String(edge.src_id || edge.from)];
                 const to = positions[String(edge.dst_id || edge.to)];
                 if (!from || !to) {
                   return null;
                 }
                 const isSelfLoop = String(edge.src_id || edge.from) === String(edge.dst_id || edge.to);
-                const isSelected = selectedEdgeKey === key;
+                const isSelected = selectedEdgeKey === key || selectedEdgeKey === edgeId;
                 const inPath = highlightedEdges.has(key);
                 const inTwoCycle = twoCycleKeys.has(`${edge.src_id || edge.from}|${edge.dst_id || edge.to}`);
                 const weight = edgeWeightOf(edge);
@@ -192,13 +280,15 @@ export function GraphWorkspace({
                       strokeWidth={strokeWidth}
                       onClick={() => onSelectEdge(edge)}
                     />
-                    <text
-                      x={(from.x + to.x) / 2}
-                      y={(from.y + to.y) / 2 - 6}
-                      className="edge-label"
-                    >
-                      {edgeTypeOf(edge)}
-                    </text>
+                    {showEdgeLabels ? (
+                      <text
+                        x={(from.x + to.x) / 2}
+                        y={(from.y + to.y) / 2 - 6}
+                        className="edge-label"
+                      >
+                        {edgeTypeOf(edge)}
+                      </text>
+                    ) : null}
                   </g>
                 );
               })}
@@ -213,17 +303,23 @@ export function GraphWorkspace({
                 const isSearchHit = searchHits.has(String(node.id));
                 const inPath = highlightedNodes.has(String(node.id));
                 const looped = loopNodeIds.has(String(node.id));
+                const isRoot = rootNodeId && String(rootNodeId) === String(node.id);
+                const translationLine = String(getNodeTranslationLine(node) || "").trim();
+                const lifecycleState = getNodeLifecycleState(node);
+                const clusterLabel = getNodeClusterLabel(node);
                 return (
                   <g
                     key={node.id}
                     transform={`translate(${pos.x} ${pos.y})`}
                     onMouseEnter={() => setHoverLabel(buildHoverText(node))}
                     onMouseLeave={() => setHoverLabel("")}
+                    onDoubleClick={(event) => handleBranchOpen(node, event)}
+                    onPointerUp={(event) => handleNodePointerUp(node, event)}
                   >
-                    {looped ? <circle className="graph-node-loop" cx="0" cy="0" r={radius + 8} /> : null}
+                    {looped || isRoot ? <circle className={`graph-node-loop ${isRoot ? "root" : ""}`} cx="0" cy="0" r={radius + (isRoot ? 12 : 8)} /> : null}
                     <g
                       data-kind="node"
-                      className={`graph-node ${isSelected ? "selected" : ""} ${isSearchHit ? "search-hit" : ""} ${inPath ? "path" : ""}`}
+                      className={`graph-node ${isSelected ? "selected" : ""} ${isSearchHit ? "search-hit" : ""} ${inPath ? "path" : ""} ${isRoot ? "root" : ""} lifecycle-${lifecycleState}`}
                       fill={style.color}
                       stroke={style.accent}
                       filter={isSelected || inPath ? "url(#graphGlow)" : undefined}
@@ -234,9 +330,22 @@ export function GraphWorkspace({
                     <text x="0" y={radius + 18} className="graph-node-label">
                       {getNodeLabel(node)}
                     </text>
+                    {translationLine ? (
+                      <text x="0" y={radius + 31} className="graph-node-translation">
+                        {translationLine}
+                      </text>
+                    ) : null}
                     <text x="0" y={4} className="graph-node-type">
                       {String(node.type || "").toUpperCase()}
                     </text>
+                    <text x="0" y={18} className={`graph-node-state graph-node-state-${lifecycleState}`}>
+                      {lifecycleState.toUpperCase()}
+                    </text>
+                    {clusterLabel ? (
+                      <text x="0" y={radius + 44} className="graph-node-cluster">
+                        {clusterLabel}
+                      </text>
+                    ) : null}
                   </g>
                 );
               })}

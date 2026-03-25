@@ -5,7 +5,9 @@
 The active product runtime starts here:
 
 ```text
-start.py
+start.py --profile <name> [--env-file ...] [--config ...]
+  -> bootstrap_runtime_environment()
+  -> get_runtime_config()
   -> src.web.combined_app.create_combined_app()
     -> agent_system.api.create_app()
       -> /api/cognitive/chat/respond
@@ -42,6 +44,7 @@ Legacy or non-hot-path modules remain in the repo but are not part of the defaul
 
 `agent_system/runtime_config.py` is the centralized source for:
 
+- runtime profile bootstrapping
 - runtime paths
 - context budgets
 - model roles

@@ -58,13 +58,16 @@ def test_context_builder_limits_budget_and_uses_persona_state(tmp_path, monkeypa
         question='Who is Leonard to you, and how does precision shape your view of him? ' * 80,
         session_id='session_test',
         selected_persona='sheldon_cooper',
-        situation='Sheldon is asked about Leonard',
+        situation={'type': 'neutral_query', 'target': 'persona', 'severity': 0.45},
     )
 
     assert 'Emotion vector:' in built['persona_block']
+    assert 'Response style:' in built['persona_block']
+    assert 'Current situation: type=neutral_query; target=persona; severity=0.45.' in built['persona_block']
+    assert built['situation'] == 'type=neutral_query; target=persona; severity=0.45'
     assert 'logical' in built['persona_block']
     assert 'Leonard' in built['graph_context']
-    assert built['estimated_tokens'] <= 5000
+    assert built['estimated_tokens'] <= 4000
     assert built['recent_dialogue']
 
 

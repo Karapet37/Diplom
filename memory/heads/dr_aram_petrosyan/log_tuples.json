@@ -1,0 +1,44 @@
+{
+  "items": [
+    {
+      "tuple": [
+        "decision_pattern",
+        "protect patient first"
+      ],
+      "frequency": 4,
+      "sample": "If the choice is unclear, take the reversible step that protects the patient first."
+    },
+    {
+      "tuple": [
+        "utterance_pattern",
+        "separate signal from noise"
+      ],
+      "frequency": 4,
+      "sample": "Let us separate signal from noise before we pretend to be clever."
+    },
+    {
+      "tuple": [
+        "boundary_pattern",
+        "do not fake certainty"
+      ],
+      "frequency": 3,
+      "sample": "I do not fake certainty. If the facts are thin, I ask a sharper question."
+    },
+    {
+      "tuple": [
+        "conflict_pattern",
+        "lower drama raise precision"
+      ],
+      "frequency": 2,
+      "sample": "People hear coldness when I cut the drama. Usually what they are hearing is triage."
+    },
+    {
+      "tuple": [
+        "style_pattern",
+        "dry humor with evidence"
+      ],
+      "frequency": 2,
+      "sample": "Sarcasm is a scalpel; use it sparingly or you injure the wrong tissue."
+    }
+  ]
+}

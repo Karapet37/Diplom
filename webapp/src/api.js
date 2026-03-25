@@ -53,6 +53,10 @@ export function listCognitivePersonalities() {
   return request('/api/cognitive/personalities');
 }
 
+export function getCognitivePersonality(name) {
+  return request(`/api/cognitive/personalities/${encodeURIComponent(name)}`);
+}
+
 export function getCognitiveGraph() {
   return request('/api/cognitive/graph');
 }
@@ -64,6 +68,79 @@ export function getCognitiveGraphSubgraph(query = '', limit = 12) {
   }
   params.set('limit', String(limit));
   return request(`/api/cognitive/graph/subgraph?${params.toString()}`);
+}
+
+export function getCognitiveGraphNodeView(nodeId, language = '') {
+  const params = new URLSearchParams();
+  if (language) {
+    params.set('language', String(language));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  return request(`/api/cognitive/graph/nodes/${encodeURIComponent(nodeId)}/view${suffix}`);
+}
+
+export function createCognitiveGraphNode(payload = {}) {
+  return request('/api/cognitive/graph/nodes', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function connectCognitiveGraphNodes(payload = {}) {
+  return request('/api/cognitive/graph/edges', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function mergeCognitiveGraphNodes(payload = {}) {
+  return request('/api/cognitive/graph/nodes/merge', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function reviewCognitiveGraphNode(nodeId, payload = {}) {
+  return request(`/api/cognitive/graph/nodes/${encodeURIComponent(nodeId)}/state`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteCognitiveGraphNode(nodeId) {
+  return request(`/api/cognitive/graph/nodes/${encodeURIComponent(nodeId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function deleteCognitiveGraphEdge(edgeId) {
+  return request(`/api/cognitive/graph/edges/${encodeURIComponent(edgeId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function rethinkCognitiveGraphNodes(payload = {}) {
+  return request('/api/cognitive/graph/rethink', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getCognitiveDebugMetrics() {
+  return request('/api/cognitive/debug/metrics');
+}
+
+export function getCognitiveDebugTraces({ limit = 20, sessionId = '' } = {}) {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  if (sessionId) {
+    params.set('session_id', String(sessionId));
+  }
+  return request(`/api/cognitive/debug/traces?${params.toString()}`);
+}
+
+export function getCognitiveGraphHealth() {
+  return request('/api/cognitive/debug/graph-health');
 }
 
 export function rebuildCognitiveGraph(payload = {}) {

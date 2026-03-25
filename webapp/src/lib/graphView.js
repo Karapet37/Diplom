@@ -34,14 +34,35 @@ export function getNodeGloss(node) {
   if (!node) {
     return "";
   }
-  return node.short_gloss || node.attributes?.summary || node.attributes?.description || "";
+  return node.translation_line || node.short_gloss || node.attributes?.summary || node.attributes?.description || "";
+}
+
+export function getNodeTranslationLine(node) {
+  if (!node) {
+    return "";
+  }
+  return node.translation_line || node.attributes?.translation_line || "";
+}
+
+export function getNodeLifecycleState(node) {
+  if (!node) {
+    return "active";
+  }
+  return String(node.lifecycle_state || node.attributes?.lifecycle_state || node.context?.lifecycle_state || "active").toLowerCase();
+}
+
+export function getNodeClusterLabel(node) {
+  if (!node) {
+    return "";
+  }
+  return String(node.cluster_label || node.attributes?.cluster_label || "").trim();
 }
 
 export function getNodeExplanation(node) {
   if (!node) {
     return "";
   }
-  return node.plain_explanation || node.attributes?.plain_explanation || node.attributes?.description || "";
+  return node.plain_explanation || node.context?.plain_explanation || node.attributes?.plain_explanation || node.attributes?.description || "";
 }
 
 export function getNodeExamples(node) {
@@ -184,13 +205,29 @@ export function computeLoopSets(loops = {}) {
 }
 
 export function deterministicLayout(nodes = [], edges = [], width = 1180, height = 780) {
+  return deterministicLayoutWithOptions(nodes, edges, width, height, {});
+}
+
+export function deterministicLayoutWithOptions(nodes = [], edges = [], width = 1180, height = 780, options = {}) {
+  const centerNodeId = String(options.centerNodeId || "");
+  const spread = Math.max(Number(options.spread || 1), 0.8);
+  if (centerNodeId) {
+    const rooted = rootedLayout(nodes, edges, width, height, centerNodeId, spread);
+    if (Object.keys(rooted).length) {
+      return rooted;
+    }
+  }
+  return groupedLayout(nodes, edges, width, height, spread);
+}
+
+function groupedLayout(nodes = [], edges = [], width = 1180, height = 780, spread = 1) {
   const centerX = width / 2;
   const centerY = height / 2;
   const groups = new Map();
   const degrees = new Map();
   for (const node of nodes) {
-    const type = String(node.type || "generic");
-    groups.set(type, [...(groups.get(type) || []), node]);
+    const groupKey = String(node.cluster_key || node.cluster_label || node.type || "generic");
+    groups.set(groupKey, [...(groups.get(groupKey) || []), node]);
     degrees.set(String(node.id), 0);
   }
   for (const edge of edges) {
@@ -206,7 +243,7 @@ export function deterministicLayout(nodes = [], edges = [], width = 1180, height
 
   const orderedGroups = [...groups.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
   const positions = {};
-  const groupRadius = Math.max(210, Math.min(width, height) * 0.28);
+  const groupRadius = Math.max(340, Math.min(width, height) * 0.38) * spread;
 
   orderedGroups.forEach(([type, groupNodes], groupIndex) => {
     const sectorAngle = (Math.PI * 2 * groupIndex) / Math.max(orderedGroups.length, 1) - Math.PI / 2;
@@ -219,10 +256,10 @@ export function deterministicLayout(nodes = [], edges = [], width = 1180, height
       }
       return getNodeLabel(left).localeCompare(getNodeLabel(right));
     });
-    const innerRadius = 58 + Math.min(sortedNodes.length, 12) * 8;
+    const innerRadius = (120 + Math.min(sortedNodes.length, 12) * 16) * spread;
     sortedNodes.forEach((node, index) => {
       const angle = (Math.PI * 2 * index) / Math.max(sortedNodes.length, 1) - Math.PI / 2;
-      const orbit = innerRadius + Math.floor(index / 6) * 18;
+      const orbit = innerRadius + Math.floor(index / 5) * 46 * spread;
       positions[node.id] = {
         x: groupCenterX + Math.cos(angle) * orbit,
         y: groupCenterY + Math.sin(angle) * orbit,
@@ -231,6 +268,94 @@ export function deterministicLayout(nodes = [], edges = [], width = 1180, height
   });
 
   return positions;
+}
+
+function rootedLayout(nodes = [], edges = [], width = 1180, height = 780, centerNodeId = "", spread = 1) {
+  if (!centerNodeId || !nodes.some((node) => String(node.id) === centerNodeId)) {
+    return {};
+  }
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const degrees = new Map(nodes.map((node) => [String(node.id), 0]));
+  for (const edge of edges) {
+    const left = String(edge.src_id || edge.from || "");
+    const right = String(edge.dst_id || edge.to || "");
+    if (degrees.has(left)) {
+      degrees.set(left, Number(degrees.get(left) || 0) + 1);
+    }
+    if (degrees.has(right)) {
+      degrees.set(right, Number(degrees.get(right) || 0) + 1);
+    }
+  }
+
+  const adjacency = buildAdjacency(edges);
+  const levels = new Map([[centerNodeId, 0]]);
+  const queue = [centerNodeId];
+  while (queue.length) {
+    const current = queue.shift();
+    const level = Number(levels.get(current) || 0);
+    for (const next of adjacency.get(current) || []) {
+      if (levels.has(next)) {
+        continue;
+      }
+      levels.set(next, level + 1);
+      queue.push(next);
+    }
+  }
+
+  const groupedLevels = new Map();
+  for (const node of nodes) {
+    const nodeId = String(node.id);
+    const level = Number(levels.get(nodeId) ?? 3);
+    groupedLevels.set(level, [...(groupedLevels.get(level) || []), node]);
+  }
+
+  const positions = {
+    [centerNodeId]: { x: centerX, y: centerY },
+  };
+  for (const [level, levelNodes] of [...groupedLevels.entries()].sort((a, b) => a[0] - b[0])) {
+    if (level === 0) {
+      continue;
+    }
+    const sortedNodes = [...levelNodes].sort((left, right) => {
+      const degreeDelta = Number(degrees.get(String(right.id)) || 0) - Number(degrees.get(String(left.id)) || 0);
+      if (degreeDelta !== 0) {
+        return degreeDelta;
+      }
+      return getNodeLabel(left).localeCompare(getNodeLabel(right));
+    });
+    const ringRadius = (220 + (level - 1) * 185) * spread;
+    sortedNodes.forEach((node, index) => {
+      const angle = (Math.PI * 2 * index) / Math.max(sortedNodes.length, 1) - Math.PI / 2;
+      positions[String(node.id)] = {
+        x: centerX + Math.cos(angle) * ringRadius,
+        y: centerY + Math.sin(angle) * ringRadius,
+      };
+    });
+  }
+  return positions;
+}
+
+export function extractNeighborhoodPayload(rootNodeId, nodes = [], edges = [], depth = 1) {
+  const rootId = String(rootNodeId || "");
+  if (!rootId) {
+    return { nodes: [], edges: [], highlightedNodeIds: new Set(), highlightedEdgeKeys: new Set() };
+  }
+  const neighborhoodIds = bfsNeighborhood(rootId, edges, depth);
+  neighborhoodIds.add(rootId);
+  const filteredNodes = nodes.filter((node) => neighborhoodIds.has(String(node.id)));
+  const filteredNodeIds = new Set(filteredNodes.map((node) => String(node.id)));
+  const filteredEdges = edges.filter((edge) => {
+    const from = String(edge.src_id || edge.from || "");
+    const to = String(edge.dst_id || edge.to || "");
+    return filteredNodeIds.has(from) && filteredNodeIds.has(to);
+  });
+  return {
+    nodes: filteredNodes,
+    edges: filteredEdges,
+    highlightedNodeIds: neighborhoodIds,
+    highlightedEdgeKeys: new Set(filteredEdges.map((edge) => `${edge.src_id || edge.from}|${edgeTypeOf(edge)}|${edge.dst_id || edge.to}`)),
+  };
 }
 
 export const TYPE_STYLE = {

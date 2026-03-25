@@ -6,6 +6,24 @@ from difflib import SequenceMatcher
 from typing import Any
 
 STOP_TOKENS = {'mr', 'mrs', 'ms', 'dr', 'prof', 'sir', 'madam', 'the', 'a', 'an'}
+SEMANTIC_EQUIVALENTS = {
+    'human': 'human',
+    'humans': 'human',
+    'human being': 'human',
+    'human beings': 'human',
+    'person': 'human',
+    'people': 'human',
+    'человек': 'human',
+    'люди': 'human',
+    'мարդ': 'human',
+    'մարդիկ': 'human',
+    'sunlight': 'sunlight',
+    'daylight': 'sunlight',
+    'solar light': 'sunlight',
+    'солнечный свет': 'sunlight',
+    'свет солнца': 'sunlight',
+    'արևի լույս': 'sunlight',
+}
 
 
 def normalize_name(value: str) -> str:
@@ -14,17 +32,22 @@ def normalize_name(value: str) -> str:
     return ' '.join(tokens).strip()
 
 
+def semantic_normalize_name(value: str) -> str:
+    normalized = normalize_name(value)
+    return SEMANTIC_EQUIVALENTS.get(normalized, normalized)
+
+
 def token_similarity(left: str, right: str) -> float:
-    left_tokens = set(normalize_name(left).split())
-    right_tokens = set(normalize_name(right).split())
+    left_tokens = set(semantic_normalize_name(left).split())
+    right_tokens = set(semantic_normalize_name(right).split())
     if not left_tokens or not right_tokens:
         return 0.0
     return len(left_tokens & right_tokens) / max(len(left_tokens | right_tokens), 1)
 
 
 def text_similarity(left: str, right: str) -> float:
-    left_norm = normalize_name(left)
-    right_norm = normalize_name(right)
+    left_norm = semantic_normalize_name(left)
+    right_norm = semantic_normalize_name(right)
     if not left_norm or not right_norm:
         return 0.0
     if left_norm == right_norm:
@@ -33,8 +56,8 @@ def text_similarity(left: str, right: str) -> float:
 
 
 def name_similarity(left: str, right: str) -> float:
-    left_norm = normalize_name(left)
-    right_norm = normalize_name(right)
+    left_norm = semantic_normalize_name(left)
+    right_norm = semantic_normalize_name(right)
     if left_norm and right_norm and (left_norm in right_norm or right_norm in left_norm):
         overlap = token_similarity(left, right)
         if overlap > 0:
@@ -66,6 +89,8 @@ def context_similarity(existing: dict[str, Any], candidate: dict[str, Any]) -> f
 
 
 def combined_similarity(existing: dict[str, Any], candidate: dict[str, Any]) -> float:
+    if semantic_normalize_name(str(existing.get('name') or '')) == semantic_normalize_name(str(candidate.get('name') or '')):
+        return 1.0
     name_score = name_similarity(str(existing.get('name') or ''), str(candidate.get('name') or ''))
     context_score = context_similarity(existing, candidate)
     aliases_left = ' '.join(str(item) for item in list(existing.get('aliases') or []))
@@ -95,6 +120,36 @@ def merge_aliases(*values: list[str]) -> list[str]:
             seen.add(token)
             ordered.append(clean)
     return ordered
+
+
+def canonical_name(*values: str) -> str:
+    candidates = []
+    seen: set[str] = set()
+    for value in values:
+        clean = str(value or '').strip()
+        token = normalize_name(clean)
+        if not clean or not token or token in seen:
+            continue
+        seen.add(token)
+        candidates.append(clean)
+    if not candidates:
+        return ''
+
+    def score(value: str) -> tuple[int, int, int, int, str]:
+        normalized = normalize_name(value)
+        semantic = semantic_normalize_name(value)
+        is_semantic_canonical = int(bool(normalized and normalized == semantic))
+        ascii_alpha = sum(1 for char in value if char.isascii() and char.isalpha())
+        token_count = len(normalized.split()) if normalized else 99
+        return (
+            is_semantic_canonical,
+            int(ascii_alpha > 0),
+            -token_count,
+            -len(value),
+            value.lower(),
+        )
+
+    return max(candidates, key=score)
 
 
 def similarity_bucket(score: float) -> str:

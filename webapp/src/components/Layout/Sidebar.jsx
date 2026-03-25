@@ -31,9 +31,12 @@ export function Sidebar({
     <aside className="or-sidebar glass-panel session-sidebar">
       <section className="sidebar-block">
         <p className="sidebar-title">{t('sidebar_primary_view')}</p>
-        <div className="side-nav inline">
+        <div className="side-nav">
           <SidebarButton active={workspace === 'chat'} onClick={() => onWorkspaceChange('chat')}>{t('sidebar_chat_workspace')}</SidebarButton>
           <SidebarButton active={workspace === 'graph'} onClick={() => onWorkspaceChange('graph')}>{t('sidebar_graph_workspace')}</SidebarButton>
+          <SidebarButton active={workspace === 'persona'} onClick={() => onWorkspaceChange('persona')}>{t('sidebar_persona_workspace')}</SidebarButton>
+          <SidebarButton active={workspace === 'files'} onClick={() => onWorkspaceChange('files')}>{t('sidebar_files_workspace')}</SidebarButton>
+          <SidebarButton active={workspace === 'diagnostics'} onClick={() => onWorkspaceChange('diagnostics')}>{t('sidebar_diagnostics_workspace')}</SidebarButton>
         </div>
       </section>
 

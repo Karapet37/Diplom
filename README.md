@@ -97,13 +97,89 @@ Supported ingestion formats:
 
 Chunks stay below 2000 estimated tokens before LLM extraction proposals are validated and merged.
 
-## Run
+## Runtime Profiles
+
+The runtime is profile-driven and local-first.
+
+Available profiles:
+
+- `development`
+- `local-demo`
+- `local-heavy`
+- `server`
+
+Profile templates live in [config/runtime-profiles/development.yaml](/home/karapet/agent_project/config/runtime-profiles/development.yaml), [config/runtime-profiles/local-demo.yaml](/home/karapet/agent_project/config/runtime-profiles/local-demo.yaml), [config/runtime-profiles/local-heavy.yaml](/home/karapet/agent_project/config/runtime-profiles/local-heavy.yaml), and [config/runtime-profiles/server.yaml](/home/karapet/agent_project/config/runtime-profiles/server.yaml).
+
+## Setup
 
 ```bash
 cd <project_root>
-pip install -e .[dev]
-python start.py --host 127.0.0.1 --port 8008
+./scripts/bootstrap_local.sh
 ```
+
+This creates `.env.local` from [/.env.example](/home/karapet/agent_project/.env.example) when needed and installs backend/frontend dependencies.
+
+If you build the combined UI locally:
+
+```bash
+cd <project_root>/webapp
+npm run build
+```
+
+## Run
+
+Recommended:
+
+```bash
+cd <project_root>
+./scripts/run_profile.sh development
+```
+
+Other profiles:
+
+```bash
+./scripts/run_profile.sh local-demo
+./scripts/run_profile.sh local-heavy
+./scripts/run_profile.sh server
+```
+
+Direct startup:
+
+```bash
+python start.py --profile development
+python start.py --profile server
+python start.py --profile development --api-only
+```
+
+Useful diagnostics:
+
+```bash
+python start.py --list-profiles
+python start.py --profile development --check
+python start.py --profile development --print-config
+```
+
+## Configuration
+
+The main runtime bootstrap order is:
+
+```text
+CLI flags -> shell environment -> env file -> runtime profile template -> code defaults
+```
+
+Common configurable paths:
+
+- `COGNITIVE_MEMORY_ROOT`
+- `COGNITIVE_WEBAPP_DIR`
+- `COGNITIVE_WEBAPP_DIST_DIR`
+- `LOCAL_MODELS_DIR`
+- `LOCAL_*_GGUF_MODEL`
+
+Paths are repo-relative unless made absolute, which keeps local deployment reproducible even when the process is launched from another directory.
+
+## Documentation
+
+Deployment and startup details are documented in [runtime_profiles.md](/home/karapet/agent_project/docs/runtime_profiles.md) and [runtime_flow.md](/home/karapet/agent_project/docs/runtime_flow.md).
 
 ## Tests
 

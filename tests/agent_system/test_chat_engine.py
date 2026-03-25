@@ -37,6 +37,11 @@ def test_chat_engine_spawns_head_updates_emotions_and_learns_reaction(tmp_path, 
     assert bundle.emotion_vector['curiosity'] > 0.55
     assert result['analysis']['user_state']['intent'] == 'question'
     assert result['analysis']['situation']['type'] == 'neutral_query'
+    assert result['persona_selection']['persona_name'] == 'Dracula'
+    assert result['persona_selection']['source'] == 'explicit_selection'
+    assert result['persona_response']['persona_name'] == 'Dracula'
+    assert str(result['persona_response']['response_style']).strip()
+    assert result['persona_response']['state_influences']
     payload = json.loads((tmp_path / 'memory' / 'heads' / 'dracula' / 'examples.json').read_text(encoding='utf-8'))
     assert 'I answer in the first person as Dracula.' not in payload['examples']
     assert payload['situation_reactions']
@@ -206,6 +211,8 @@ def test_user_anger_triggers_personality_dependent_reaction(tmp_path, monkeypatc
     assert first['analysis']['situation']['type'] == 'user_anger'
     assert second['analysis']['situation']['type'] == 'user_anger'
     assert aggressive.emotion_vector['anger'] > calm.emotion_vector['anger']
+    assert first['persona_response']['response_style'] in {'assertive', 'defensive', 'firm_boundary', 'steady'}
+    assert second['persona_response']['response_style'] in {'de_escalating', 'measured_support', 'steady', 'supportive'}
 
 
 def test_user_distress_can_increase_persona_empathy(tmp_path, monkeypatch) -> None:

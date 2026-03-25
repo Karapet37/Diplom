@@ -125,6 +125,12 @@ def _chat_role(*, persona_selected: bool = False) -> str:
     return config.chat
 
 
+def chat_runtime_available(*, persona_selected: bool = False) -> bool:
+    role = _chat_role(persona_selected=persona_selected)
+    n_ctx, max_tokens = _mode_defaults('chat', role=role)
+    return _provider(role=role, n_ctx=n_ctx, max_tokens=max_tokens) is not None
+
+
 def fallback_chat_reply(*, language: str = 'en', persona_selected: bool = False) -> str:
     if persona_selected:
         if str(language or 'en').lower().startswith('ru'):

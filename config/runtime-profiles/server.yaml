@@ -1,0 +1,17 @@
+profile: server
+description: Server-oriented profile with network binding, combined app routing, persistent runtime paths, and production-like defaults.
+env:
+  WEB_HOST: 0.0.0.0
+  WEB_PORT: "8008"
+  COGNITIVE_MEMORY_ROOT: runtime/server/memory
+  COGNITIVE_ENABLE_FRONTEND_ROOT: "1"
+  COGNITIVE_ENABLE_FRONTEND_ASSETS: "1"
+  COGNITIVE_ENABLE_BACKGROUND_REBUILD: "1"
+  COGNITIVE_MAX_CONTEXT_TOKENS: "4000"
+  COGNITIVE_GRAPH_SUBGRAPH_LIMIT: "12"
+  COGNITIVE_BACKGROUND_REBUILD_INTERVAL: "6"
+  COGNITIVE_CHAT_ROLE: analyst
+  COGNITIVE_EXTRACTION_ROLE: analyst
+  COGNITIVE_PERSONA_ROLE: analyst
+  COGNITIVE_RETHINK_ROLE: analyst
+  COGNITIVE_TRANSLATION_ROLE: translator
