@@ -6,6 +6,7 @@ from collections import Counter, defaultdict
 from typing import Any, Protocol
 
 from .dialogue_cases import FALLBACK_PATTERNS
+from .evolution_metrics import evaluate_evolution_layers
 from .models import DialogueObservation, StartupDiagnosis
 from .persona_fixture import CanonicalTestPersona
 
@@ -23,12 +24,17 @@ class RealismJudge(Protocol):
 
 GENERIC_LEAK_MARKERS = [
     'as an ai',
+    'as an llm',
+    'as a language model',
     'how can i assist',
     'i am here to help',
     'i do not have enough reliable context yet',
     'i will answer in first person from the current persona graph and emotional state',
     'i cannot browse',
     'i cannot provide',
+    'i do not have a body',
+    'i do not have personal experiences',
+    'i cannot have children',
     'helpful assistant',
 ]
 
@@ -262,12 +268,14 @@ def evaluate_realism(
     persona_endpoint: dict[str, Any] | None,
     dialogue_observations: list[DialogueObservation],
     diagnostics: dict[str, Any],
+    advanced_results: dict[str, Any] | None = None,
     judge: RealismJudge | None = None,
 ) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     latency_values: list[float] = []
     timeout_count = 0
     contradiction_count = 0
+    exploratory_failure_count = 0
     suspicious_patterns: list[str] = []
     major_failures: list[str] = []
 
@@ -330,6 +338,8 @@ def evaluate_realism(
             suspicious_patterns.append(f"{case.case_id}: forbidden pattern -> {', '.join(forbidden_hits)}")
         if leakage_hits:
             suspicious_patterns.append(f"{case.case_id}: leakage -> {', '.join(leakage_hits)}")
+        if case.category == 'exploratory' and (forbidden_hits or leakage_hits or fidelity < 0.3):
+            exploratory_failure_count += 1
 
         results.append(
             {
@@ -409,6 +419,7 @@ def evaluate_realism(
     memory_continuity_score = _safe_mean(memory_continuity_cases)
     decision_authenticity_score = _safe_mean([item['decision_authenticity'] for item in results])
     generic_llm_leakage_score = _safe_mean([item['generic_leakage_badness'] for item in results])
+    exploratory_results = [item for item in results if item['category'] == 'exploratory']
 
     average_latency_ms = _safe_mean(latency_values)
     max_latency_ms = max(latency_values) if latency_values else 0.0
@@ -434,6 +445,12 @@ def evaluate_realism(
         major_failures.append('Generic assistant leakage is too high.')
     if results and memory_continuity_score < 0.25:
         suspicious_patterns.append('Session continuity is weak or missing on explicit follow-up prompts.')
+    if exploratory_results and exploratory_failure_count:
+        suspicious_patterns.append(
+            f'Exploratory prompts exposed {exploratory_failure_count} persona-collapse case(s) outside the fixed benchmark.'
+        )
+    if exploratory_results and exploratory_failure_count >= max(1, len(exploratory_results) // 2):
+        major_failures.append('Persona collapses too often on exploratory prompts outside the scripted benchmark.')
     if average_latency_ms > 5000:
         suspicious_patterns.append(f'Average latency is high ({average_latency_ms:.1f} ms).')
     if diagnostics.get('runtime_status', {}).get('mode') == 'degraded':
@@ -461,6 +478,8 @@ def evaluate_realism(
         recommendations.append('Tighten fallback triggers and persona-response shaping. The system still leaks generic assistant phrasing.')
     if results and memory_continuity_score < 0.4:
         recommendations.append('Inspect session-memory selection and recency scoring. Cross-turn recall is not consistently visible in replies.')
+    if exploratory_results and exploratory_failure_count:
+        recommendations.append('Expand persona-shaping checks with less-scripted prompts. The persona still collapses on exploratory or counterfactual questions.')
     if results and average_latency_ms > 4000:
         recommendations.append('Reduce hot-path context load or model startup overhead. Latency is too high for an operator-facing local workflow.')
     if startup.startup_success and not frontend_reachable:
@@ -472,6 +491,8 @@ def evaluate_realism(
         'case_count': len(results),
         'successful_response_count': sum(1 for item in results if item['status_code'] == 200),
         'fallback_like_count': sum(1 for item in results if _fallback_detected(item['reply'])),
+        'exploratory_case_count': len(exploratory_results),
+        'exploratory_failure_count': exploratory_failure_count,
     }
     score_explanations = {
         'infrastructure_status': _infrastructure_explanation(
@@ -506,6 +527,9 @@ def evaluate_realism(
         'decision_authenticity': (
             f"Decision authenticity is `{_metric_band(decision_authenticity_score)}` because the evaluator checks for values, boundaries, "
             'and scenario-specific practical reasoning instead of generic moralizing.'
+        ),
+        'exploratory_resilience': (
+            f'Exploratory resilience recorded {exploratory_failure_count} failure case(s) across {len(exploratory_results)} less-scripted prompts.'
         ),
     }
     metric_breakdowns = {
@@ -553,6 +577,11 @@ def evaluate_realism(
             'band': _metric_band(decision_authenticity_score),
             'average_value_hits': round(_safe_mean([len(item['trait_hits']) for item in results]), 4),
         },
+        'exploratory_resilience': {
+            'case_count': len(exploratory_results),
+            'failure_count': exploratory_failure_count,
+            'failure_rate': round(exploratory_failure_count / max(len(exploratory_results), 1), 4) if exploratory_results else 0.0,
+        },
     }
     judge_evaluation = _run_optional_judge(
         judge,
@@ -562,6 +591,66 @@ def evaluate_realism(
         dialogue_results=results,
         diagnostics=diagnostics,
     )
+    advanced_enabled = bool(advanced_results) or any(
+        str(item.get('category') or '') in {
+            'unexpected_rare',
+            'unseen_generalization',
+            'memory_injection',
+            'persona_evolution',
+            'memory_deletion',
+            'graph_editor',
+            'contradiction_resistance',
+            'identity_continuity',
+            'chaos',
+        }
+        for item in results
+    )
+    evolution_metrics = {'enabled': False}
+    if advanced_enabled:
+        evolution_metrics = evaluate_evolution_layers(
+            advanced_results=advanced_results,
+            dialogue_results=results,
+        )
+        evolution_metrics['enabled'] = True
+        suspicious_patterns.extend(list(evolution_metrics.get('suspicious_patterns') or []))
+        recommendations.extend(list(evolution_metrics.get('engineering_recommendations') or []))
+        metric_breakdowns['adaptation_quality'] = dict(dict(evolution_metrics.get('metric_breakdowns') or {}).get('adaptation_quality') or {})
+        metric_breakdowns['memory_usage'] = dict(dict(evolution_metrics.get('metric_breakdowns') or {}).get('memory_usage') or {})
+        metric_breakdowns['system_stability'] = dict(dict(evolution_metrics.get('metric_breakdowns') or {}).get('system_stability') or {})
+        score_explanations['adaptation_quality'] = (
+            f"Adaptation quality is `{_metric_band(float(evolution_metrics.get('adaptation_quality_score') or 0.0))}` because it averages how well the persona absorbs unseen prompts, memory injections, local evolution, and graph edits."
+        )
+        score_explanations['memory_usage'] = (
+            f"Memory usage is `{_metric_band(float(evolution_metrics.get('memory_usage_score') or 0.0))}` because injected facts must later appear in reasoning and disappear again after deletion or restore."
+        )
+        score_explanations['identity_continuity'] = (
+            f"Identity continuity is `{_metric_band(float(evolution_metrics.get('identity_continuity_score') or 0.0))}` because the persona must stay recognizably the same person after mutations."
+        )
+        score_explanations['system_stability'] = (
+            f"System stability is `{_metric_band(float(evolution_metrics.get('system_stability_score') or 0.0))}` because mutation paths, cleanup, and post-suite health checks all stay in the loop."
+        )
+        if float(evolution_metrics.get('adaptation_quality_score') or 0.0) < 0.35:
+            major_failures.append('Adaptive scenarios show weak transfer: the persona does not generalize well after live mutations.')
+        if float(evolution_metrics.get('memory_usage_score') or 0.0) < 0.35:
+            major_failures.append('Memory lifecycle is weak: injected or deleted persona state is not reflected cleanly in later replies.')
+        if float(evolution_metrics.get('identity_continuity_score') or 0.0) < 0.35:
+            major_failures.append('Identity continuity degraded after local mutations.')
+        if float(evolution_metrics.get('system_stability_score') or 0.0) < 0.55:
+            major_failures.append('Mutation paths or post-mutation runtime health are too unstable.')
+
+        if overall_verdict == 'persona_alive_and_believable':
+            if (
+                float(evolution_metrics.get('adaptation_quality_score') or 0.0) < 0.6
+                or float(evolution_metrics.get('identity_continuity_score') or 0.0) < 0.6
+                or float(evolution_metrics.get('memory_usage_score') or 0.0) < 0.5
+            ):
+                overall_verdict = 'persona_partially_alive_but_uneven'
+        elif overall_verdict == 'persona_partially_alive_but_uneven':
+            if (
+                float(evolution_metrics.get('adaptation_quality_score') or 0.0) < 0.35
+                or float(evolution_metrics.get('system_stability_score') or 0.0) < 0.5
+            ):
+                overall_verdict = 'generic_assistant_drift_or_degraded_runtime'
 
     return {
         'infrastructure_status': infrastructure_status,
@@ -580,9 +669,10 @@ def evaluate_realism(
         'overall_verdict': overall_verdict,
         'major_failures': list(dict.fromkeys(major_failures)),
         'suspicious_patterns': list(dict.fromkeys(suspicious_patterns)),
-        'engineering_recommendations': recommendations,
+        'engineering_recommendations': list(dict.fromkeys(recommendations)),
         'dialogue_results': results,
         'dialogue_summary': dialogue_summary,
+        'advanced_metrics': evolution_metrics,
         'persona_endpoint_visible': bool(persona_endpoint),
         'persona_materialization_ok': bool(persona_materialization.get('ok')),
         'diagnostic_counters': dict(diagnostics.get('metrics', {}).get('counters') or {}),

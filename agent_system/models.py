@@ -284,6 +284,145 @@ class PersonaResponseExplanation:
 
 
 @dataclass(slots=True)
+class SocialRoleDecision:
+    role: str = 'ally'
+    confidence: float = 0.0
+    reason: str = ''
+    evidence: list[str] = field(default_factory=list)
+    graph_anchors: list[str] = field(default_factory=list)
+    mood_signals: dict[str, float] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'role': self.role,
+            'confidence': round(float(self.confidence or 0.0), 6),
+            'reason': self.reason,
+            'evidence': list(self.evidence),
+            'graph_anchors': list(self.graph_anchors),
+            'mood_signals': {
+                str(key): round(float(value or 0.0), 6)
+                for key, value in dict(self.mood_signals or {}).items()
+            },
+        }
+
+
+@dataclass(slots=True)
+class MoodFeatureSnapshot:
+    snapshot_id: str
+    session_id: str
+    persona_name: str
+    source: str
+    language: str
+    user_features: dict[str, float] = field(default_factory=dict)
+    persona_features: dict[str, float] = field(default_factory=dict)
+    combined_features: dict[str, float] = field(default_factory=dict)
+    selected_role: str = ''
+    response_style: str = ''
+    situation_type: str = ''
+    summary: str = ''
+    created_at: str = ''
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'snapshot_id': self.snapshot_id,
+            'session_id': self.session_id,
+            'persona_name': self.persona_name,
+            'source': self.source,
+            'language': self.language,
+            'user_features': {
+                str(key): round(float(value or 0.0), 6)
+                for key, value in dict(self.user_features or {}).items()
+            },
+            'persona_features': {
+                str(key): round(float(value or 0.0), 6)
+                for key, value in dict(self.persona_features or {}).items()
+            },
+            'combined_features': {
+                str(key): round(float(value or 0.0), 6)
+                for key, value in dict(self.combined_features or {}).items()
+            },
+            'selected_role': self.selected_role,
+            'response_style': self.response_style,
+            'situation_type': self.situation_type,
+            'summary': self.summary,
+            'created_at': self.created_at,
+        }
+
+
+@dataclass(slots=True)
+class MoodCluster:
+    cluster_id: str
+    label: str
+    centroid: dict[str, float] = field(default_factory=dict)
+    feature_peaks: list[str] = field(default_factory=list)
+    size: int = 0
+    examples: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'cluster_id': self.cluster_id,
+            'label': self.label,
+            'centroid': {
+                str(key): round(float(value or 0.0), 6)
+                for key, value in dict(self.centroid or {}).items()
+            },
+            'feature_peaks': list(self.feature_peaks),
+            'size': int(self.size or 0),
+            'examples': list(self.examples),
+        }
+
+
+@dataclass(slots=True)
+class MoodResearchReport:
+    scope: str
+    snapshot_count: int = 0
+    latest_language: str = 'en'
+    latest_cluster_id: str = ''
+    latest_cluster_label: str = ''
+    clusters: list[MoodCluster] = field(default_factory=list)
+    transition_counts: list[dict[str, Any]] = field(default_factory=list)
+    classification: dict[str, Any] = field(default_factory=dict)
+    regressions: list[dict[str, Any]] = field(default_factory=list)
+    role_effects: list[dict[str, Any]] = field(default_factory=list)
+    updated_at: str = ''
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'scope': self.scope,
+            'snapshot_count': int(self.snapshot_count or 0),
+            'latest_language': self.latest_language,
+            'latest_cluster_id': self.latest_cluster_id,
+            'latest_cluster_label': self.latest_cluster_label,
+            'clusters': [item.to_dict() for item in list(self.clusters or [])],
+            'transition_counts': [dict(item) for item in list(self.transition_counts or [])],
+            'classification': dict(self.classification or {}),
+            'regressions': [dict(item) for item in list(self.regressions or [])],
+            'role_effects': [dict(item) for item in list(self.role_effects or [])],
+            'updated_at': self.updated_at,
+        }
+
+
+@dataclass(slots=True)
+class PersonaGraphExplanation:
+    persona_name: str
+    summary: str
+    central_nodes: list[str] = field(default_factory=list)
+    peripheral_nodes: list[str] = field(default_factory=list)
+    conflict_nodes: list[str] = field(default_factory=list)
+    causal_links: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'persona_name': self.persona_name,
+            'summary': self.summary,
+            'central_nodes': list(self.central_nodes),
+            'peripheral_nodes': list(self.peripheral_nodes),
+            'conflict_nodes': list(self.conflict_nodes),
+            'causal_links': list(self.causal_links),
+        }
+
+
+@dataclass(slots=True)
 class PersonaSystemModel:
     T: dict[str, Any]
     E: dict[str, float]
@@ -531,6 +670,7 @@ class ChatSideEffects:
 @dataclass(slots=True)
 class ChatTurnResult:
     assistant_reply: str
+    response_language: str
     session_id: str
     session: dict[str, Any]
     persona_name: str
@@ -544,6 +684,9 @@ class ChatTurnResult:
     side_effects: ChatSideEffects = field(default_factory=ChatSideEffects)
     persona_selection: PersonaSelectionExplanation = field(default_factory=PersonaSelectionExplanation)
     persona_response: PersonaResponseExplanation = field(default_factory=PersonaResponseExplanation)
+    social_role: SocialRoleDecision = field(default_factory=SocialRoleDecision)
+    mood_research: dict[str, Any] = field(default_factory=dict)
+    behavior_trace: dict[str, Any] = field(default_factory=dict)
     context_preview: dict[str, Any] = field(default_factory=dict)
     runtime_status: dict[str, Any] = field(default_factory=dict)
     operator_messages: list[str] = field(default_factory=list)
@@ -551,6 +694,7 @@ class ChatTurnResult:
     def to_dict(self, *, include_side_effects: bool = True) -> dict[str, Any]:
         payload = {
             'assistant_reply': self.assistant_reply,
+            'response_language': self.response_language,
             'session_id': self.session_id,
             'trace_id': self.trace_id,
             'session': dict(self.session),
@@ -571,6 +715,9 @@ class ChatTurnResult:
             'proposal_requested': self.proposal_requested,
             'persona_selection': self.persona_selection.to_dict(),
             'persona_response': self.persona_response.to_dict(),
+            'social_role': self.social_role.to_dict(),
+            'mood_research': dict(self.mood_research),
+            'behavior_trace': dict(self.behavior_trace),
             'context_preview': dict(self.context_preview),
             'runtime_status': dict(self.runtime_status),
             'operator_messages': list(self.operator_messages),

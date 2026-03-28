@@ -162,6 +162,11 @@ class RuntimePaths:
     archive_heads_dir: Path
     archive_graphs_dir: Path
     archive_files_dir: Path
+    mood_research_dir: Path
+    mood_datasets_dir: Path
+    mood_personas_dir: Path
+    mood_sessions_dir: Path
+    mood_reports_dir: Path
     webapp_dir: Path
     webapp_dist_dir: Path
     webapp_assets_dir: Path
@@ -259,12 +264,12 @@ class RuntimeConfig:
         mode_key = str(mode or 'chat').strip().lower()
         role_key = str(role or self.roles.chat).strip().lower()
         if mode_key == 'translation':
-            return 1024, 384
+            return 896, 160
         if mode_key == 'knowledge':
-            return (1536, 700) if role_key == 'analyst' else (2048, 800)
+            return (1152, 288) if role_key == 'analyst' else (1280, 352)
         if mode_key == 'chat':
-            return (1536, 640) if role_key == 'analyst' else (2048, 768)
-        return 1536, 700
+            return (1024, 80) if role_key == 'analyst' else (1152, 64)
+        return 1152, 288
 
     def max_context_attempts_for_role(self, role: str) -> int:
         role_key = str(role or '').strip().lower()
@@ -414,6 +419,11 @@ def get_runtime_config() -> RuntimeConfig:
         archive_heads_dir=memory_root / 'archive' / 'heads',
         archive_graphs_dir=memory_root / 'archive' / 'graphs',
         archive_files_dir=memory_root / 'archive' / 'files',
+        mood_research_dir=memory_root / 'mood_research',
+        mood_datasets_dir=memory_root / 'mood_research' / 'datasets',
+        mood_personas_dir=memory_root / 'mood_research' / 'personas',
+        mood_sessions_dir=memory_root / 'mood_research' / 'sessions',
+        mood_reports_dir=memory_root / 'mood_research' / 'reports',
         webapp_dir=webapp_dir,
         webapp_dist_dir=webapp_dist_dir,
         webapp_assets_dir=webapp_dist_dir / 'assets',
@@ -505,6 +515,11 @@ def get_runtime_config() -> RuntimeConfig:
         paths.archive_heads_dir,
         paths.archive_graphs_dir,
         paths.archive_files_dir,
+        paths.mood_research_dir,
+        paths.mood_datasets_dir,
+        paths.mood_personas_dir,
+        paths.mood_sessions_dir,
+        paths.mood_reports_dir,
     ):
         path.mkdir(parents=True, exist_ok=True)
     return RuntimeConfig(

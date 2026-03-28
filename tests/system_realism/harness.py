@@ -5,12 +5,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from .dialogue_cases import canonical_dialogue_cases
+from .advanced_harness import run_advanced_realism_suite
 from .evaluator import evaluate_realism
 from .models import DialogueObservation, RealismRunConfig
 from .persona_fixture import canonical_test_persona, materialize_canonical_persona
 from .reporting import create_report_run_dir, write_json_report, write_markdown_report, write_text_artifact
 from .runtime_launcher import RuntimeLauncher, choose_free_port
+from .scenario_generators import baseline_dialogue_cases_for_suite
 
 
 def _repo_root() -> Path:
@@ -103,6 +104,7 @@ def run_realism_suite(config: RealismRunConfig) -> dict[str, Any]:
     reachability: dict[str, Any] = {}
     persona_endpoint: dict[str, Any] | None = None
     session_id = f'system-realism-{config.report_tag}'
+    advanced_results: dict[str, Any] = {}
 
     try:
         launcher.start()
@@ -119,7 +121,11 @@ def run_realism_suite(config: RealismRunConfig) -> dict[str, Any]:
         }
 
         if startup.startup_success:
-            cases = canonical_dialogue_cases()
+            cases = baseline_dialogue_cases_for_suite(
+                suite=config.suite,
+                exploratory_seed=config.exploratory_seed,
+                exploratory_count=config.exploratory_case_count,
+            )
             for case in cases:
                 payload = {
                     'session_id': session_id,
@@ -131,6 +137,21 @@ def run_realism_suite(config: RealismRunConfig) -> dict[str, Any]:
                 if response.ok and isinstance(response.json_body, dict):
                     reachability['chat_alive'] = True
                 observations.append(DialogueObservation(case=case, request_payload=payload, response=response))
+
+            if str(config.suite or 'core').strip().lower() in {'core', 'advanced', 'full'}:
+                advanced_results = run_advanced_realism_suite(
+                    config=config,
+                    launcher=launcher,
+                    persona=persona,
+                    memory_root=memory_root,
+                    report_tag=config.report_tag,
+                )
+                observations.extend(list(advanced_results.get('dialogue_observations') or []))
+                if observations:
+                    reachability['chat_alive'] = reachability['chat_alive'] or any(
+                        item.response.ok and isinstance(item.response.json_body, dict)
+                        for item in list(advanced_results.get('dialogue_observations') or [])
+                    )
 
             diagnostics = _collect_runtime_diagnostics(launcher)
             persona_endpoint = _collect_persona_endpoint(launcher, persona.slug)
@@ -148,14 +169,22 @@ def run_realism_suite(config: RealismRunConfig) -> dict[str, Any]:
         persona_endpoint=persona_endpoint,
         dialogue_observations=observations,
         diagnostics=diagnostics,
+        advanced_results=advanced_results,
     )
     report_payload = {
         'run': {
             'profile': config.profile,
             'host': host,
             'port': port,
+            'suite': config.suite,
             'api_only': bool(config.api_only),
             'strict': bool(config.strict),
+            'exploratory_case_count': int(config.exploratory_case_count),
+            'exploratory_seed': int(config.exploratory_seed),
+            'unexpected_case_count': int(config.unexpected_case_count),
+            'generalization_case_count': int(config.generalization_case_count),
+            'mutation_subset': str(config.mutation_subset or 'smoke'),
+            'include_chaos': bool(config.include_chaos),
             'memory_root': str(memory_root),
             'output_dir': str(run_dir),
         },
@@ -164,6 +193,11 @@ def run_realism_suite(config: RealismRunConfig) -> dict[str, Any]:
         'persona_materialization': persona_record.to_dict(),
         'persona_endpoint': persona_endpoint or {},
         'dialogues': [item.to_dict() for item in observations],
+        'advanced_results': {
+            key: value
+            for key, value in dict(advanced_results or {}).items()
+            if key != 'dialogue_observations'
+        },
         'diagnostics': diagnostics,
         'evaluation': evaluation,
     }

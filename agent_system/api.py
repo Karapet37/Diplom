@@ -15,10 +15,13 @@ from .graph_localizer import localized_node_view
 from .observability import get_observability_store
 from .graph_store import GraphStore
 from .history_store import create_session, list_sessions, parse_session
+from .llm import prewarm_runtime_models_async
+from .mood_research import analyze_mood_research, load_mood_report
 from .reliability import RuntimeFailure, operator_messages_from_status, runtime_status_snapshot
 from .runtime_config import get_runtime_config
 from .node_rethinker import rethink_graph_nodes
 from .persona_engine import (
+    explain_persona_graph,
     formalize_persona,
     list_persona_revisions,
     list_personas,
@@ -325,6 +328,8 @@ def create_router() -> APIRouter:
         if bundle is None:
             raise HTTPException(status_code=404, detail='Head not found')
         model = formalize_persona(bundle)
+        graph_explanation = explain_persona_graph(name)
+        mood_report = load_mood_report(persona_name=name) or analyze_mood_research(persona_name=name)
         return {
             'name': bundle.name,
             'entity_type': bundle.entity_type,
@@ -351,7 +356,16 @@ def create_router() -> APIRouter:
             'indicators': bundle.indicators.to_dict() if bundle.indicators is not None else {},
             'revisions': dict(bundle.revision_meta),
             'meta': bundle.meta,
+            'graph_explanation': graph_explanation.to_dict() if graph_explanation is not None else {},
+            'mood_research': mood_report.to_dict(),
         }
+
+    @router.get('/personalities/{name}/graph-explanation')
+    def personality_graph_explanation_endpoint(name: str) -> dict[str, Any]:
+        explanation = explain_persona_graph(name)
+        if explanation is None:
+            raise HTTPException(status_code=404, detail='Head not found')
+        return {'ok': True, 'graph_explanation': explanation.to_dict()}
 
     @router.get('/personalities/{name}/revisions')
     def personality_revisions_endpoint(name: str) -> dict[str, Any]:
@@ -392,6 +406,14 @@ def create_router() -> APIRouter:
     def rebuild_endpoint(request: RebuildRequest) -> dict[str, Any]:
         return rebuild_artifacts(request.session_id, personality_name=request.personality_name)
 
+    @router.get('/mood/research')
+    def mood_research_endpoint(persona_name: str = '', session_id: str = '') -> dict[str, Any]:
+        report = load_mood_report(persona_name=persona_name, session_id=session_id) or analyze_mood_research(
+            persona_name=persona_name,
+            session_id=session_id,
+        )
+        return {'ok': True, 'report': report.to_dict()}
+
     return router
 
 
@@ -414,6 +436,10 @@ def create_app() -> FastAPI:
 
     if feature_flags.enable_frontend_assets and assets_dir.exists() and not any(getattr(route, 'path', None) == '/assets' for route in app.routes):
         app.mount('/assets', StaticFiles(directory=assets_dir), name='assets')
+
+    @app.on_event('startup')
+    async def _startup_prewarm() -> None:
+        prewarm_runtime_models_async()
 
     @app.get('/api/health')
     def api_health() -> dict[str, Any]:

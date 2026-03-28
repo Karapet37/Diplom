@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from .language_tools import language_label, normalize_language_code
+from .semantic_routing import infer_semantic_focus, render_semantic_focus_guidance
 
 
 def _truncate_tokens_equivalent(text: str, max_tokens_equivalent: int) -> str:
@@ -14,30 +15,60 @@ def _truncate_tokens_equivalent(text: str, max_tokens_equivalent: int) -> str:
     return raw[:max_chars].strip() if len(raw) > max_chars else raw
 
 
+def _reply_shape_guidance(question: str) -> list[str]:
+    normalized = ' '.join(str(question or '').strip().lower().split())
+    if not normalized:
+        return ['Keep the reply brief by default: 2 to 4 sentences unless the user explicitly asks for detail.']
+    if any(marker in normalized for marker in ('one sentence', 'single sentence')):
+        return ['Reply in exactly one sentence.']
+    if any(marker in normalized for marker in ('two sentences', '2 sentences', 'two short sentences', '2 short sentences')):
+        return ['Reply in exactly two short sentences.']
+    if any(marker in normalized for marker in ('briefly', 'brief', 'short answer', 'concise', 'in short')):
+        return ['Keep the reply concise: no more than 3 short sentences.']
+    if any(marker in normalized for marker in ('in detail', 'detailed', 'walk me through', 'long answer', 'explain fully')):
+        return ['The user explicitly wants depth. Give a fuller answer, but stay concrete and in character.']
+    return ['Keep the reply brief by default: 2 to 4 sentences unless the user explicitly asks for detail.']
+
+
 def build_chat_prompt(
     *,
     question: str,
+    internal_question: str = '',
     persona_block: str = '',
+    social_role_block: str = '',
+    mood_research_block: str = '',
     graph_context: str = '',
     recent_dialogue: str = '',
     language: str = 'en',
+    semantic_focus: dict[str, Any] | None = None,
 ) -> str:
     reply_language = language_label(normalize_language_code(language, fallback='en'))
+    effective_focus = dict(semantic_focus or infer_semantic_focus(question=str(internal_question or question or '')))
     blocks = [
         f'Respond in {reply_language}.',
-        'Stay in first person when a persona head is provided.',
-        'Use the emotional state, traits, relations, and learned situation reactions when relevant.',
-        'Use the structured situation context and never mirror the user emotion directly.',
-        'If the graph context is sparse or insufficient, explicitly say that you lack reliable context instead of inventing facts.',
-        'Do not output JSON.',
+        'Answer as the persona in first person, not as an assistant or helpdesk.',
+        'The persona is the speaker and the user is speaking to that person.',
+        'Answer the user question directly and concretely before adding any extra explanation.',
+        *_reply_shape_guidance(question),
+        'Prefer lived biography, work habits, relations, values, and memory anchors over slogans.',
+        'Use the selected social role and the current situation without mirroring the user emotion directly.',
+        'Stay inside known persona facts; if a fact is uncertain, say so plainly instead of inventing a new identity.',
+        'Use graph context only as support. If it conflicts with persona identity, prefer the persona block.',
+        'Do not output analysis, hidden reasoning, `<think>` tags, system notes, prompt commentary, or JSON.',
+        'Do not mention being an AI, assistant, language model, system, or following instructions.',
     ]
+    blocks.extend(render_semantic_focus_guidance(effective_focus))
+    blocks.extend(['User question:', _truncate_tokens_equivalent(str(question or '').strip(), 420)])
     if persona_block:
-        blocks.extend(['Persona head:', _truncate_tokens_equivalent(persona_block, 1150)])
+        blocks.extend(['Persona head:', _truncate_tokens_equivalent(persona_block, 760)])
+    if social_role_block:
+        blocks.extend(['Interaction role:', _truncate_tokens_equivalent(social_role_block, 120)])
+    if mood_research_block:
+        blocks.extend(['Mood research:', _truncate_tokens_equivalent(mood_research_block, 96)])
     if graph_context:
-        blocks.extend(['Knowledge graph:', _truncate_tokens_equivalent(graph_context, 1600)])
+        blocks.extend(['Knowledge graph:', _truncate_tokens_equivalent(graph_context, 520)])
     if recent_dialogue:
-        blocks.extend(['Recent dialogue:', _truncate_tokens_equivalent(recent_dialogue, 650)])
-    blocks.extend(['User question:', _truncate_tokens_equivalent(str(question or '').strip(), 900)])
+        blocks.extend(['Recent dialogue:', _truncate_tokens_equivalent(recent_dialogue, 220)])
     return '\n\n'.join(block for block in blocks if str(block).strip())
 
 

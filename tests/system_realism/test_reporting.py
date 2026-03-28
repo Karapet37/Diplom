@@ -9,8 +9,13 @@ def _sample_payload(startup_success: bool) -> dict:
     return {
         'run': {
             'profile': 'local-demo',
+            'suite': 'core',
             'host': '127.0.0.1',
             'port': 8123,
+        },
+        'advanced_results': {
+            'mutation_summary': {'setup_action_count': 4, 'setup_failures': 0, 'cleanup_action_count': 1, 'cleanup_failures': 0, 'chaos_enabled': False},
+            'post_suite_health': {'ok': startup_success, 'status_code': 200 if startup_success else 0, 'latency_ms': 14.2 if startup_success else 0.0},
         },
         'startup': {
             'startup_success': startup_success,
@@ -55,12 +60,25 @@ def _sample_payload(startup_success: bool) -> dict:
             'decision_authenticity_score': 0.81 if startup_success else 0.0,
             'generic_llm_leakage_score': 0.11 if startup_success else 0.0,
             'contradiction_count': 0,
+            'advanced_metrics': {
+                'adaptation_quality_score': 0.74 if startup_success else 0.0,
+                'memory_usage_score': 0.68 if startup_success else 0.0,
+                'contradiction_handling_score': 0.79 if startup_success else 0.0,
+                'identity_continuity_score': 0.71 if startup_success else 0.0,
+                'system_stability_score': 0.86 if startup_success else 0.0,
+                'mutation_success_rate': 1.0 if startup_success else 0.0,
+                'scenario_findings': [{'scenario_id': 'memory_injection_unique_tool', 'category': 'memory_injection', 'setup_ok': True, 'cleanup_ok': True, 'probe_count': 1, 'stale_markers': []}] if startup_success else [],
+                'mutation_summary': {'setup_action_count': 4, 'setup_failures': 0, 'cleanup_action_count': 1, 'cleanup_failures': 0, 'chaos_enabled': False},
+                'post_suite_health': {'ok': startup_success, 'status_code': 200 if startup_success else 0, 'latency_ms': 14.2 if startup_success else 0.0},
+                'suspicious_patterns': [] if startup_success else ['Deleted persona memories still leaked into replies.'],
+            },
             'major_failures': ['Backend did not start through the real runtime entrypoint.'] if not startup_success else [],
             'suspicious_patterns': ['Runtime reports degraded mode during the realism run.'] if not startup_success else [],
             'engineering_recommendations': ['Inspect startup logs first. The realism harness could not reach a live backend through start.py.'] if not startup_success else ['Keep watching degraded-mode diagnostics and rerun realism after graph/persona changes. The system currently behaves like a living product.'],
             'score_explanations': {
                 'latency': 'Latency summary is based on live response timings.',
                 'persona_fidelity': 'Persona fidelity is strong because anchors and style markers are present.',
+                'adaptation_quality': 'Adaptation quality is acceptable because the persona changed under mutation without collapsing.',
             },
             'dialogue_results': [
                 {
@@ -107,6 +125,8 @@ def test_markdown_report_contains_engineering_sections_for_live_like_run() -> No
     assert '## Generic Assistant Leakage Analysis' in markdown
     assert '## Memory Continuity Analysis' in markdown
     assert '## Contradictions' in markdown
+    assert '## Adaptation And Evolution' in markdown
+    assert '## Memory And Graph Mutation Results' in markdown
     assert '## Final Verdict' in markdown
     assert '## Prioritized Recommendations' in markdown
 

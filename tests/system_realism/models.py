@@ -11,8 +11,17 @@ class RealismRunConfig:
     host: str = '127.0.0.1'
     port: int = 0
     startup_timeout_s: float = 40.0
-    request_timeout_s: float = 20.0
+    request_timeout_s: float = 90.0
     readiness_poll_interval_s: float = 0.4
+    suite: str = 'core'
+    exploratory_case_count: int = 6
+    exploratory_seed: int = 17
+    unexpected_case_count: int = 3
+    generalization_case_count: int = 3
+    mutation_subset: str = 'smoke'
+    include_chaos: bool = False
+    chaos_seed: int = 41
+    chaos_rounds: int = 1
     api_only: bool = False
     strict: bool = False
     memory_root: Path | None = None
@@ -141,4 +150,78 @@ class DialogueObservation:
             'case': self.case.to_dict(),
             'request_payload': dict(self.request_payload),
             'response': self.response.to_dict(),
+        }
+
+
+@dataclass(slots=True)
+class MutationAction:
+    action_id: str
+    action_type: str
+    description: str
+    payload: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'action_id': self.action_id,
+            'action_type': self.action_type,
+            'description': self.description,
+            'payload': dict(self.payload),
+        }
+
+
+@dataclass(slots=True)
+class MutationRecord:
+    action: MutationAction
+    ok: bool
+    latency_ms: float = 0.0
+    details: dict[str, Any] = field(default_factory=dict)
+    error: str = ''
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'action': self.action.to_dict(),
+            'ok': bool(self.ok),
+            'latency_ms': round(float(self.latency_ms or 0.0), 3),
+            'details': dict(self.details),
+            'error': self.error,
+        }
+
+
+@dataclass(slots=True)
+class EvolutionScenario:
+    scenario_id: str
+    category: str
+    description: str
+    setup_actions: list[MutationAction] = field(default_factory=list)
+    probe_cases: list[DialogueCase] = field(default_factory=list)
+    cleanup_actions: list[MutationAction] = field(default_factory=list)
+    rare: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'scenario_id': self.scenario_id,
+            'category': self.category,
+            'description': self.description,
+            'setup_actions': [item.to_dict() for item in self.setup_actions],
+            'probe_cases': [item.to_dict() for item in self.probe_cases],
+            'cleanup_actions': [item.to_dict() for item in self.cleanup_actions],
+            'rare': bool(self.rare),
+        }
+
+
+@dataclass(slots=True)
+class EvolutionScenarioObservation:
+    scenario: EvolutionScenario
+    setup_records: list[MutationRecord] = field(default_factory=list)
+    probe_observations: list[DialogueObservation] = field(default_factory=list)
+    cleanup_records: list[MutationRecord] = field(default_factory=list)
+    state_snapshot: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'scenario': self.scenario.to_dict(),
+            'setup_records': [item.to_dict() for item in self.setup_records],
+            'probe_observations': [item.to_dict() for item in self.probe_observations],
+            'cleanup_records': [item.to_dict() for item in self.cleanup_records],
+            'state_snapshot': dict(self.state_snapshot),
         }

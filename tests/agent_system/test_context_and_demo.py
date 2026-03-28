@@ -7,6 +7,7 @@ from agent_system.demo import run_demo
 from agent_system.graph_store import GraphStore, graph_nodes_path
 from agent_system.history_store import create_session
 from agent_system.persona_engine import materialize_persona
+from agent_system.prompt_builder import build_chat_prompt
 
 
 def test_context_builder_limits_budget_and_uses_persona_state(tmp_path, monkeypatch) -> None:
@@ -61,14 +62,107 @@ def test_context_builder_limits_budget_and_uses_persona_state(tmp_path, monkeypa
         situation={'type': 'neutral_query', 'target': 'persona', 'severity': 0.45},
     )
 
-    assert 'Emotion vector:' in built['persona_block']
-    assert 'Response style:' in built['persona_block']
-    assert 'Current situation: type=neutral_query; target=persona; severity=0.45.' in built['persona_block']
+    assert 'Current stance:' in built['persona_block']
+    assert 'Situation note:' in built['persona_block']
+    assert 'Response style:' not in built['persona_block']
+    assert 'Emotion vector:' not in built['persona_block']
     assert built['situation'] == 'type=neutral_query; target=persona; severity=0.45'
     assert 'logical' in built['persona_block']
     assert 'Leonard' in built['graph_context']
     assert built['estimated_tokens'] <= 4000
     assert built['recent_dialogue']
+
+
+def test_context_builder_surfaces_persona_identity_biography_and_anchors(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+
+    materialize_persona(
+        'Dr. Aram Petrosyan',
+        {
+            'entity_type': 'PERSON',
+            'traits': ['skeptical', 'precise', 'dryly humorous'],
+            'examples': ['Let us separate signal from noise.'],
+            'knowledge': 'Aram is an emergency physician and triage lead from Yerevan.',
+            'persona_form': {
+                'identity_class': 'human',
+                'biography': 'Aram Petrosyan is an emergency physician and triage lead from Yerevan who also rotates through rural clinics in Lori.',
+                'values': ['evidence over theater', 'protect the vulnerable first'],
+                'speech_style': ['concise', 'dryly humorous when tension rises', 'fact-first'],
+                'emotional_tendencies': ['steady under pressure', 'warmer with genuine distress'],
+                'trust_model': ['trust is earned through clarity, follow-through, and willingness to revise'],
+                'memory_anchors': ['steel watch from father', 'blue field notebook'],
+                'recurring_style_markers': ['Let us separate signal from noise.', 'I do not fake certainty.'],
+                'decision_patterns': ['stabilize risk first'],
+                'response_priorities': ['protect_people'],
+                'clarification_policy': 'Ask for the missing fact that would change the decision.',
+                'sarcasm_profile': 'low_to_medium',
+            },
+            'decision_explanation': 'Aram stabilizes risk first, then strips away noise before answering.',
+        },
+        explicit=True,
+    )
+    create_session('aram_identity', 'Aram Identity')
+
+    built = build_context(
+        question='Who are you and how do you think under pressure?',
+        session_id='aram_identity',
+        selected_persona='dr_aram_petrosyan',
+        situation={'type': 'neutral_query', 'target': 'persona', 'severity': 0.4},
+    )
+
+    assert built['context_debug']['question_focus'] == ['decision', 'identity']
+    assert 'Biography: Aram Petrosyan is an emergency physician' in built['persona_block']
+    assert 'Memory anchors: steel watch from father | blue field notebook.' in built['persona_block']
+    assert 'Recurring style markers: Let us separate signal from noise.' in built['persona_block']
+    assert 'Learned situation reactions:' not in built['persona_block']
+    assert 'Preferred reply shape' not in built['persona_block']
+
+
+def test_context_builder_prioritizes_work_profile_for_workday_questions(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+
+    materialize_persona(
+        'Dr. Aram Petrosyan',
+        {
+            'entity_type': 'PERSON',
+            'traits': ['skeptical', 'precise', 'dryly humorous'],
+            'knowledge': 'Aram is an emergency physician and triage lead from Yerevan.',
+            'relations': [
+                {'type': 'WORKS_IN', 'target': 'Emergency medicine'},
+                {'type': 'SPECIALIZES_IN', 'target': 'Triage'},
+                {'type': 'WORKS_WITH', 'target': 'Rural clinics'},
+                {'type': 'LIVES_IN', 'target': 'Yerevan'},
+            ],
+            'persona_form': {
+                'identity_class': 'human',
+                'biography': 'Aram Petrosyan is an emergency physician and triage lead based in Yerevan. He rotates through rural clinics in Lori.',
+                'work_habits': [
+                    'keeps a blue field notebook',
+                    'writes after hard shifts',
+                    'tracks near-misses and outcomes',
+                    'reviews what almost fooled him',
+                    'mentors new emergency residents during overnight shifts',
+                ],
+                'decision_patterns': ['stabilize risk first', 'separate signal from noise'],
+                'memory_anchors': ['steel watch from father', 'blue field notebook'],
+            },
+        },
+        explicit=True,
+    )
+    create_session('aram_workday', 'Aram Workday')
+
+    built = build_context(
+        question='What else is part of your working routine?',
+        session_id='aram_workday',
+        selected_persona='dr_aram_petrosyan',
+        situation={'type': 'neutral_query', 'target': 'persona', 'severity': 0.4},
+    )
+
+    assert built['context_debug']['question_focus'] == ['work']
+    assert 'Professional role:' in built['persona_block']
+    assert 'Daily work habits:' in built['persona_block']
+    assert 'Work structure:' in built['persona_block']
+    assert 'mentors new emergency residents during overnight shifts' in built['persona_block']
 
 
 def test_demo_runs_ingestion_then_persona_response(tmp_path, monkeypatch) -> None:
@@ -108,3 +202,21 @@ def test_demo_runs_ingestion_then_persona_response(tmp_path, monkeypatch) -> Non
     assert 'vampire' in result['assistant_reply'].lower()
     assert graph_nodes_path().exists()
     assert 'dracula' in graph_nodes_path().read_text(encoding='utf-8').lower()
+
+
+def test_build_chat_prompt_hardens_direct_persona_self_questions() -> None:
+    prompt = build_chat_prompt(
+        question='What does your normal working day look like?',
+        persona_block='You are Dr. Aram Petrosyan.',
+        graph_context='',
+        recent_dialogue='',
+        language='en',
+    )
+
+    assert 'This is a direct personal question about the persona.' in prompt
+    assert 'Because the user is asking about a normal day or work routine' in prompt
+    assert 'User question:' in prompt
+    assert prompt.index('User question:') < prompt.index('Persona head:')
+    assert 'Keep the reply brief by default: 2 to 4 sentences unless the user explicitly asks for detail.' in prompt
+    assert 'Do not output analysis, hidden reasoning, `<think>` tags, system notes, prompt commentary, or JSON.' in prompt
+    assert 'Do not mention being an AI, assistant, language model, system, or following instructions.' in prompt

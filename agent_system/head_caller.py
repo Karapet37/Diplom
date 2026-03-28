@@ -17,16 +17,24 @@ def prepare_heads(
     prepared: list[dict[str, Any]] = []
     selected_token = normalize_name(analysis.selected_head)
     for decision in classifications:
-        node = graph_store.upsert_entity(
-            name=decision.entity_name,
-            entity_type=decision.entity_type,
-            aliases=[],
-            description='',
-            confidence=decision.confidence,
-            source='chat',
+        is_selected_entity = bool(selected_token and normalize_name(decision.entity_name) == selected_token)
+        profession_head_allowed = decision.entity_type == 'PROFESSION' and (
+            is_selected_entity
+            or len(str(decision.entity_name or '').split()) >= 2
+            or load_persona(decision.entity_name) is not None
         )
-        allow_head = decision.entity_type in HEAD_ENTITY_TYPES or (
-            selected_token and normalize_name(decision.entity_name) == selected_token
+        allow_head = decision.entity_type in {'PERSON', 'FICTIONAL_CHARACTER'} or profession_head_allowed or is_selected_entity
+        node = (
+            graph_store.upsert_entity(
+                name=decision.entity_name,
+                entity_type=decision.entity_type,
+                aliases=[],
+                description='',
+                confidence=decision.confidence,
+                source='chat',
+            )
+            if allow_head
+            else graph_store.get_node(decision.entity_name)
         )
         head = (
             spawn_head(

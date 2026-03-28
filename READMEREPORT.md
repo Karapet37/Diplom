@@ -51,7 +51,9 @@ LLM только заполняет строгие формы или генер�
 | `config/runtime-profiles/` | Профили запуска: development, local-demo, local-heavy, server | Активно используется |
 | `scripts/` | Bootstrap и profile-aware run scripts | Активно используется |
 | `tests/agent_system/` | Основные регрессионные тесты текущей системы | Активно используется |
+| `tests/system_realism/` | End-to-end realism и evolution harness для живого runtime | Активно используется |
 | `memory/` | Runtime storage: graph, heads, sessions, files | Активно используется |
+| `runtime/` | Generated runtime artifacts: reports, isolated test memory, logs | Активно используется |
 | `docs/` | Документы, схемы, заметки | Вспомогательно |
 | `models/` | GGUF-модели и внешние reference artifacts | Частично активно |
 | `data/` | Исследовательские/служебные данные, не hot path чата | Вторично |
@@ -100,12 +102,15 @@ start.py --profile <name> [--env-file ...] [--config ...]
 | --- | --- |
 | `agent_system/chat_engine.py` | Главная orchestration-функция chat path |
 | `agent_system/message_analyzer.py` | Анализ user message, выделение `user_state` и сущностей |
+| `agent_system/semantic_routing.py` | Семантическое определение focus и behavioral guidance без привязки к точной формулировке prompt-а |
 | `agent_system/situation_engine.py` | Преобразует user analysis в structured situation |
 | `agent_system/feature_extractor.py` | Детерминированные признаки для classifier |
 | `agent_system/classifier_forest.py` | Vote-based классификация entity type |
 | `agent_system/head_caller.py` | Решает, нужен ли persona head и какой head главный |
 | `agent_system/persona_engine.py` | Persona storage, layered baseline/dynamic/learned state, emotion update, triad, revisions, indicators, explainability |
 | `agent_system/context_builder.py` | Собирает bounded context через deterministic stages: collect, score, rank, compress, pack |
+| `agent_system/social_roles.py` | Детерминированный выбор социальной роли для текущего хода на основе persona graph, mood signals и situation context |
+| `agent_system/mood_research.py` | File-backed mood research: snapshots, clustering, transition analysis, role-fit summaries, interpretable regressions |
 | `agent_system/graph_store.py` | Global graph storage, merge, hygiene, editing |
 | `agent_system/duplicate_resolver.py` | Duplicate resolution и semantic normalization |
 | `agent_system/entity_extractor.py` | Structured extraction из текста в graph proposals |
@@ -181,6 +186,14 @@ start.py --profile <name> [--env-file ...] [--config ...]
 
 - persona proposals для materialization.
 
+#### `memory/mood_research/`
+
+- `datasets/global.jsonl` — общий накопительный mood dataset;
+- `personas/{persona}.jsonl` — mood snapshots по persona;
+- `sessions/{session}.jsonl` — mood snapshots по session;
+- `reports/global.json` — глобальный clustering / transition / regression report;
+- `reports/persona__*.json`, `reports/session__*.json` — локальные reports для role selection и operator inspection.
+
 #### `memory/archive/`
 
 - cold session archives;
@@ -210,6 +223,7 @@ src/web/
 webapp/src/
 memory/
 tests/agent_system/
+tests/system_realism/
 start.py
 ```
 
@@ -226,13 +240,15 @@ chat request
   -> ChatTurnRequest
   -> message_analyzer
   -> situation_engine
+  -> semantic_routing
   -> feature_extractor
   -> classifier_forest
   -> head_caller
   -> explicit persona emotion update
-  -> persona_engine
+  -> social_roles
   -> context_builder
   -> llm.generate_chat_reply
+  -> mood_research snapshot + background refresh
   -> explicit storage writes
   -> ChatTurnResult
   -> response
@@ -244,6 +260,7 @@ chat request
 - `ChatTurnRequest` — вход в chat runtime;
 - `UserState` — нормализованное состояние пользователя;
 - `Situation` — структурированная интерпретация ситуации;
+- `semantic_focus` — explainable смысловой фокус вопроса, выведенный из persona structure и wording without fixed-answer fitting;
 - `ChatSideEffects` — явное описание write-side effects;
 - `ChatTurnResult` — итог runtime-прохода до сериализации в API response.
 
@@ -272,11 +289,13 @@ collect candidates
 5. подготавливает heads;
 6. выбирает primary persona;
 7. обновляет её emotion vector;
-8. строит context;
-9. вызывает LLM;
-10. сохраняет turn в history;
-11. записывает situation-reaction;
-12. решает, нужен ли background rebuild.
+8. выбирает социальную роль на основе persona graph, mood signals и текущей ситуации;
+9. строит context;
+10. вызывает LLM;
+11. сохраняет turn в history;
+12. записывает situation-reaction;
+13. пишет mood snapshot и обновляет mood research artifacts;
+14. решает, нужен ли background rebuild.
 
 Теперь эти side effects выделены явно, а не “растворены” в одной длинной процедуре. На chat-path отдельно видны:
 
@@ -284,6 +303,8 @@ collect candidates
 - history write;
 - persona emotion update;
 - persona reaction memory write;
+- social role decision;
+- mood research write и background report refresh;
 - rebuild scheduling decision.
 - degraded fallback decision, если local chat provider недоступен или вернул пустой unusable output.
 
@@ -1098,15 +1119,18 @@ Storage writes на этом пути происходят в строго фи�
 
 ## 11. Текущие тесты
 
-Главная живая зона тестов:
+Главные живые зоны тестов:
 
 - `tests/agent_system/`
+- `tests/system_realism/`
 
-Она покрывает:
+`tests/agent_system/` покрывает:
 
 - chat engine;
 - classifier and heads;
 - context builder;
+- social role selection;
+- mood research persistence and clustering;
 - concept graphs;
 - graph editor;
 - graph hygiene;
@@ -1120,6 +1144,45 @@ Storage writes на этом пути происходят в строго фи�
 
 ```bash
 python3 -m pytest tests/agent_system -q
+```
+
+`tests/system_realism/` — это уже не unit/regression слой, а живой operator-grade harness, который:
+
+- запускает настоящий runtime через `start.py`;
+- создаёт каноническую persona fixture в реальном storage формате;
+- шлёт реальные chat-запросы через HTTP;
+- оценивает persona fidelity, style consistency, memory continuity, generic leakage и latency;
+- гоняет mutation/evolution scenarios через реальные graph/persona механизмы;
+- пишет JSON и Markdown отчёты в `runtime/system_realism_reports/`.
+
+Что сейчас входит в advanced realism/evolution layer:
+
+- generated unexpected / rare prompts;
+- unseen prompt generalization через детерминированные paraphrase/mutation cases;
+- persona evolution через live dossier fact injection;
+- memory injection tests;
+- memory deletion через restore persona revision;
+- graph editor simulation: create / connect / merge / patch / delete;
+- contradiction resistance;
+- identity continuity after mutations;
+- optional rare chaos path.
+
+Базовая команда:
+
+```bash
+python3 -m pytest tests/system_realism -q
+```
+
+По умолчанию `pytest` entrypoint использует облегчённый live suite:
+
+- `suite=advanced`
+- `mutation_subset=smoke`
+- короткий live timeout, чтобы GGUF-run не зависал на десятках тяжёлых turns
+
+Если нужен полный ручной прогон с richer artifacts, используется direct runner:
+
+```bash
+python3 -m tests.system_realism --profile local-demo --suite full --mutation-subset all --tag manual
 ```
 
 ---
@@ -1151,6 +1214,7 @@ python3 -m pytest tests/agent_system -q
 21. `webapp/src/App.jsx`
 22. `webapp/src/components/Graph/GraphWorkspace.jsx`
 23. `tests/agent_system/`
+24. `tests/system_realism/`
 
 Если задача только по runtime-speed, то фокус должен быть на:
 
@@ -1198,3 +1262,147 @@ python3 -m pytest tests/agent_system -q
 Это orchestration system,
 в которой LLM — лишь один из подчинённых модулей.
 ```
+
+---
+
+## 14. Последние результаты тестов
+
+Ниже перечислены последние реально выполненные прогоны, а не “идеальные ожидаемые” результаты.
+
+### 14.1 Structural и targeted realism tests
+
+Команда:
+
+```bash
+python3 -m pytest \
+  tests/system_realism/test_scenario_generators.py \
+  tests/system_realism/test_evolution_metrics.py \
+  tests/system_realism/test_reporting.py \
+  tests/system_realism/test_evaluator.py \
+  tests/system_realism/test_runtime_launcher.py \
+  tests/system_realism/test_dialogue_cases_fixture.py \
+  -q
+```
+
+Результат:
+
+```text
+17 passed in 0.07s
+```
+
+Это подтверждает, что:
+
+- сценарные генераторы детерминированы;
+- evolution metrics считаются корректно;
+- Markdown/JSON reporting не разваливается;
+- runtime launcher и benchmark fixtures совместимы с текущим кодом.
+
+### 14.2 Full realism/evolution pytest suite
+
+Команда:
+
+```bash
+python3 -m pytest tests/system_realism -q
+```
+
+Результат:
+
+```text
+18 passed in 81.26s (0:01:21)
+```
+
+Это означает, что:
+
+- вся папка `tests/system_realism/` сейчас собирается как единая система;
+- top-level live runtime test проходит;
+- JSON/Markdown realism reports действительно генерируются;
+- mutation/evolution layer не ломает existing realism harness.
+
+### 14.3 Live runtime realism integration test
+
+Команда:
+
+```bash
+python3 -m pytest tests/system_realism/test_runtime_realism.py -q
+```
+
+Результат:
+
+```text
+1 passed in 82.27s (0:01:22)
+```
+
+Это важный proof-point, потому что здесь действительно:
+
+- поднимается `start.py`;
+- открывается реальный localhost port;
+- выполняются live requests;
+- запускаются advanced mutation scenarios;
+- формируется operator report.
+
+### 14.4 Manual degraded smoke run через real runtime
+
+Команда:
+
+```bash
+python3 -m tests.system_realism \
+  --profile local-demo \
+  --suite advanced \
+  --mutation-subset smoke \
+  --unexpected-cases 0 \
+  --generalization-cases 0 \
+  --request-timeout 2 \
+  --tag evolution-smoke-fast
+```
+
+Результат:
+
+```text
+Verdict: api_unreachable
+Startup success: True
+```
+
+Artifacts:
+
+- `runtime/system_realism_reports/20260326T010719Z-evolution-smoke-fast/realism_report.md`
+- `runtime/system_realism_reports/20260326T010719Z-evolution-smoke-fast/realism_report.json`
+- `runtime/system_realism_reports/20260326T010719Z-evolution-smoke-fast/server.log`
+
+Этот прогон считается полезным, а не “плохим”, потому что он показал честное degraded поведение:
+
+- сервер стартовал;
+- persona revision restore и debug endpoints отработали;
+- live chat path не уложился в жёсткий `2s` timeout;
+- harness не упал traceback’ом, а выдал нормальный инженерный отчёт.
+
+### 14.5 Что это значит practically
+
+На текущий момент можно утверждать следующее:
+
+- regression layer `tests/agent_system/` остаётся основной для детерминированной логики;
+- `tests/system_realism/` уже стал живым end-to-end слоем для проверки поведения системы как продукта;
+- узкое место в live realism runs сейчас не startup и не storage safety, а latency local GGUF inference на нескольких последовательных persona turns;
+- сама test architecture уже умеет честно фиксировать и хорошие, и degraded исходы без фейковых pass conditions.
+
+### 14.6 Последний локальный regression run
+
+Команда:
+
+```bash
+python3 -m pytest tests/agent_system -q
+```
+
+Результат:
+
+```text
+74 passed, 4 skipped
+```
+
+Этот прогон уже включает социальный persona-graph слой:
+
+- structural social persona graph;
+- social role selection;
+- file-backed mood research;
+- semantic routing without fixed prompt matching;
+- structured behavior trace в chat response;
+- chat integration этих слоёв в active runtime path.

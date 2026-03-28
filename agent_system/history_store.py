@@ -35,6 +35,13 @@ _ENTITY_STOPWORDS = {
     'with',
     'to',
     'for',
+    'i',
+    'im',
+    'm',
+    'my',
+    'we',
+    'our',
+    'glad',
     'про',
     'как',
     'что',
@@ -256,6 +263,8 @@ def infer_current_entity(session_id: str) -> str:
     if not parsed:
         return ''
     for item in reversed(list(parsed.get('messages') or [])):
+        if str(item.get('role') or '').strip() != 'user':
+            continue
         message = str(item.get('message') or '').strip()
         for pattern in _ENTITY_PATTERNS:
             match = re.search(pattern, message, flags=re.IGNORECASE)

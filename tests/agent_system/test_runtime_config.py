@@ -50,8 +50,9 @@ def test_runtime_config_resolves_relative_paths_against_repo_root(monkeypatch) -
 def test_runtime_config_llm_windows_and_context_attempts() -> None:
     config = get_runtime_config()
 
-    assert config.llm_window('chat', role='analyst') == (1536, 640)
-    assert config.llm_window('translation', role='translator') == (1024, 384)
+    assert config.llm_window('chat', role='analyst') == (1024, 80)
+    assert config.llm_window('knowledge', role='analyst') == (1152, 288)
+    assert config.llm_window('translation', role='translator') == (896, 160)
     assert config.max_context_attempts_for_role('analyst') >= 1
     assert config.max_context_attempts_for_role('general') >= 1
 

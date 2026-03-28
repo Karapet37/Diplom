@@ -136,6 +136,14 @@ _JSON_PROMPT_HINTS: tuple[str, ...] = (
     '"persona_payload":{',
     '"node_improvement":{',
 )
+_CHAT_QUESTION_LABEL = "User question:"
+_CHAT_SECTION_LABELS: tuple[str, ...] = (
+    "Persona head:",
+    "Interaction role:",
+    "Mood research:",
+    "Knowledge graph:",
+    "Recent dialogue:",
+)
 
 
 def _allow_uncensored_autodiscovery() -> bool:
@@ -461,6 +469,8 @@ def _allowed_n_ctx_list_for_role(role: str | None) -> list[int]:
     role_key = _normalize_role(role or ROLE_GENERAL)
     if role_key == ROLE_ANALYST:
         return [MIN_ROUTER_N_CTX, 1536, MAX_ROUTER_N_CTX]
+    if role_key in {ROLE_GENERAL, ROLE_CREATIVE, ROLE_TRANSLATOR}:
+        return [MIN_ROUTER_N_CTX, 1536, 2048, 3072, 4096, MAX_REASONING_N_CTX]
     return [MIN_REASONING_N_CTX, 3072, 4096, MAX_REASONING_N_CTX]
 
 
@@ -475,11 +485,16 @@ def _build_llm_for_path(model_path: str, *, n_ctx: int | None = None) -> "Llama"
     if Llama is None:
         return None
     resolved_n_ctx = max(MIN_ROUTER_N_CTX, min(MAX_REASONING_N_CTX, int(n_ctx))) if n_ctx is not None else _resolve_n_ctx()
+    cpu_threads = max(1, int(os.cpu_count() or 4))
+    configured_threads = max(1, int(os.getenv("LOCAL_GGUF_THREADS", str(cpu_threads))))
+    configured_batch_threads = max(1, int(os.getenv("LOCAL_GGUF_THREADS_BATCH", str(configured_threads))))
     return Llama(
         model_path=str(model_path),
         n_ctx=resolved_n_ctx,
         temperature=float(os.getenv("LOCAL_GGUF_TEMPERATURE", "0.15")),
         n_batch=int(os.getenv("LOCAL_GGUF_N_BATCH", "256")),
+        n_threads=configured_threads,
+        n_threads_batch=configured_batch_threads,
         verbose=False,
     )
 
@@ -489,20 +504,45 @@ def _prompt_prefers_json_output(prompt: str) -> bool:
     return any(hint in lowered for hint in _JSON_PROMPT_HINTS)
 
 
+def _split_chat_prompt_messages(prompt: str) -> list[dict[str, str]]:
+    raw = str(prompt or "").strip()
+    if not raw:
+        return [{"role": "user", "content": ""}]
+    if _CHAT_QUESTION_LABEL not in raw:
+        return [{"role": "user", "content": raw}]
+    prefix, remainder = raw.split(_CHAT_QUESTION_LABEL, 1)
+    question_block = remainder.strip()
+    system_parts = [prefix.strip()]
+    for label in _CHAT_SECTION_LABELS:
+        if label in question_block:
+            question_text, tail = question_block.split(label, 1)
+            question_block = question_text.strip()
+            system_parts.append(f"{label}\n\n{tail.strip()}".strip())
+    user_content = question_block.strip() or raw
+    system_content = "\n\n".join(part for part in system_parts if part).strip()
+    if system_content:
+        return [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content},
+        ]
+    return [{"role": "user", "content": user_content}]
+
+
 def _make_raw_llm_fn(llm: "Llama", *, max_tokens: int | None = None) -> Callable[[str], str]:
     resolved_max_tokens = int(max_tokens if max_tokens is not None else int(os.getenv("LOCAL_GGUF_MAX_TOKENS", "2048")))
 
     def llm_fn(prompt: str) -> str:
-        messages = [{"role": "user", "content": str(prompt or "")}]
+        messages = _split_chat_prompt_messages(prompt)
         kwargs = {
-            "messages": messages,
             "max_tokens": resolved_max_tokens,
             "temperature": float(os.getenv("LOCAL_GGUF_TEMPERATURE", "0.15")),
             "top_p": float(os.getenv("LOCAL_GGUF_TOP_P", "0.9")),
+            "stop": ["<think>", "</think>", "\nUser question:"],
         }
         if _prompt_prefers_json_output(prompt):
             try:
                 response = llm.create_chat_completion(
+                    messages=messages,
                     response_format={"type": "json_object"},
                     **kwargs,
                 )
@@ -511,9 +551,22 @@ def _make_raw_llm_fn(llm: "Llama", *, max_tokens: int | None = None) -> Callable
             except Exception:
                 pass
         try:
-            out = llm.create_chat_completion(**kwargs)
+            out = llm.create_chat_completion(messages=messages, **kwargs)
             result_text = out["choices"][0]["message"]["content"]
         except Exception as inner_exc:
+            if len(messages) > 1 and 'system role not supported' in str(inner_exc).lower():
+                fallback_messages = [
+                    {
+                        "role": "user",
+                        "content": "\n\n".join(str(item.get("content") or "").strip() for item in messages if str(item.get("content") or "").strip()),
+                    }
+                ]
+                try:
+                    out = llm.create_chat_completion(messages=fallback_messages, **kwargs)
+                    result_text = out["choices"][0]["message"]["content"]
+                    return str(result_text or "")
+                except Exception as fallback_exc:
+                    raise RuntimeError(str(fallback_exc)) from fallback_exc
             raise RuntimeError(str(inner_exc)) from inner_exc
         return str(result_text or "")
 
@@ -526,6 +579,33 @@ def _resolve_max_tokens(explicit_max_tokens: int | None = None) -> int:
     return int(explicit_max_tokens if explicit_max_tokens is not None else int(os.getenv("LOCAL_GGUF_MAX_TOKENS", "2048")))
 
 
+def _ensure_raw_llm_fn(
+    *,
+    model_path: str,
+    role: str,
+    requested_n_ctx: int,
+    requested_max_tokens: int,
+) -> Callable[[str], str] | None:
+    cache_key = _llm_cache_key(model_path, n_ctx=requested_n_ctx, max_tokens=requested_max_tokens)
+    with _LLM_LOCK:
+        if cache_key in _PATH_LLM_FN:
+            return _PATH_LLM_FN[cache_key]
+        try:
+            llm = _build_llm_for_path(model_path, n_ctx=requested_n_ctx)
+        except Exception as exc:
+            _warn(
+                f"[local_llm_provider] WARN: Failed to initialize model '{model_path}' "
+                f"for role '{role}' at n_ctx={requested_n_ctx}: {exc}"
+            )
+            return None
+        if llm is None:
+            return None
+        raw_fn = _make_raw_llm_fn(llm, max_tokens=requested_max_tokens)
+        _PATH_LLM_INSTANCE[cache_key] = llm
+        _PATH_LLM_FN[cache_key] = raw_fn
+        return raw_fn
+
+
 def _make_budgeted_llm_fn(
     *,
     role: str,
@@ -536,24 +616,12 @@ def _make_budgeted_llm_fn(
     allowed_contexts = _allowed_n_ctx_list_for_role(role)
 
     def _builder(_role: str, requested_n_ctx: int, requested_max_tokens: int) -> Callable[[str], str] | None:
-        cache_key = _llm_cache_key(model_path, n_ctx=requested_n_ctx, max_tokens=requested_max_tokens)
-        with _LLM_LOCK:
-            if cache_key in _PATH_LLM_FN:
-                return _PATH_LLM_FN[cache_key]
-            try:
-                llm = _build_llm_for_path(model_path, n_ctx=requested_n_ctx)
-            except Exception as exc:
-                _warn(
-                    f"[local_llm_provider] WARN: Failed to initialize model '{model_path}' "
-                    f"for role '{role}' at n_ctx={requested_n_ctx}: {exc}"
-                )
-                return None
-            if llm is None:
-                return None
-            raw_fn = _make_raw_llm_fn(llm, max_tokens=requested_max_tokens)
-            _PATH_LLM_INSTANCE[cache_key] = llm
-            _PATH_LLM_FN[cache_key] = raw_fn
-            return raw_fn
+        return _ensure_raw_llm_fn(
+            model_path=model_path,
+            role=role,
+            requested_n_ctx=requested_n_ctx,
+            requested_max_tokens=requested_max_tokens,
+        )
 
     def llm_fn(prompt: str) -> str:
         outcome = retry_infer(
@@ -728,6 +796,45 @@ def list_model_advisors() -> dict[str, Any]:
         "fast_model_priority": "nanbeige4.1-3b.q3_k_m.gguf",
         "uncensored_model_priority": "mistral-nemo-2407-12b-thinking-claude-gemini-gpt5.2-uncensored-heretic_q3_k_m.gguf",
     }
+
+
+def prewarm_role_model(
+    role: str = ROLE_GENERAL,
+    *,
+    n_ctx: int | None = None,
+    max_tokens: int | None = None,
+) -> bool:
+    role_key = _normalize_role(role)
+    if role_key not in ADVISOR_ROLES:
+        role_key = ROLE_GENERAL
+    role_map = _resolve_model_role_paths()
+    model_path = role_map.get(role_key)
+    if role_key != ROLE_TRANSLATOR and not model_path:
+        model_path = role_map.get(ROLE_GENERAL)
+    if not model_path or not Path(model_path).exists() or Llama is None:
+        return False
+    resolved_n_ctx = _resolve_n_ctx(role_key, n_ctx)
+    resolved_max_tokens = _resolve_max_tokens(max_tokens)
+    raw_fn = _ensure_raw_llm_fn(
+        model_path=model_path,
+        role=role_key,
+        requested_n_ctx=resolved_n_ctx,
+        requested_max_tokens=resolved_max_tokens,
+    )
+    if raw_fn is None:
+        return False
+    cache_key = _llm_cache_key(model_path, n_ctx=resolved_n_ctx, max_tokens=resolved_max_tokens)
+    with _LLM_LOCK:
+        if cache_key not in _ROLE_LLM_FN:
+            _ROLE_LLM_FN[cache_key] = _make_budgeted_llm_fn(
+                role=role_key,
+                model_path=model_path,
+                n_ctx=resolved_n_ctx,
+                max_tokens=resolved_max_tokens,
+            )
+        if n_ctx is None and max_tokens is None:
+            _ROLE_LLM_FN[role_key] = _ROLE_LLM_FN[cache_key]
+    return True
 
 
 def build_local_llm_fn() -> Callable[[str], str] | None:

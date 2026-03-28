@@ -34,8 +34,9 @@ def test_api_surfaces_chat_runtime(tmp_path, monkeypatch) -> None:
     assert reply.status_code == 200
     payload = reply.json()
     assert payload['assistant_reply'] == 'I am Dracula.'
+    assert payload['response_language'] == 'en'
     assert payload['persona_name'] == 'dracula'
-    assert payload['repair_status'] == {}
+    assert payload['repair_status']['status'] == 'skipped'
     assert str(payload['trace_id']).strip()
 
 

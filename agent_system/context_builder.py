@@ -7,10 +7,11 @@ from typing import Any
 from .duplicate_resolver import normalize_name, score_node
 from .graph_store import GraphStore
 from .history_store import infer_current_entity, parse_session, recent_dialogue
-from .models import ContextCandidate, ContextPayload, ContextScoreBreakdown, HeadBundle, Situation
-from .persona_engine import emotion_label, infer_persona_name, load_persona, load_persona_graph, persona_exists, reaction_policy, relevant_reactions
+from .models import ContextCandidate, ContextPayload, ContextScoreBreakdown, HeadBundle, MessageAnalysis, MoodResearchReport, Situation, SocialRoleDecision
+from .persona_engine import infer_persona_name, load_persona, load_persona_graph, persona_exists, reaction_policy, relevant_reactions
 from .prompt_builder import render_graph_context
 from .runtime_config import get_runtime_config
+from .semantic_routing import infer_semantic_focus
 from .situation_engine import situation_summary
 
 # Weighted factors stay explicit so the ranking remains explainable in debug output.
@@ -28,22 +29,28 @@ _CONTEXT_SCORE_WEIGHTS: dict[str, float] = {
 _SOURCE_PRIORITY: dict[str, int] = {
     'persona_memory': 0,
     'persona_triad': 1,
-    'local_graph_neighborhood': 2,
-    'global_graph_facts': 3,
-    'file_ingested_knowledge': 4,
-    'session_short_term_history': 5,
+    'social_role': 2,
+    'mood_research': 3,
+    'local_graph_neighborhood': 4,
+    'global_graph_facts': 5,
+    'file_ingested_knowledge': 6,
+    'session_short_term_history': 7,
 }
 
 _PERSONA_RENDER_ORDER: dict[str, int] = {
     'persona_core': 0,
-    'persona_state': 1,
-    'persona_form': 2,
-    'persona_decision_explanation': 3,
-    'persona_reactions': 4,
-    'persona_relations': 5,
-    'persona_examples': 6,
-    'persona_knowledge': 7,
-    'persona_log_tuples': 8,
+    'persona_identity': 1,
+    'persona_work_profile': 2,
+    'persona_social_role': 3,
+    'persona_mood_dynamics': 4,
+    'persona_knowledge': 5,
+    'persona_relations': 6,
+    'persona_form': 7,
+    'persona_decision_explanation': 8,
+    'persona_state': 9,
+    'persona_reactions': 10,
+    'persona_examples': 11,
+    'persona_log_tuples': 12,
 }
 
 
@@ -116,13 +123,73 @@ def _text_relevance(query_tokens: set[str], text: str) -> float:
     return _clamp01((overlap * 0.7) + (density * 0.3))
 
 
+def _render_emotional_stance(emotion_vector: dict[str, Any]) -> str:
+    vector = {str(key): float(value or 0.0) for key, value in dict(emotion_vector or {}).items()}
+    traits: list[str] = []
+    if vector.get('confidence', 0.0) >= 0.6:
+        traits.append('steady')
+    if vector.get('curiosity', 0.0) >= 0.6:
+        traits.append('curious')
+    if vector.get('empathy', 0.0) >= 0.5:
+        traits.append('attentive to people')
+    if vector.get('anger', 0.0) >= 0.35:
+        traits.append('firm')
+    if vector.get('fear', 0.0) >= 0.35:
+        traits.append('cautious')
+    if not traits:
+        traits.append('composed')
+    return ', '.join(traits[:3])
+
+
+def _render_situation_note(situation: Situation | dict[str, Any] | str) -> str:
+    if isinstance(situation, Situation):
+        situation_type = str(situation.type or '').strip()
+        target = str(situation.target or '').strip()
+    elif isinstance(situation, dict):
+        situation_type = str(situation.get('type') or '').strip()
+        target = str(situation.get('target') or '').strip()
+    else:
+        situation_type = ''
+        target = ''
+    if situation_type == 'neutral_query' and target == 'persona':
+        return 'Situation note: the user is asking a direct question about your own life or work. Answer concretely from your lived routine, values, and known biography.'
+    if situation_type == 'neutral_query':
+        return 'Situation note: answer directly and stay grounded in what you know.'
+    if situation_type == 'user_distress':
+        return 'Situation note: the user appears distressed. Be warmer, practical, and clear without pretending certainty.'
+    if situation_type == 'insult' and target == 'persona':
+        return 'Situation note: the user is insulting you. Hold a calm boundary and return to the concrete issue without mirroring the hostility.'
+    if situation_type == 'abnormal_behavior':
+        return 'Situation note: the user describes harmful or morally abnormal behavior. Do not mirror approval; respond in a corrective and grounded way.'
+    if situation_type == 'user_anger':
+        return 'Situation note: the user is angry. Stay measured and do not let their emotion dictate your own tone.'
+    return ''
+
+
+def _render_learned_reaction_line(situation_label: str, reaction_label: str) -> str:
+    situation_text = str(situation_label or '').strip()
+    reaction_text = str(reaction_label or '').strip()
+    lowered = reaction_text.lower()
+    if 'answers_substance_first_with_persona_grounding' in lowered:
+        return f"{situation_text} -> answer with substance first, using your own biography, work, and known routines."
+    if 'asks_for_missing_fact_before_claiming_certainty' in lowered:
+        return f"{situation_text} -> ask for the missing fact that would materially change the judgment before sounding certain."
+    if 'firm_boundary' in lowered:
+        return f"{situation_text} -> set a calm boundary, then return to facts and consequences."
+    if 'measured_support' in lowered or 'supportive' in lowered:
+        return f"{situation_text} -> respond with measured support, practical care, and honest limits."
+    if 'corrective' in lowered:
+        return f"{situation_text} -> respond in a corrective, non-approving tone."
+    return f'{situation_text} -> {reaction_text}'
+
+
 def _context_source_for_node(node: dict[str, Any], *, local_neighbor: bool = False) -> str:
-    if local_neighbor:
-        return 'local_graph_neighborhood'
     context = node.get('context') if isinstance(node.get('context'), dict) else {}
     source = str(context.get('source') or '').strip().lower()
     if source == 'file':
         return 'file_ingested_knowledge'
+    if local_neighbor:
+        return 'local_graph_neighborhood'
     return 'global_graph_facts'
 
 
@@ -144,14 +211,22 @@ def _candidate_importance(candidate: ContextCandidate) -> float:
         return _clamp01(float(node.get('importance') or 0.0))
     if candidate.item_type in {'persona_core', 'persona_state'}:
         return 1.0
+    if candidate.item_type == 'persona_identity':
+        return 0.98
+    if candidate.item_type == 'persona_work_profile':
+        return 0.95
     if candidate.item_type in {'persona_form', 'persona_decision_explanation'}:
         return 0.9
     if candidate.item_type == 'persona_reactions':
         return 0.82
     if candidate.item_type == 'persona_knowledge':
         return 0.78
-    if candidate.item_type in {'persona_relations', 'persona_examples', 'persona_log_tuples'}:
+    if candidate.item_type == 'persona_relations':
         return 0.72
+    if candidate.item_type == 'persona_examples':
+        return 0.62
+    if candidate.item_type == 'persona_log_tuples':
+        return 0.58
     if candidate.section == 'recent_dialogue':
         return 0.55
     return 0.5
@@ -282,22 +357,41 @@ def _rank_candidates(candidates: list[ContextCandidate]) -> list[ContextCandidat
 
 def _candidate_token_limit(candidate: ContextCandidate) -> int:
     if candidate.section == 'recent_dialogue':
-        return 90
+        return 48
+    if candidate.item_type == 'persona_identity':
+        return 160
+    if candidate.item_type == 'persona_work_profile':
+        return 144
     if candidate.item_type == 'persona_knowledge':
-        return 320
+        return 132
     if candidate.item_type == 'persona_examples':
-        return 180
+        return 56
     if candidate.item_type == 'persona_log_tuples':
-        return 130
+        return 48
     if candidate.item_type == 'persona_relations':
-        return 120
+        return 72
     if candidate.item_type == 'persona_reactions':
-        return 180
+        return 96
     if candidate.item_type in {'persona_core', 'persona_state', 'persona_form', 'persona_decision_explanation'}:
-        return 220
+        return 112
     if candidate.section == 'graph_context':
-        return 170
-    return 180
+        return 72
+    return 120
+
+
+def _recent_first_items(values: list[str]) -> list[str]:
+    clean = [str(item).strip() for item in list(values or []) if str(item).strip()]
+    if not clean:
+        return []
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for item in reversed(clean):
+        key = normalize_name(item)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        ordered.append(item)
+    return ordered
 
 
 def _compress_candidates(candidates: list[ContextCandidate]) -> int:
@@ -338,13 +432,12 @@ def _build_persona_candidates(name: str, situation: Situation | dict[str, Any] |
     bundle = load_persona(name)
     if bundle is None:
         return None, []
-    summary = situation_summary(situation)
     fallback_situation = Situation(type='neutral_statement', target='external', severity=0.2, summary='type=neutral_statement; target=external; severity=0.20')
     policy = reaction_policy(bundle, situation if isinstance(situation, (dict, Situation)) else fallback_situation)
     reaction_lines = []
     for item in relevant_reactions(name, situation):
         learned_reaction = item.get('reaction')
-        rendered = f"{item.get('situation')} -> {learned_reaction}"
+        rendered = _render_learned_reaction_line(str(item.get('situation') or ''), str(learned_reaction or ''))
         reaction_lines.append(rendered)
 
     candidates: list[ContextCandidate] = []
@@ -352,12 +445,17 @@ def _build_persona_candidates(name: str, situation: Situation | dict[str, Any] |
     core_lines = [
         f'You are {bundle.name}.',
         f'Entity type: {bundle.entity_type}.',
-        f'Emotion profile: {emotion_label(bundle.emotion_vector)}.',
         'Answer in first person from this persona head.',
         'React from persona traits and the current situation, not from raw user emotion.',
+        'Identity lock: do not invent a different biography, job, worldview, or temperament.',
+        'If the available facts are thin, stay within known persona evidence and ask or answer cautiously instead of improvising a new identity.',
     ]
-    if summary:
-        core_lines.append(f'Current situation: {summary}.')
+    stance = _render_emotional_stance(bundle.emotion_vector)
+    if stance:
+        core_lines.append(f'Current stance: {stance}.')
+    situation_note = _render_situation_note(situation)
+    if situation_note:
+        core_lines.append(situation_note)
     candidates.append(
         ContextCandidate(
             candidate_id=f'persona:{normalize_name(bundle.name)}:core',
@@ -371,29 +469,118 @@ def _build_persona_candidates(name: str, situation: Situation | dict[str, Any] |
         )
     )
 
+    if bundle.persona_form:
+        identity_lines: list[str] = []
+        biography = str(bundle.persona_form.get('biography') or '').strip()
+        values = [str(item).strip() for item in list(bundle.persona_form.get('values') or []) if str(item).strip()]
+        speech_style = [str(item).strip() for item in list(bundle.persona_form.get('speech_style') or []) if str(item).strip()]
+        emotional_tendencies = [
+            str(item).strip()
+            for item in list(bundle.persona_form.get('emotional_tendencies') or [])
+            if str(item).strip()
+        ]
+        conflict_behavior = [
+            str(item).strip()
+            for item in list(bundle.persona_form.get('conflict_behavior') or [])
+            if str(item).strip()
+        ]
+        trust_model = [str(item).strip() for item in list(bundle.persona_form.get('trust_model') or []) if str(item).strip()]
+        work_habits = [str(item).strip() for item in list(bundle.persona_form.get('work_habits') or []) if str(item).strip()]
+        prioritized_work_habits = _recent_first_items(work_habits)
+        memory_anchors = [
+            str(item).strip()
+            for item in list(bundle.persona_form.get('memory_anchors') or [])
+            if str(item).strip()
+        ]
+        style_markers = [
+            str(item).strip()
+            for item in list(bundle.persona_form.get('recurring_style_markers') or [])
+            if str(item).strip()
+        ]
+        if biography:
+            identity_lines.append(f'Biography: {biography}')
+        if values:
+            identity_lines.append(f"Values: {' | '.join(values[:5])}.")
+        if speech_style:
+            identity_lines.append(f"Voice and speech style: {' | '.join(speech_style[:5])}.")
+        if emotional_tendencies:
+            identity_lines.append(f"Emotional tendencies: {' | '.join(emotional_tendencies[:4])}.")
+        if conflict_behavior:
+            identity_lines.append(f"Conflict behavior: {' | '.join(conflict_behavior[:4])}.")
+        if trust_model:
+            identity_lines.append(f"Trust model: {' | '.join(trust_model[:4])}.")
+        if prioritized_work_habits:
+            identity_lines.append(f"Work habits: {' | '.join(prioritized_work_habits[:5])}.")
+        if memory_anchors:
+            identity_lines.append(f"Memory anchors: {' | '.join(memory_anchors[:5])}.")
+        if style_markers:
+            identity_lines.append(f"Recurring style markers: {' | '.join(style_markers[:4])}.")
+        if identity_lines:
+            identity_text = '\n'.join(identity_lines).strip()
+            candidates.append(
+                ContextCandidate(
+                    candidate_id=f'persona:{normalize_name(bundle.name)}:identity',
+                    source='persona_triad',
+                    section='persona_block',
+                    item_type='persona_identity',
+                    title='persona_identity',
+                    text=identity_text,
+                    token_estimate=_estimate_tokens(identity_text),
+                    metadata={'persona_name': bundle.name},
+                )
+            )
+
+        work_lines: list[str] = []
+        work_relations = [
+            f"{str(item.get('type') or '').strip()} {str(item.get('target') or '').strip()}"
+            for item in bundle.relations
+            if str(item.get('type') or '').strip().upper() in {'WORKS_IN', 'SPECIALIZES_IN', 'WORKS_WITH', 'LIVES_IN'}
+            and str(item.get('target') or '').strip()
+        ]
+        decision_patterns = [
+            str(item).strip()
+            for item in list(bundle.persona_form.get('decision_patterns') or [])
+            if str(item).strip()
+        ]
+        if biography:
+            first_sentence = biography.split('. ')[0].strip()
+            if first_sentence and not first_sentence.endswith('.'):
+                first_sentence += '.'
+            if first_sentence:
+                work_lines.append(f'Professional role: {first_sentence}')
+        if work_relations:
+            work_lines.append(f"Work structure: {' | '.join(work_relations[:5])}.")
+        if prioritized_work_habits:
+            work_lines.append(f"Daily work habits: {' | '.join(prioritized_work_habits[:5])}.")
+        if decision_patterns:
+            work_lines.append(f"Operational decision pattern: {' | '.join(decision_patterns[:4])}.")
+        if work_lines:
+            work_text = '\n'.join(work_lines).strip()
+            candidates.append(
+                ContextCandidate(
+                    candidate_id=f'persona:{normalize_name(bundle.name)}:work_profile',
+                    source='persona_triad',
+                    section='persona_block',
+                    item_type='persona_work_profile',
+                    title='persona_work_profile',
+                    text=work_text,
+                    token_estimate=_estimate_tokens(work_text),
+                    metadata={'persona_name': bundle.name},
+                )
+            )
+
     state_lines: list[str] = []
     if bundle.traits:
         state_lines.append(f"Traits: {', '.join(bundle.traits[:8])}.")
     if bundle.emotion_vector:
-        emotion_text = ', '.join(f'{key}={value}' for key, value in bundle.emotion_vector.items())
-        state_lines.append(f'Emotion vector: {emotion_text}.')
+        state_lines.append(f'Current stance qualities: {_render_emotional_stance(bundle.emotion_vector)}.')
     if bundle.indicators is not None:
         state_lines.append(
-            'Persona maturity: '
-            f"{bundle.indicators.maturity_level} "
-            f"(confidence={bundle.indicators.confidence_score}, "
-            f"maturity={bundle.indicators.maturity_score}, "
-            f"locked={bundle.indicators.adaptation_locked})."
+            'Adaptation state: '
+            f"{bundle.indicators.maturity_level}, "
+            f"reviewable, "
+            f"drift_locked={bundle.indicators.adaptation_locked}."
         )
-    if bundle.revision_meta:
-        state_lines.append(
-            'Persona revisions: '
-            f"overall={bundle.revision_meta.get('revision', 1)}, "
-            f"baseline={bundle.revision_meta.get('baseline_revision', 1)}, "
-            f"dynamic={bundle.revision_meta.get('dynamic_revision', 1)}, "
-            f"learned={bundle.revision_meta.get('learned_revision', 1)}."
-        )
-    state_lines.append(f'Response style: {policy.response_style}.')
     candidates.append(
         ContextCandidate(
             candidate_id=f'persona:{normalize_name(bundle.name)}:state',
@@ -599,7 +786,14 @@ def _merge_node_payload(base: dict[str, Any], overlay: dict[str, Any]) -> dict[s
             merged[key] = str(merged.get(key) or '').strip() or str(value or '').strip()
             continue
         if key == 'context':
-            merged[key] = {**dict(merged.get(key) or {}), **dict(value or {})}
+            existing_context = dict(merged.get(key) or {})
+            incoming_context = dict(value or {})
+            merged_context = {**existing_context, **incoming_context}
+            existing_source = str(existing_context.get('source') or '').strip().lower()
+            incoming_source = str(incoming_context.get('source') or '').strip().lower()
+            if existing_source in {'file', 'session'} and incoming_source in {'head', 'persona_graph'}:
+                merged_context['source'] = existing_source
+            merged[key] = merged_context
             continue
         if merged.get(key) in (None, '', [], {}) and value not in (None, '', [], {}):
             merged[key] = value
@@ -614,6 +808,11 @@ def _build_graph_candidates(
 ) -> tuple[list[ContextCandidate], list[dict[str, Any]], list[dict[str, Any]]]:
     subgraph = store.subgraph(query, limit=6, depth=1)
     local_graph = load_persona_graph(resolved_persona) if resolved_persona else {'nodes': [], 'edges': []}
+    global_by_name = {
+        normalize_name(str(node.get('name') or node.get('id') or '')): dict(node)
+        for node in store.load_nodes()
+        if normalize_name(str(node.get('name') or node.get('id') or ''))
+    }
 
     entries: dict[str, dict[str, Any]] = {}
     for node in list(subgraph.get('nodes') or []):
@@ -625,11 +824,35 @@ def _build_graph_candidates(
         node_id = str(node.get('id') or '')
         if not node_id:
             continue
+        global_match = global_by_name.get(normalize_name(str(node.get('name') or node_id)))
+        if global_match is not None:
+            node = _merge_node_payload(dict(global_match), dict(node))
         if node_id in entries:
             entries[node_id]['node'] = _merge_node_payload(entries[node_id]['node'], dict(node))
             entries[node_id]['local_neighbor'] = True
         else:
             entries[node_id] = {'node': dict(node), 'local_neighbor': True}
+
+    collapsed_entries: dict[str, dict[str, Any]] = {}
+    for payload in entries.values():
+        node = dict(payload['node'])
+        collapse_key = normalize_name(str(node.get('name') or node.get('id') or ''))
+        if not collapse_key:
+            continue
+        if collapse_key in collapsed_entries:
+            collapsed_entries[collapse_key]['node'] = _merge_node_payload(collapsed_entries[collapse_key]['node'], node)
+            collapsed_entries[collapse_key]['local_neighbor'] = bool(collapsed_entries[collapse_key].get('local_neighbor')) or bool(
+                payload.get('local_neighbor')
+            )
+        else:
+            collapsed_entries[collapse_key] = {
+                'node': node,
+                'local_neighbor': bool(payload.get('local_neighbor')),
+            }
+    entries = {
+        str(payload['node'].get('id') or key): payload
+        for key, payload in collapsed_entries.items()
+    }
 
     all_edges: list[dict[str, Any]] = []
     seen_edges: set[tuple[str, str, str]] = set()
@@ -654,6 +877,15 @@ def _build_graph_candidates(
         node = dict(payload['node'])
         aliases = [str(item).strip() for item in list(node.get('aliases') or []) if str(item).strip()]
         facts = [str(item).strip() for item in list(node.get('facts') or []) if str(item).strip()]
+        node_context = dict(node.get('context') or {})
+        node_source = str(node_context.get('source') or '').strip().lower()
+        if (
+            node_source == 'chat'
+            and not str(node.get('description') or '').strip()
+            and not facts
+            and int(node.get('frequency') or 0) <= 1
+        ):
+            continue
         preview_lines = [
             f"{node.get('name')} [{node.get('type')}] importance={node.get('importance')} confidence={node.get('confidence')} frequency={node.get('frequency')}.",
         ]
@@ -693,6 +925,8 @@ def _collect_candidates(
     explicit_context: str,
     situation: Situation | dict[str, Any] | str | None,
     store: GraphStore,
+    social_role: SocialRoleDecision | None,
+    mood_report: MoodResearchReport | None,
 ) -> dict[str, Any]:
     clipped_question = _clip(question, _context_config()[1])
     current_entity = infer_current_entity(session_id)
@@ -717,6 +951,60 @@ def _collect_candidates(
         resolved,
         situation or Situation(type='neutral_query', target='external', severity=0.35, summary='type=neutral_query; target=external; severity=0.35'),
     ) if resolved else (None, [])
+    if social_role is not None:
+        role_text = '\n'.join(
+            item
+            for item in (
+                f'Selected social role: {social_role.role}.',
+                f'Role reason: {social_role.reason}',
+                f"Role evidence: {' | '.join(social_role.evidence[:4])}." if social_role.evidence else '',
+                f"Persona graph anchors: {' | '.join(social_role.graph_anchors[:4])}." if social_role.graph_anchors else '',
+            )
+            if str(item).strip()
+        )
+        persona_candidates.append(
+            ContextCandidate(
+                candidate_id=f'persona:{normalize_name(resolved)}:social_role',
+                source='social_role',
+                section='persona_block',
+                item_type='persona_social_role',
+                title='persona_social_role',
+                text=role_text,
+                token_estimate=_estimate_tokens(role_text),
+                metadata={'role': social_role.role, 'persona_name': resolved},
+            )
+        )
+    if mood_report is not None and mood_report.snapshot_count > 0:
+        transition_preview = ' | '.join(
+            f"{item.get('from')} -> {item.get('to')}"
+            for item in list(mood_report.transition_counts or [])[:3]
+        )
+        mood_text = '\n'.join(
+            item
+            for item in (
+                f'Recent mood pattern: {mood_report.latest_cluster_label}.' if mood_report.latest_cluster_label else '',
+                f"Observed role effects: {' | '.join(str(item.get('role') or '') for item in list(mood_report.role_effects or [])[:4] if str(item.get('role') or '').strip())}."
+                if mood_report.role_effects
+                else '',
+                f'Key transition patterns: {transition_preview}.'
+                if transition_preview
+                else '',
+            )
+            if str(item).strip()
+        )
+        if mood_text:
+            persona_candidates.append(
+                ContextCandidate(
+                    candidate_id=f'persona:{normalize_name(resolved)}:mood_dynamics',
+                    source='mood_research',
+                    section='persona_block',
+                    item_type='persona_mood_dynamics',
+                    title='persona_mood_dynamics',
+                    text=mood_text,
+                    token_estimate=_estimate_tokens(mood_text),
+                    metadata={'persona_name': resolved},
+                )
+            )
     history_candidates = _build_history_candidates(session_id)
     graph_candidates, graph_nodes, graph_edges = _build_graph_candidates(query=query, resolved_persona=resolved, store=store)
     candidates = persona_candidates + history_candidates + graph_candidates
@@ -760,9 +1048,12 @@ def _score_rank_compress(
         )
     ranked = _rank_candidates(candidates)
     compressed = _compress_candidates(ranked)
+    source_counts = Counter(candidate.source for candidate in ranked)
+    for source_name in _SOURCE_PRIORITY:
+        source_counts.setdefault(source_name, 0)
     diagnostics = {
         'weights': dict(_CONTEXT_SCORE_WEIGHTS),
-        'source_counts': dict(Counter(candidate.source for candidate in ranked)),
+        'source_counts': dict(source_counts),
         'query_tokens': sorted(query_tokens),
         'compressed_candidates': compressed,
     }
@@ -793,17 +1084,54 @@ def _select_edges_for_nodes(selected_nodes: list[dict[str, Any]], all_edges: lis
 
 
 def _pack_persona_block(candidates: list[ContextCandidate], *, token_budget: int) -> tuple[str, list[ContextCandidate]]:
+    return _pack_persona_block_for_focus(candidates, token_budget=token_budget, question_focus=set())
+
+
+def _pack_persona_block_for_focus(
+    candidates: list[ContextCandidate],
+    *,
+    token_budget: int,
+    question_focus: set[str],
+) -> tuple[str, list[ContextCandidate]]:
+    focus = set(question_focus or set())
+    focus_render_order = dict(_PERSONA_RENDER_ORDER)
+    if 'work' in focus:
+        focus_render_order.update(
+            {
+                'persona_core': 0,
+                'persona_work_profile': 1,
+                'persona_relations': 2,
+                'persona_knowledge': 3,
+                'persona_identity': 4,
+                'persona_decision_explanation': 5,
+                'persona_form': 6,
+            }
+        )
     ordered = sorted(
         candidates,
         key=lambda candidate: (
-            _PERSONA_RENDER_ORDER.get(candidate.item_type, 99),
+            focus_render_order.get(candidate.item_type, 99),
             candidate.rank,
             candidate.candidate_id,
         ),
     )
+    suppressed: set[str] = set()
+    max_items: int | None = None
+    if focus & {'identity', 'work', 'memory'}:
+        suppressed.update({'persona_reactions', 'persona_log_tuples'})
+    if focus & {'work', 'memory'}:
+        max_items = 6
+    if focus == {'work'}:
+        suppressed.add('persona_state')
+    if focus == {'decision'}:
+        suppressed.update({'persona_examples', 'persona_log_tuples'})
     selected: list[ContextCandidate] = []
     used = 0
     for candidate in ordered:
+        if candidate.item_type in suppressed:
+            continue
+        if max_items is not None and len(selected) >= max_items:
+            continue
         if used + candidate.token_estimate > token_budget and selected:
             continue
         selected.append(candidate)
@@ -838,18 +1166,38 @@ def _pack_graph_context(
     *,
     all_edges: list[dict[str, Any]],
     token_budget: int,
+    question_focus: set[str],
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]], list[ContextCandidate]]:
     ranked = sorted(candidates, key=lambda candidate: (candidate.rank, candidate.candidate_id))
+    has_persona_aligned_graph = any(candidate.score.persona_alignment >= 0.5 for candidate in ranked)
     selected_candidates: list[ContextCandidate] = []
     selected_nodes: list[dict[str, Any]] = []
     node_rank_map: dict[str, int] = {}
     graph_context = ''
     selected_edges: list[dict[str, Any]] = []
+    bare_node_count = 0
+    max_nodes = 3 if question_focus & {'identity', 'work', 'memory'} else 5
     for candidate in ranked:
+        if has_persona_aligned_graph and candidate.score.persona_alignment < 0.2 and selected_candidates:
+            continue
         node = dict(candidate.metadata.get('node') or {})
         node_id = str(node.get('id') or '')
         if not node_id or node_id in node_rank_map:
             continue
+        if node_id.startswith('example:') or node_id.startswith('log:'):
+            continue
+        if (
+            has_persona_aligned_graph
+            and len(selected_nodes) >= 2
+            and str(node.get('id') or '').startswith('trait:')
+            and int(candidate.metadata.get('degree') or 0) <= 1
+        ):
+            continue
+        if not str(node.get('description') or '').strip() and not list(node.get('facts') or []):
+            if len(selected_nodes) >= 3 and candidate.score.relevance < 0.09:
+                continue
+            if bare_node_count >= 3:
+                continue
         trial_nodes = selected_nodes + [node]
         trial_rank_map = {**node_rank_map, node_id: candidate.rank}
         trial_edges = _select_edges_for_nodes(trial_nodes, all_edges, trial_rank_map)
@@ -862,7 +1210,9 @@ def _pack_graph_context(
         selected_edges = trial_edges
         graph_context = trial_context
         candidate.selected = True
-        if len(selected_nodes) >= 8:
+        if not str(node.get('description') or '').strip() and not list(node.get('facts') or []):
+            bare_node_count += 1
+        if len(selected_nodes) >= max_nodes:
             break
     if not selected_nodes and ranked:
         fallback = ranked[0]
@@ -881,17 +1231,23 @@ def _pack_context(
     *,
     candidates: list[ContextCandidate],
     all_edges: list[dict[str, Any]],
+    question_focus: set[str],
 ) -> tuple[dict[str, str], list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     max_context_tokens, question_budget, prompt_overhead_tokens, section_budgets, _ = _context_config()
     persona_candidates = [candidate for candidate in candidates if candidate.section == 'persona_block']
     graph_candidates = [candidate for candidate in candidates if candidate.section == 'graph_context']
     history_candidates = [candidate for candidate in candidates if candidate.section == 'recent_dialogue']
 
-    persona_block, selected_persona = _pack_persona_block(persona_candidates, token_budget=section_budgets['persona_block'])
+    persona_block, selected_persona = _pack_persona_block_for_focus(
+        persona_candidates,
+        token_budget=section_budgets['persona_block'],
+        question_focus=question_focus,
+    )
     graph_context, selected_nodes, selected_edges, selected_graph = _pack_graph_context(
         graph_candidates,
         all_edges=all_edges,
         token_budget=section_budgets['graph_context'],
+        question_focus=question_focus,
     )
     recent_text, selected_history = _pack_recent_dialogue(history_candidates, token_budget=section_budgets['recent_dialogue'])
 
@@ -921,6 +1277,9 @@ def build_context(
     explicit_context: str = '',
     situation: Situation | dict[str, Any] | str | None = None,
     store: GraphStore | None = None,
+    social_role: SocialRoleDecision | None = None,
+    mood_report: MoodResearchReport | None = None,
+    analysis: MessageAnalysis | None = None,
 ) -> dict[str, Any]:
     max_context_tokens, _, prompt_overhead_tokens, _, _ = _context_config()
     graph_store = store or GraphStore()
@@ -931,6 +1290,8 @@ def build_context(
         explicit_context=explicit_context,
         situation=situation,
         store=graph_store,
+        social_role=social_role,
+        mood_report=mood_report,
     )
 
     ranked, score_debug = _score_rank_compress(
@@ -941,9 +1302,17 @@ def build_context(
         rendered_situation=collected['rendered_situation'],
         persona_bundle=collected['persona_bundle'],
     )
+    semantic_focus = infer_semantic_focus(
+        question=collected['clipped_question'],
+        persona_bundle=collected['persona_bundle'],
+        analysis=analysis,
+        situation=analysis.situation if analysis is not None else (situation if isinstance(situation, Situation) else None),
+    )
+    question_focus = set(str(item).strip() for item in list(semantic_focus.get('focus') or []) if str(item).strip())
     packed_sections, selected_nodes, selected_edges, pack_debug = _pack_context(
         candidates=ranked,
         all_edges=list(collected['graph_edges']),
+        question_focus=question_focus,
     )
 
     section_limit = max(max_context_tokens - _estimate_tokens(collected['clipped_question']) - prompt_overhead_tokens, 0)
@@ -968,6 +1337,8 @@ def build_context(
                 'pack_context': dict(pack_debug['packed_candidate_counts']),
             },
             'query': collected['query'],
+            'question_focus': sorted(question_focus),
+            'semantic_focus': dict(semantic_focus),
             'situation': collected['rendered_situation'],
             'weights': dict(score_debug['weights']),
             'source_counts': dict(score_debug['source_counts']),

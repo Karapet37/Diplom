@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import inspect
 from threading import Lock
 from typing import Any
 
 from .classifier_forest import DEFAULT_CLASSIFIER
 from .concept_graphs import concept_graph_extraction
 from .context_builder import build_context
+from .duplicate_resolver import normalize_name
 from .feature_extractor import extract_features
 from .file_ingestion import rebuild_artifacts
 from .graph_store import GraphStore, normalize_personality_name, personality_proposals_dir
 from .head_caller import prepare_heads, select_primary_head
 from .history_store import append_turn, create_session, infer_current_entity, parse_session
-from .llm import fallback_chat_reply, generate_chat_reply
+from .language_tools import normalize_language_code
+from .llm import fallback_chat_reply, generate_chat_reply, translate_text
 from .message_analyzer import analyze_message_state
+from .mood_research import build_mood_snapshot, load_mood_report, record_mood_snapshot, schedule_mood_research_refresh
 from .models import (
     BackgroundRebuildDecision,
     ChatSideEffects,
@@ -25,15 +29,71 @@ from .models import (
     Situation,
 )
 from .observability import get_observability_store
-from .persona_engine import adjust_emotion_vector, explain_response_style, load_persona, record_situation_reaction
+from .persona_engine import adjust_emotion_vector, explain_response_style, load_persona, record_persona_dossier_fact, record_situation_reaction
 from .prompt_builder import build_chat_prompt
 from .reliability import operator_messages_from_status, runtime_status_snapshot
 from .runtime_config import get_runtime_config
+from .social_roles import choose_social_role, render_social_role_block
 from .situation_engine import model_situation
 
 _BACKGROUND_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix='agent-system-rebuild')
 _REPAIR_STATUS_LOCK = Lock()
 _REPAIR_STATUS: dict[str, dict[str, Any]] = {}
+_PERSONA_DOSSIER_FACT_MARKERS = (
+    'you are',
+    'you work',
+    'you live',
+    'you keep',
+    'you value',
+    'you trust',
+    'you trained',
+    'you rotate',
+    'you still wear',
+    'your sister',
+    'your father',
+    'your mother',
+    'you usually',
+    'you tend to',
+)
+_PERSONA_DOSSIER_UPDATE_MARKERS = (
+    'for the record',
+    'just so you know',
+    'remember that',
+    'note that',
+    'keep in mind',
+)
+_SECOND_PERSON_TOKENS = {
+    'you',
+    'your',
+    'yourself',
+}
+
+
+def _normalized_marker_hits(text: str, markers: tuple[str, ...]) -> list[str]:
+    normalized_text = normalize_name(text)
+    hits: list[str] = []
+    for marker in markers:
+        normalized_marker = normalize_name(marker)
+        if normalized_marker and normalized_marker in normalized_text:
+            hits.append(marker)
+    return hits
+
+
+def _strip_leading_persona_update_scaffolding(text: str) -> str:
+    clean = ' '.join(str(text or '').strip().split())
+    if not clean:
+        return ''
+    lowered = clean.casefold()
+    for marker in sorted(_PERSONA_DOSSIER_UPDATE_MARKERS, key=len, reverse=True):
+        marker_clean = ' '.join(str(marker or '').strip().split())
+        if not marker_clean:
+            continue
+        marker_lowered = marker_clean.casefold()
+        if lowered.startswith(marker_lowered):
+            trimmed = clean[len(marker_clean) :].lstrip(' ,:;-')
+            if trimmed:
+                return trimmed
+    return clean
 
 
 def _set_repair_status(session_id: str, payload: dict[str, Any]) -> None:
@@ -135,6 +195,112 @@ def _apply_emotion_update(persona_name: str, situation: Situation, *, side_effec
     side_effects.add_persona_update('emotion_vector')
 
 
+def _effective_response_language(*, requested_language: str, detected_language: str) -> str:
+    requested = normalize_language_code(requested_language, fallback='')
+    detected = normalize_language_code(detected_language, fallback='en')
+    if detected in {'ru', 'hy', 'zh'}:
+        return detected
+    if requested:
+        return requested
+    return detected or 'en'
+
+
+def _internal_reasoning_message(message: str, *, detected_language: str) -> str:
+    clean = ' '.join(str(message or '').strip().split())
+    source_language = normalize_language_code(detected_language, fallback='en')
+    if not clean or source_language == 'en':
+        return clean
+    translated = translate_text(
+        clean,
+        target_language='en',
+        source_language=source_language,
+        role=get_runtime_config().roles.translation,
+    )
+    return ' '.join(str(translated or clean).strip().split()) or clean
+
+
+def _looks_like_persona_dossier_update(message: str, *, persona_name: str, analysis: MessageAnalysis) -> bool:
+    clean = ' '.join(str(message or '').strip().split())
+    if not clean or not persona_name:
+        return False
+    if analysis.user_state.intent in {'insult', 'seek_support', 'confession'}:
+        return False
+    lowered = normalize_name(clean)
+    persona_token = normalize_name(persona_name)
+    has_persona_reference = bool(persona_token and persona_token in lowered)
+    has_second_person = any(token in lowered.split() for token in _SECOND_PERSON_TOKENS)
+    if not has_persona_reference and not has_second_person:
+        return False
+    if len(clean.split()) < 5:
+        return False
+    update_hits = _normalized_marker_hits(clean, _PERSONA_DOSSIER_UPDATE_MARKERS)
+    fact_hits = _normalized_marker_hits(clean, _PERSONA_DOSSIER_FACT_MARKERS)
+    if '?' in clean and not update_hits:
+        return False
+    return bool(fact_hits or update_hits)
+
+
+def _capture_persona_dossier_update(
+    persona_name: str,
+    message: str,
+    *,
+    analysis: MessageAnalysis,
+    response_language: str,
+    side_effects: ChatSideEffects,
+    detection_message: str = '',
+) -> bool:
+    detection_input = str(detection_message or message or '').strip()
+    if not _looks_like_persona_dossier_update(detection_input, persona_name=persona_name, analysis=analysis):
+        return False
+    try:
+        clean = ' '.join(str(message or '').strip().split())
+        canonical_excerpt = _strip_leading_persona_update_scaffolding(clean)
+        source_language = normalize_language_code(response_language or analysis.user_state.language, fallback='en')
+        if source_language != 'en':
+            canonical_excerpt = translate_text(
+                canonical_excerpt,
+                target_language='en',
+                source_language=source_language,
+                role=get_runtime_config().roles.translation,
+            ) or canonical_excerpt
+        canonical_excerpt = _strip_leading_persona_update_scaffolding(canonical_excerpt)
+        record_persona_dossier_fact(
+            persona_name,
+            canonical_excerpt,
+        )
+        side_effects.add_persona_update('learned_update')
+        return True
+    except Exception:
+        return False
+
+
+def _persona_dossier_acknowledgement(language: str) -> str:
+    target = normalize_language_code(language, fallback='en')
+    base = 'Noted. I will add that to my personal record and use it in later answers.'
+    if target == 'en':
+        return base
+    return translate_text(
+        base,
+        target_language=target,
+        source_language='en',
+        role=get_runtime_config().roles.translation,
+    ) or base
+
+
+def _normalized_persona_dossier_situation() -> Situation:
+    normalized = Situation(
+        type='neutral_statement',
+        target='persona',
+        severity=0.22,
+    )
+    return Situation(
+        type=normalized.type,
+        target=normalized.target,
+        severity=normalized.severity,
+        summary=f'type={normalized.type}; target={normalized.target}; severity={normalized.severity:.2f}',
+    )
+
+
 def _record_persona_reaction(persona_name: str, situation: Situation, assistant_reply: str, *, side_effects: ChatSideEffects) -> None:
     if not persona_name:
         return
@@ -166,6 +332,36 @@ def _apply_rebuild_schedule(session_id: str, *, personality_name: str, side_effe
             },
         )
     return _get_repair_status(session_id)
+
+
+def _call_build_context_compat(**kwargs: Any) -> dict[str, Any]:
+    try:
+        signature = inspect.signature(build_context)
+    except (TypeError, ValueError):
+        return build_context(**kwargs)
+    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()):
+        return build_context(**kwargs)
+    accepted = {
+        key: value
+        for key, value in kwargs.items()
+        if key in signature.parameters
+    }
+    return build_context(**accepted)
+
+
+def _call_build_chat_prompt_compat(**kwargs: Any) -> str:
+    try:
+        signature = inspect.signature(build_chat_prompt)
+    except (TypeError, ValueError):
+        return build_chat_prompt(**kwargs)
+    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()):
+        return build_chat_prompt(**kwargs)
+    accepted = {
+        key: value
+        for key, value in kwargs.items()
+        if key in signature.parameters
+    }
+    return build_chat_prompt(**accepted)
 
 
 def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
@@ -237,6 +433,36 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             user_state=prepared['user_state'],
             situation=situation,
         )
+        response_language = _effective_response_language(
+            requested_language=request.language,
+            detected_language=analysis.user_state.language,
+        )
+        reasoning_message = _internal_reasoning_message(
+            clean_message,
+            detected_language=analysis.user_state.language,
+        )
+        dossier_update_candidate = _looks_like_persona_dossier_update(
+            reasoning_message,
+            persona_name=str(prepared['selected_head'] or request.selected_persona or ''),
+            analysis=analysis,
+        )
+        dossier_update_statement = bool(
+            dossier_update_candidate
+            and analysis.user_state.intent == 'statement'
+            and not bool(analysis.user_state.signals.get('contains_question'))
+        )
+        if dossier_update_statement:
+            analysis = MessageAnalysis(
+                message=analysis.message,
+                session_id=analysis.session_id,
+                selected_head=analysis.selected_head,
+                primary_entity=analysis.primary_entity,
+                current_entity=analysis.current_entity,
+                explicit_context=analysis.explicit_context,
+                entities=list(analysis.entities),
+                user_state=analysis.user_state,
+                situation=_normalized_persona_dossier_situation(),
+            )
         features = observability.time_stage(
             trace,
             'feature_extraction',
@@ -277,6 +503,9 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             },
         )
         active_persona_bundle = load_persona(primary_name) if primary_name else None
+        session_mood_report = load_mood_report(session_id=clean_session_id) if clean_session_id else None
+        persona_mood_report = load_mood_report(persona_name=primary_name) if primary_name else None
+        active_mood_report = session_mood_report or persona_mood_report
         selection_explanation = (
             primary.get('selection_explanation')
             if primary and isinstance(primary.get('selection_explanation'), PersonaSelectionExplanation)
@@ -287,16 +516,25 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             if active_persona_bundle is not None
             else PersonaResponseExplanation(persona_name=primary_name)
         )
+        social_role = choose_social_role(
+            bundle=active_persona_bundle,
+            analysis=analysis,
+            situation=analysis.situation,
+            mood_report=active_mood_report,
+        )
         built = observability.time_stage(
             trace,
             'context_building',
-            lambda: build_context(
-                question=clean_message,
+            lambda: _call_build_context_compat(
+                question=reasoning_message,
                 session_id=clean_session_id,
                 selected_persona=primary_name,
                 explicit_context=request.explicit_context,
                 situation=analysis.situation,
                 store=graph_store,
+                social_role=social_role,
+                mood_report=active_mood_report,
+                analysis=analysis,
             ),
             meta_builder=lambda payload: {
                 'estimated_tokens': int(payload.get('estimated_tokens') or 0),
@@ -305,20 +543,31 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 'packed_candidate_counts': dict(dict(dict(payload.get('context_debug') or {}).get('stages') or {}).get('pack_context') or {}),
             },
         )
-        prompt = build_chat_prompt(
+        prompt = _call_build_chat_prompt_compat(
             question=clean_message,
+            internal_question=reasoning_message,
             persona_block=built.get('persona_block') or '',
+            social_role_block=render_social_role_block(social_role, mood_report=active_mood_report),
+            mood_research_block=(
+                f"Latest mood cluster: {active_mood_report.latest_cluster_label}. "
+                f"Observed role trend: {', '.join(str(item.get('role') or '') for item in list(active_mood_report.role_effects or [])[:3] if str(item.get('role') or '').strip())}."
+                if active_mood_report is not None and active_mood_report.snapshot_count > 0
+                else ''
+            ),
             graph_context=built.get('graph_context') or '',
             recent_dialogue=built.get('recent_dialogue') or '',
-            language=request.language,
+            language=response_language,
+            semantic_focus=dict(dict(built.get('context_debug') or {}).get('semantic_focus') or {}),
         )
 
         def _generate_reply() -> tuple[str, bool, str, dict[str, Any]]:
-            fallback_text = fallback_chat_reply(language=request.language, persona_selected=bool(primary_name))
+            if dossier_update_statement:
+                return _persona_dossier_acknowledgement(response_language), False, '', {}
+            fallback_text = fallback_chat_reply(language=response_language, persona_selected=bool(primary_name))
             grounded = any(str(part or '').strip() for part in (built.get('persona_block'), built.get('graph_context'), built.get('recent_dialogue')))
             if not grounded:
                 return fallback_text, True, 'no_grounding', {}
-            reply = generate_chat_reply(prompt, language=request.language, persona_selected=bool(primary_name))
+            reply = generate_chat_reply(prompt, language=response_language, persona_selected=bool(primary_name))
             used_fallback = str(reply or '').strip() == fallback_text
             status = runtime_status_snapshot() if used_fallback else {}
             fallback_reason = ''
@@ -358,14 +607,33 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             lambda: (
                 _write_session_history(clean_session_id, clean_message, assistant_reply, side_effects=side_effects),
                 _record_persona_reaction(primary_name, analysis.situation, assistant_reply, side_effects=side_effects),
+                _capture_persona_dossier_update(
+                    primary_name,
+                    clean_message,
+                    analysis=analysis,
+                    response_language=response_language,
+                    side_effects=side_effects,
+                    detection_message=reasoning_message,
+                ),
+                record_mood_snapshot(
+                    build_mood_snapshot(
+                        analysis=analysis,
+                        persona_bundle=active_persona_bundle,
+                        social_role=social_role,
+                        response_style=response_explanation.response_style,
+                        session_id=clean_session_id,
+                    )
+                ),
+                schedule_mood_research_refresh(persona_name=primary_name, session_id=clean_session_id),
                 _apply_rebuild_schedule(clean_session_id, personality_name=primary_name, side_effects=side_effects),
             )[-1],
             meta_builder=lambda payload: {
                 'history_write_path': side_effects.history_write_path,
-                'persona_updates': list(side_effects.persona_updates),
+                'persona_updates': list(side_effects.persona_updates) + ['mood_research'],
                 'repair_status': str(payload.get('status') or ''),
             },
         )
+        side_effects.add_persona_update('mood_research')
         observability.finish_trace(
             trace,
             status='ok',
@@ -378,10 +646,22 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 'classification_count': len(classifications),
                 'repair_status': str(repair_status.get('status') or ''),
                 'runtime_mode': str(dict(runtime_status or {}).get('mode') or 'full'),
+                'response_language': response_language,
+                'social_role': social_role.role,
             },
         )
+        if 'learned_update' in side_effects.persona_updates:
+            operator_messages = [
+                *operator_messages,
+                'A new user-provided fact about the persona was added to the learned dossier and will influence future replies.',
+            ]
+        operator_messages = [
+            *operator_messages,
+            f"The current interaction role was selected as '{social_role.role}' based on persona structure, mood signals, and situation context.",
+        ]
         return ChatTurnResult(
             assistant_reply=assistant_reply,
+            response_language=response_language,
             session_id=clean_session_id,
             trace_id=trace.request_id,
             session=parse_session(clean_session_id) or session,
@@ -395,11 +675,36 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             side_effects=side_effects,
             persona_selection=selection_explanation,
             persona_response=response_explanation,
+            social_role=social_role,
+            mood_research={
+                'active_report_scope': active_mood_report.scope if active_mood_report is not None else '',
+                'latest_cluster': active_mood_report.latest_cluster_label if active_mood_report is not None else '',
+                'snapshot_count': active_mood_report.snapshot_count if active_mood_report is not None else 0,
+            },
+            behavior_trace={
+                'semantic_focus': dict(dict(built.get('context_debug') or {}).get('semantic_focus') or {}),
+                'social_role': social_role.to_dict(),
+                'mood_cluster': active_mood_report.latest_cluster_label if active_mood_report is not None else '',
+                'selected_context_sources': dict(dict(built.get('context_debug') or {}).get('source_counts') or {}),
+                'selected_context_items': [
+                    {
+                        'source': str(item.get('source') or ''),
+                        'item_type': str(item.get('item_type') or ''),
+                        'title': str(item.get('title') or ''),
+                        'reasons': list(item.get('reasons') or []),
+                    }
+                    for item in list(dict(built.get('context_debug') or {}).get('selected_items') or [])[:12]
+                    if isinstance(item, dict)
+                ],
+                'dossier_update_candidate': bool(dossier_update_candidate),
+                'response_style': response_explanation.response_style,
+            },
             context_preview={
                 'estimated_tokens': int(built.get('estimated_tokens') or 0),
                 'graph_context': built.get('graph_context') or '',
                 'current_entity': built.get('current_entity') or primary_name,
                 'persona_name': built.get('persona_name') or primary_name,
+                'social_role': social_role.to_dict(),
                 'source_counts': dict(dict(built.get('context_debug') or {}).get('source_counts') or {}),
                 'selected_items': list(dict(built.get('context_debug') or {}).get('selected_items') or []),
             },

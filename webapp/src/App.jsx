@@ -495,7 +495,7 @@ export default function App() {
         personality_name: selectedPersonality,
       });
       setLastChatResult(result);
-      setGraphContentLanguage(result?.analysis?.user_state?.language || uiLanguage);
+      setGraphContentLanguage(result?.response_language || result?.analysis?.user_state?.language || uiLanguage);
       setChatInput('');
       if (result.session) {
         setActiveSession(result.session);

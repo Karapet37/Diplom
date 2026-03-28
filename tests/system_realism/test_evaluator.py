@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tests.system_realism.dialogue_cases import canonical_dialogue_cases
+from tests.system_realism.dialogue_cases import canonical_dialogue_cases, exploratory_dialogue_case_pool
 from tests.system_realism.evaluator import evaluate_realism
 from tests.system_realism.models import DialogueObservation, HttpCallRecord, StartupDiagnosis
 from tests.system_realism.persona_fixture import canonical_test_persona
@@ -15,7 +15,8 @@ class StubJudge:
 
 
 def _observation(case_id: str, reply: str, *, latency_ms: float = 120.0) -> DialogueObservation:
-    case = {case.case_id: case for case in canonical_dialogue_cases()}[case_id]
+    case_index = {case.case_id: case for case in canonical_dialogue_cases() + exploratory_dialogue_case_pool()}
+    case = case_index[case_id]
     response = HttpCallRecord(
         method='POST',
         path='/api/cognitive/chat/respond',
@@ -96,3 +97,21 @@ def test_evaluator_marks_startup_failure_transparently() -> None:
     assert report['overall_verdict'] == 'startup_failed'
     assert report['score_explanations']['infrastructure_status']
     assert report['judge_evaluation']['enabled'] is False
+
+
+def test_evaluator_penalizes_exploratory_persona_collapse() -> None:
+    report = evaluate_realism(
+        startup=StartupDiagnosis(startup_attempted=True, startup_success=True),
+        reachability={'root_html': True, 'chat_alive': True},
+        persona=canonical_test_persona(),
+        persona_materialization={'ok': True},
+        persona_endpoint={'name': canonical_test_persona().name},
+        dialogue_observations=[
+            _observation('exploratory_unexpected_fatherhood', 'As an AI, I cannot have children or personal experiences.'),
+        ],
+        diagnostics={'runtime_status': {'mode': 'normal'}},
+    )
+
+    assert report['generic_llm_leakage_score'] >= 0.25
+    assert report['metric_breakdowns']['exploratory_resilience']['failure_count'] == 1
+    assert any('exploratory' in item.lower() for item in report['suspicious_patterns'])

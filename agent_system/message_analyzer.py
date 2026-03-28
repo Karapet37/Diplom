@@ -12,7 +12,7 @@ ENTITY_PATTERNS = (
     re.compile(r'"([^"]{2,80})"'),
     re.compile(r"'([^']{2,80})'"),
     re.compile(r'\b(?:about|like|as|with|to|for)\s+([A-ZА-Я][\w-]*(?:\s+[A-ZА-Я][\w-]*){0,3})'),
-    re.compile(r'\b(?:about|like|as|with|to|for|regarding|around|про|о|как)\s+([A-Za-zА-Яа-я][\w-]*(?:\s+[A-Za-zА-Яа-я][\w-]*){0,3})', re.IGNORECASE),
+    re.compile(r'\b(?:about|regarding|around|про|о|как)\s+([A-Za-zА-Яа-я][\w-]*(?:\s+[A-Za-zА-Яа-я][\w-]*){0,3})', re.IGNORECASE),
 )
 
 ENTITY_STOPWORDS = {
@@ -43,6 +43,11 @@ ENTITY_STOPWORDS = {
     'как',
     'что',
     'кто',
+    'day',
+    'night',
+    'today',
+    'tomorrow',
+    'yesterday',
 }
 
 ENTITY_BREAKWORDS = {'the', 'a', 'an'}

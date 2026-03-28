@@ -23,6 +23,7 @@ def test_runtime_launcher_uses_real_project_entrypoint() -> None:
     assert launcher.command[1] == 'start.py'
     assert '--profile' in launcher.command
     assert '--api-only' in launcher.command
+    assert launcher.command[0]
 
 
 def test_runtime_launcher_reachability_helpers_hit_expected_paths() -> None:

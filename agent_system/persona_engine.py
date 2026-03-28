@@ -28,6 +28,7 @@ from .models import (
     HeadBundle,
     PersonaBaselineDefinition,
     PersonaDynamicState,
+    PersonaGraphExplanation,
     PersonaIndicators,
     PersonaLearnedPatterns,
     PersonaResponseExplanation,
@@ -220,6 +221,20 @@ def _normalize_string_list(values: list[Any], *, limit: int) -> list[str]:
     return list(
         dict.fromkeys(str(item).strip() for item in list(values or []) if str(item).strip())
     )[:limit]
+
+
+def _append_unique_limited(values: list[str], item: str, *, limit: int) -> list[str]:
+    clean = str(item or '').strip()
+    if not clean:
+        return _normalize_string_list(values, limit=limit)
+    return _normalize_string_list(list(values or []) + [clean], limit=limit)
+
+
+def _prepend_unique_limited(values: list[str], item: str, *, limit: int) -> list[str]:
+    clean = str(item or '').strip()
+    if not clean:
+        return _normalize_string_list(values, limit=limit)
+    return _normalize_string_list([clean] + list(values or []), limit=limit)
 
 
 def _normalized_emotion_vector(payload: Any) -> dict[str, float]:
@@ -833,7 +848,18 @@ def _default_persona_form(
         'identity_class': _identity_class(entity_type),
         'interaction_style': _normalize_string_list((existing_form or {}).get('interaction_style') or interaction_style, limit=8),
         'core_dispositions': _normalize_string_list((existing_form or {}).get('core_dispositions') or traits, limit=12),
+        'biography': str((existing_form or {}).get('biography') or '').strip()[:1200],
+        'social_roles': _normalize_string_list((existing_form or {}).get('social_roles') or interaction_style, limit=8),
+        'habits': _normalize_string_list((existing_form or {}).get('habits') or (existing_form or {}).get('work_habits') or [], limit=10),
+        'values': _normalize_string_list((existing_form or {}).get('values') or [], limit=8),
+        'conflicts': _normalize_string_list((existing_form or {}).get('conflicts') or (existing_form or {}).get('weaknesses') or [], limit=8),
+        'topic_affinities': _normalize_string_list((existing_form or {}).get('topic_affinities') or relation_targets, limit=10),
+        'speech_style': _normalize_string_list((existing_form or {}).get('speech_style') or [], limit=8),
+        'speech_tendencies': _normalize_string_list((existing_form or {}).get('speech_tendencies') or (existing_form or {}).get('speech_style') or [], limit=8),
+        'emotional_tendencies': _normalize_string_list((existing_form or {}).get('emotional_tendencies') or [], limit=8),
+        'conflict_behavior': _normalize_string_list((existing_form or {}).get('conflict_behavior') or [], limit=8),
         'decision_patterns': _normalize_string_list((existing_form or {}).get('decision_patterns') or decision_patterns, limit=8),
+        'reaction_patterns': _normalize_string_list((existing_form or {}).get('reaction_patterns') or (existing_form or {}).get('conflict_behavior') or decision_patterns, limit=10),
         'clarification_policy': str((existing_form or {}).get('clarification_policy') or 'Ask a clarifying question when the target, intent, or grounding is insufficient.').strip(),
         'sarcasm_profile': str((existing_form or {}).get('sarcasm_profile') or _sarcasm_profile(traits, examples)).strip() or 'none',
         'response_priorities': _normalize_string_list(
@@ -842,6 +868,14 @@ def _default_persona_form(
         ),
         'knowledge_domains': _normalize_string_list((existing_form or {}).get('knowledge_domains') or relation_targets, limit=10),
         'risk_controls': _normalize_string_list((existing_form or {}).get('risk_controls') or risk_controls, limit=8),
+        'trust_model': _normalize_string_list((existing_form or {}).get('trust_model') or [], limit=8),
+        'work_habits': _normalize_string_list((existing_form or {}).get('work_habits') or [], limit=8),
+        'memory_anchors': _normalize_string_list((existing_form or {}).get('memory_anchors') or [], limit=10),
+        'memories': _normalize_string_list((existing_form or {}).get('memories') or (existing_form or {}).get('memory_anchors') or [], limit=12),
+        'recurring_style_markers': _normalize_string_list((existing_form or {}).get('recurring_style_markers') or [], limit=8),
+        'strengths': _normalize_string_list((existing_form or {}).get('strengths') or [], limit=8),
+        'weaknesses': _normalize_string_list((existing_form or {}).get('weaknesses') or [], limit=8),
+        'personal_history': _normalize_string_list((existing_form or {}).get('personal_history') or [], limit=10),
         'log_signature_count': len(log_tuples),
     }
     return form
@@ -854,13 +888,32 @@ def _validated_persona_form(value: Any, *, fallback: dict[str, Any]) -> dict[str
         token = str(raw.get(key) or result.get(key) or '').strip()
         if token:
             result[key] = token
+    result['biography'] = str(raw.get('biography') or result.get('biography') or '').strip()[:1200]
     for key, limit in (
         ('interaction_style', 8),
         ('core_dispositions', 12),
+        ('social_roles', 8),
+        ('habits', 10),
+        ('values', 8),
+        ('conflicts', 8),
+        ('topic_affinities', 10),
+        ('speech_style', 8),
+        ('speech_tendencies', 8),
+        ('emotional_tendencies', 8),
+        ('conflict_behavior', 8),
         ('decision_patterns', 8),
+        ('reaction_patterns', 10),
         ('response_priorities', 8),
         ('knowledge_domains', 10),
         ('risk_controls', 8),
+        ('trust_model', 8),
+        ('work_habits', 8),
+        ('memory_anchors', 10),
+        ('memories', 12),
+        ('recurring_style_markers', 8),
+        ('strengths', 8),
+        ('weaknesses', 8),
+        ('personal_history', 10),
     ):
         result[key] = _normalize_string_list(list(raw.get(key) or result.get(key) or []), limit=limit)
     result['log_signature_count'] = int(raw.get('log_signature_count') or result.get('log_signature_count') or 0)
@@ -890,6 +943,31 @@ def _default_decision_explanation(name: str, persona_form: dict[str, Any]) -> st
 def _validated_decision_explanation(value: Any, *, fallback: str) -> str:
     text = str(value or '').strip()
     return text[:600] if text else fallback[:600]
+
+
+def _persona_dossier_bucket(fact: str) -> str:
+    lowered = normalize_name(fact)
+    if any(token in lowered for token in ('role', 'friend', 'ally', 'critic', 'rival', 'mentor', 'comfort', 'provocat')):
+        return 'social_roles'
+    if any(token in lowered for token in ('habit', 'routine', 'always', 'usually', 'tend to', 'keep doing')):
+        return 'habits'
+    if any(token in lowered for token in ('work', 'shift', 'hospital', 'clinic', 'resident', 'triage', 'mentor', 'overnight')):
+        return 'work_habits'
+    if any(token in lowered for token in ('value', 'values', 'protect', 'prefer', 'principle', 'believe')):
+        return 'values'
+    if any(token in lowered for token in ('conflict', 'torn', 'struggle', 'resent', 'fear becoming', 'can not forgive')):
+        return 'conflicts'
+    if any(token in lowered for token in ('topic', 'obsessed', 'interested in', 'drawn to', 'care about')):
+        return 'topic_affinities'
+    if any(token in lowered for token in ('speak', 'voice', 'tone', 'dryly', 'blunt', 'sarcast', 'quietly')):
+        return 'speech_tendencies'
+    if any(token in lowered for token in ('trust', 'distrust', 'skeptical of', 'earns attention')):
+        return 'trust_model'
+    if any(token in lowered for token in ('watch', 'notebook', 'anchor', 'father', 'mother', 'sister')):
+        return 'memory_anchors'
+    if any(token in lowered for token in ('remember', 'once', 'after', 'during', 'lost', 'learned that')):
+        return 'memories'
+    return 'personal_history'
 
 
 def _validated_persona_payload(
@@ -1260,6 +1338,8 @@ def _response_style(bundle: HeadBundle, *, situation_type: str, target: str, sev
     if situation_type == 'user_anger':
         return 'de_escalating' if traits['empathy'] >= traits['aggression'] else 'assertive'
     if situation_type == 'neutral_query':
+        if target == 'persona' and (traits['restraint'] >= 0.5 or traits['confidence'] >= 0.5):
+            return 'direct_explanatory'
         return 'inquisitive' if emotion_state.get('curiosity', 0.0) >= 0.45 else 'formal'
     return 'steady'
 
@@ -1382,7 +1462,7 @@ def explain_response_style(
         trait_influences.extend([trait for trait in bundle.traits if normalize_name(trait) in {'aggressive', 'predatory', 'aristocratic', 'logical'}][:3])
     elif actual.response_style in {'supportive', 'measured_support', 'de_escalating'}:
         trait_influences.extend([trait for trait in bundle.traits if normalize_name(trait) in {'empathetic', 'warm', 'logical'}][:3])
-    elif actual.response_style in {'inquisitive', 'formal', 'steady'}:
+    elif actual.response_style in {'inquisitive', 'formal', 'steady', 'direct_explanatory'}:
         trait_influences.extend([trait for trait in bundle.traits if normalize_name(trait) in {'logical', 'analytical', 'curious', 'aristocratic'}][:3])
     learned_influences: list[str] = []
     if bundle.persona_form:
@@ -1449,7 +1529,26 @@ def record_situation_reaction(name: str, situation: str | Situation | dict[str, 
         bundle = load_persona(clean) or spawn_head(clean, entity_type='PERSON')
         payload = load_json(_head_file(clean, 'examples.json'), {'examples': [], 'situation_reactions': []})
         situation_reactions = [dict(item) for item in list(payload.get('situation_reactions') or []) if isinstance(item, dict)]
-        entry = {'situation': situation_summary(situation), 'reaction': reaction if reaction == 0 else str(reaction or '').strip()}
+        reaction_outcome = reaction_policy(bundle, situation)
+        raw_reaction = ' '.join(str(reaction or '').split()) if reaction != 0 else ''
+        reaction_excerpt = raw_reaction
+        if len(reaction_excerpt) > 220:
+            reaction_excerpt = reaction_excerpt[:217].rsplit(' ', 1)[0].strip() + '...'
+        situation_type = ''
+        if isinstance(situation, Situation):
+            situation_type = str(situation.type or '').strip()
+        elif isinstance(situation, dict):
+            situation_type = str(situation.get('type') or '').strip()
+        if situation_type in {'neutral_query', 'neutral_statement'}:
+            if raw_reaction.endswith('?'):
+                reaction_value = f'response_style={reaction_outcome.response_style}; asks_for_clarification_when_grounding_is_thin'
+            else:
+                reaction_value = f'response_style={reaction_outcome.response_style}; answers_substance_first_with_persona_grounding'
+        elif reaction_excerpt:
+            reaction_value = f'response_style={reaction_outcome.response_style}; {reaction_excerpt}'
+        else:
+            reaction_value = f'response_style={reaction_outcome.response_style}'
+        entry = {'situation': situation_summary(situation), 'reaction': reaction_value}
         if not entry['situation']:
             return
         deduped: list[dict[str, Any]] = []
@@ -1489,6 +1588,81 @@ def record_situation_reaction(name: str, situation: str | Situation | dict[str, 
     )
 
 
+def record_persona_dossier_fact(name: str, fact: str) -> HeadBundle | None:
+    clean = normalize_personality_name(name)
+    normalized_fact = ' '.join(str(fact or '').strip().split())
+    if not clean or not normalized_fact:
+        return load_persona(clean) if clean else None
+
+    def _apply() -> HeadBundle | None:
+        bundle = load_persona(clean) or spawn_head(clean, entity_type='PERSON')
+        payload = load_json(_head_file(clean, 'examples.json'), {'examples': [], 'situation_reactions': []})
+        updated_examples = _merge_examples(
+            list(payload.get('examples') or bundle.examples),
+            [f'User-provided fact: {normalized_fact}'],
+        )
+        updated_reactions = [
+            dict(item)
+            for item in list(payload.get('situation_reactions') or bundle.situation_reactions)
+            if isinstance(item, dict)
+        ]
+        write_json(
+            _head_file(clean, 'examples.json'),
+            {
+                'examples': list(updated_examples),
+                'situation_reactions': updated_reactions,
+            },
+        )
+
+        persona_form = dict(bundle.persona_form or {})
+        bucket = _persona_dossier_bucket(normalized_fact)
+        persona_form[bucket] = _prepend_unique_limited(
+            [str(item).strip() for item in list(persona_form.get(bucket) or []) if str(item).strip()],
+            normalized_fact,
+            limit=_memory_limits().persona_example_limit,
+        )
+        write_json(_head_file(clean, 'persona_form.json'), persona_form)
+
+        learned = PersonaLearnedPatterns(
+            examples=list(updated_examples),
+            situation_reactions=list(updated_reactions),
+            log_tuples=_merge_log_tuples(
+                list(bundle.log_tuples),
+                _build_log_tuples(list(updated_examples), list(updated_reactions)),
+            ),
+            persona_form=dict(persona_form),
+            decision_explanation=bundle.decision_explanation,
+            learned_traits=list(bundle.learned_patterns.learned_traits) if bundle.learned_patterns is not None else [],
+            revision=int((bundle.learned_patterns.revision if bundle.learned_patterns is not None else bundle.meta.get('learned_revision') or 1)),
+            updated_at=_utc_now(),
+        )
+        write_json(_head_file(clean, 'log_tuples.json'), {'items': list(learned.log_tuples)})
+        _write_layered_state(clean, learned=learned, reason='record_persona_dossier_fact')
+        baseline = bundle.baseline_definition
+        if baseline is not None:
+            GraphStore().sync_head(
+                name=baseline.name,
+                folder=str(_head_dir(clean)),
+                entity_type=baseline.entity_type,
+                aliases=list(baseline.aliases),
+                description=(baseline.knowledge.splitlines()[0] if baseline.knowledge else f'Persona head for {baseline.name}.'),
+                facts=list(updated_examples)[:8],
+                knowledge=baseline.knowledge,
+                relations=list(baseline.relations),
+            )
+        _sync_local_graph(clean)
+        _sync_meta_summary(clean)
+        return load_persona(clean)
+
+    return _execute_persona_mutation(
+        clean,
+        reason='record_persona_dossier_fact',
+        archive_snapshot=False,
+        graph_snapshot=False,
+        operation=_apply,
+    )
+
+
 def build_persona_graph(profile: HeadBundle | dict[str, Any]) -> dict[str, Any]:
     if isinstance(profile, HeadBundle):
         name = profile.name
@@ -1498,6 +1672,7 @@ def build_persona_graph(profile: HeadBundle | dict[str, Any]) -> dict[str, Any]:
         examples = profile.examples
         emotion_vector = profile.emotion_vector
         folder = profile.folder
+        persona_form = dict(profile.persona_form or {})
     else:
         name = str(profile.get('name') or 'unknown_head')
         entity_type = str(profile.get('entity_type') or 'CONCEPT')
@@ -1506,6 +1681,7 @@ def build_persona_graph(profile: HeadBundle | dict[str, Any]) -> dict[str, Any]:
         examples = _normalize_string_list(list(profile.get('examples') or []), limit=_memory_limits().persona_example_limit)
         emotion_vector = _normalized_emotion_vector(profile.get('emotion_vector') or profile)
         folder = str(profile.get('folder') or _head_dir(name))
+        persona_form = dict(profile.get('persona_form') or {})
     slug = normalize_personality_name(name)
     root_id = f'head:{slug}'
     nodes = [
@@ -1519,26 +1695,134 @@ def build_persona_graph(profile: HeadBundle | dict[str, Any]) -> dict[str, Any]:
             'frequency': max(len(examples), 1),
             'emotion_vector': emotion_vector,
             'facts': examples[:6],
+            'context': {'source': 'persona_graph', 'persona_name': name, 'category': 'identity'},
         }
     ]
     edges: list[dict[str, Any]] = []
+
+    def _append_node(node_id: str, node_name: str, *, importance: float, confidence: float, category: str, facts: list[str] | None = None) -> None:
+        nodes.append(
+            {
+                'id': node_id,
+                'name': node_name,
+                'type': 'CONCEPT',
+                'importance': importance,
+                'confidence': confidence,
+                'frequency': 1,
+                'facts': list(facts or [])[:6],
+                'context': {'source': 'persona_graph', 'persona_name': name, 'category': category},
+            }
+        )
+
+    def _append_edge(from_id: str, to_id: str, relation_type: str, *, weight: float = 0.78, confidence: float = 0.8) -> None:
+        edges.append({'from': from_id, 'to': to_id, 'type': relation_type, 'weight': weight, 'confidence': confidence})
+
     for trait in traits:
         trait_id = f'trait:{slug}:{normalize_personality_name(trait)}'
-        nodes.append({'id': trait_id, 'name': trait, 'type': 'CONCEPT', 'importance': 0.4, 'confidence': 0.8, 'frequency': 1})
-        edges.append({'from': root_id, 'to': trait_id, 'type': 'HAS_TRAIT', 'weight': 0.9, 'confidence': 0.85})
+        _append_node(trait_id, trait, importance=0.4, confidence=0.8, category='trait')
+        _append_edge(root_id, trait_id, 'HAS_TRAIT', weight=0.9, confidence=0.85)
     for relation in relations:
         target = str(relation.get('target') or relation.get('to') or '').strip()
         relation_type = str(relation.get('type') or 'RELATED_TO').strip().upper()
         if not target:
             continue
         target_id = f'concept:{normalize_personality_name(target)}'
-        nodes.append({'id': target_id, 'name': target, 'type': 'CONCEPT', 'importance': 0.3, 'confidence': 0.7, 'frequency': 1})
-        edges.append({'from': root_id, 'to': target_id, 'type': relation_type, 'weight': 0.8, 'confidence': 0.8})
+        _append_node(target_id, target, importance=0.3, confidence=0.7, category='relation_target')
+        _append_edge(root_id, target_id, relation_type, weight=0.8, confidence=0.8)
     for example in examples[:6]:
         example_id = f'example:{slug}:{normalize_personality_name(example)[:32]}'
-        nodes.append({'id': example_id, 'name': example, 'type': 'CONCEPT', 'importance': 0.2, 'confidence': 0.6, 'frequency': 1})
-        edges.append({'from': root_id, 'to': example_id, 'type': 'HAS_EXAMPLE', 'weight': 0.5, 'confidence': 0.6})
+        _append_node(example_id, example, importance=0.2, confidence=0.6, category='example')
+        _append_edge(root_id, example_id, 'HAS_EXAMPLE', weight=0.5, confidence=0.6)
+
+    structural_categories = (
+        ('social_roles', 'role', 'CAN_PLAY_ROLE', 0.46),
+        ('habits', 'habit', 'HAS_HABIT', 0.42),
+        ('values', 'value', 'VALUES', 0.5),
+        ('conflicts', 'conflict', 'HAS_CONFLICT', 0.47),
+        ('topic_affinities', 'topic', 'AFFINITY_FOR', 0.4),
+        ('speech_tendencies', 'speech', 'SPEAKS_WITH', 0.4),
+        ('memories', 'memory', 'REMEMBERS', 0.38),
+        ('reaction_patterns', 'reaction', 'USES_REACTION_PATTERN', 0.44),
+    )
+    category_nodes: dict[str, list[str]] = {}
+    for form_key, prefix, relation_type, importance in structural_categories:
+        items = [str(item).strip() for item in list(persona_form.get(form_key) or []) if str(item).strip()]
+        local_ids: list[str] = []
+        for item in items[:12]:
+            node_id = f'{prefix}:{slug}:{normalize_personality_name(item)[:36]}'
+            _append_node(node_id, item, importance=importance, confidence=0.82, category=form_key)
+            _append_edge(root_id, node_id, relation_type, weight=0.84, confidence=0.82)
+            local_ids.append(node_id)
+        category_nodes[form_key] = local_ids
+
+    for role_id in category_nodes.get('social_roles', []):
+        for habit_id in category_nodes.get('habits', [])[:4]:
+            _append_edge(role_id, habit_id, 'SUPPORTED_BY_HABIT', weight=0.62, confidence=0.74)
+        for speech_id in category_nodes.get('speech_tendencies', [])[:4]:
+            _append_edge(role_id, speech_id, 'COLORED_BY_SPEECH', weight=0.58, confidence=0.72)
+        for reaction_id in category_nodes.get('reaction_patterns', [])[:4]:
+            _append_edge(role_id, reaction_id, 'EXPRESSED_AS', weight=0.61, confidence=0.74)
+    for value_id in category_nodes.get('values', []):
+        for conflict_id in category_nodes.get('conflicts', [])[:4]:
+            _append_edge(value_id, conflict_id, 'IN_TENSION_WITH', weight=0.66, confidence=0.76)
+    for topic_id in category_nodes.get('topic_affinities', []):
+        for memory_id in category_nodes.get('memories', [])[:4]:
+            _append_edge(memory_id, topic_id, 'SHAPES_INTEREST_IN', weight=0.57, confidence=0.72)
     return {'nodes': nodes, 'edges': edges}
+
+
+def explain_persona_graph(name: str) -> PersonaGraphExplanation | None:
+    bundle = load_persona(name)
+    if bundle is None:
+        return None
+    graph = load_persona_graph(name)
+    nodes = [dict(item) for item in list(graph.get('nodes') or []) if isinstance(item, dict)]
+    edges = [dict(item) for item in list(graph.get('edges') or []) if isinstance(item, dict)]
+    if not nodes:
+        return PersonaGraphExplanation(persona_name=bundle.name, summary='No local persona graph is available yet.')
+    degree: Counter[str] = Counter()
+    for edge in edges:
+        degree[str(edge.get('from') or '')] += 1
+        degree[str(edge.get('to') or '')] += 1
+    ranked_nodes = sorted(
+        nodes,
+        key=lambda item: (
+            -degree.get(str(item.get('id') or ''), 0),
+            -float(item.get('importance') or 0.0),
+            str(item.get('name') or ''),
+        ),
+    )
+    central_nodes = [str(item.get('name') or '') for item in ranked_nodes[:6] if str(item.get('name') or '').strip()]
+    peripheral_nodes = [
+        str(item.get('name') or '')
+        for item in sorted(nodes, key=lambda item: (degree.get(str(item.get('id') or ''), 0), float(item.get('importance') or 0.0), str(item.get('name') or '')))[:6]
+        if str(item.get('name') or '').strip() and str(item.get('name') or '') not in central_nodes
+    ]
+    conflict_nodes = [
+        str(item.get('name') or '')
+        for item in nodes
+        if str(dict(item.get('context') or {}).get('category') or '') == 'conflicts'
+    ][:6]
+    node_map = {str(item.get('id') or ''): str(item.get('name') or item.get('id') or '') for item in nodes}
+    causal_links = [
+        f"{node_map.get(str(edge.get('from') or ''), str(edge.get('from') or ''))} {str(edge.get('type') or '').replace('_', ' ').lower()} {node_map.get(str(edge.get('to') or ''), str(edge.get('to') or ''))}"
+        for edge in edges
+        if str(edge.get('type') or '') in {'SUPPORTED_BY_HABIT', 'COLORED_BY_SPEECH', 'EXPRESSED_AS', 'IN_TENSION_WITH', 'SHAPES_INTEREST_IN', 'CAN_PLAY_ROLE', 'USES_REACTION_PATTERN'}
+    ][:10]
+    summary_parts = [
+        f'{bundle.name} is represented as a social personality graph rather than a flat prompt.',
+        f"Central structures are {', '.join(central_nodes[:4])}." if central_nodes else '',
+        f"Persistent tensions appear around {', '.join(conflict_nodes[:4])}." if conflict_nodes else '',
+        'Roles, habits, values, memories, speech tendencies, and reaction patterns are linked so that behavior can be grounded in structure.'
+    ]
+    return PersonaGraphExplanation(
+        persona_name=bundle.name,
+        summary=' '.join(part for part in summary_parts if part).strip(),
+        central_nodes=central_nodes,
+        peripheral_nodes=peripheral_nodes,
+        conflict_nodes=conflict_nodes,
+        causal_links=causal_links,
+    )
 
 
 def _sync_local_graph(name: str) -> None:

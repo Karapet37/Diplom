@@ -4,8 +4,10 @@ import json
 
 from agent_system.classifier_forest import DEFAULT_CLASSIFIER
 from agent_system.feature_extractor import extract_features
+from agent_system.graph_store import GraphStore
+from agent_system.head_caller import prepare_heads
 from agent_system.message_analyzer import analyze_message
-from agent_system.models import MessageEntity
+from agent_system.models import MessageAnalysis, MessageEntity, UserState
 from agent_system.persona_engine import (
     evolve_emotion_state,
     formalize_persona,
@@ -26,6 +28,18 @@ def test_classifier_forest_routes_dracula_to_fictional_character() -> None:
 
     assert decision.entity_type == 'FICTIONAL_CHARACTER'
     assert decision.votes['FICTIONAL_CHARACTER'] >= 4
+
+
+def test_message_analyzer_does_not_promote_day_to_entity() -> None:
+    analysis = analyze_message(
+        message='Dr. Aram Petrosyan, what do you do day to day?',
+        session_id='classifier',
+        selected_head='Dr. Aram Petrosyan',
+    )
+
+    entity_names = [entity.name for entity in analysis.entities]
+    assert any('Aram Petrosyan' in item for item in entity_names)
+    assert 'day' not in [item.lower() for item in entity_names]
 
 
 def test_materialized_head_uses_folder_files(tmp_path, monkeypatch) -> None:
@@ -103,6 +117,9 @@ def test_persona_is_formalized_as_stateful_model_and_reaction_policy(tmp_path, m
     assert outcome.target == 'persona'
     assert outcome.delta_emotion['anger'] > 0.0
     assert outcome.response_style in {'defensive', 'firm_boundary'}
+
+    neutral_outcome = reaction_policy(bundle, {'type': 'neutral_query', 'target': 'persona', 'severity': 0.4})
+    assert neutral_outcome.response_style in {'direct_explanatory', 'inquisitive', 'formal'}
 
     evolved, _ = evolve_emotion_state(bundle, {'type': 'neutral_query', 'target': 'persona', 'severity': 0.4})
     assert all(0.0 <= value <= 1.0 for value in evolved.values())
@@ -267,3 +284,31 @@ def test_persona_revision_restore_recovers_previous_learned_state(tmp_path, monk
     assert restored is not None
     assert restored.learned_patterns is not None
     assert 'sarcastic' not in restored.learned_patterns.learned_traits
+
+
+def test_prepare_heads_does_not_materialize_non_head_noise_entities(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+
+    analysis = MessageAnalysis(
+        message='What do you do day to day?',
+        session_id='head_noise',
+        selected_head='Dr. Aram Petrosyan',
+        primary_entity='Dr. Aram Petrosyan',
+        current_entity='',
+        explicit_context='',
+        entities=[MessageEntity(name='Dr. Aram Petrosyan'), MessageEntity(name='day')],
+        user_state=UserState(language='en', tone='inquisitive', intent='question', signals={}),
+    )
+    dr_features = extract_features(MessageEntity(name='Dr. Aram Petrosyan', description='Emergency physician.'), analysis)
+    day_features = extract_features(MessageEntity(name='day', description='Time period.'), analysis)
+    decisions = [
+        DEFAULT_CLASSIFIER.classify(dr_features),
+        DEFAULT_CLASSIFIER.classify(day_features),
+    ]
+    store = GraphStore()
+
+    prepared = prepare_heads(analysis=analysis, classifications=decisions, graph_store=store)
+
+    assert any(item.get('head') is not None for item in prepared if item['decision'].entity_name == 'Dr. Aram Petrosyan')
+    assert not any(item.get('head') is not None for item in prepared if item['decision'].entity_name == 'day')
+    assert store.get_node('day') is None

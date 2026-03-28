@@ -20,6 +20,20 @@ def choose_free_port(host: str = '127.0.0.1') -> int:
         return int(sock.getsockname()[1])
 
 
+def _resolve_runtime_python(repo_root: Path) -> str:
+    explicit = str(os.getenv('COGNITIVE_REALISM_PYTHON', '') or '').strip()
+    if explicit:
+        return explicit
+    candidates = (
+        Path(repo_root) / '.venv' / 'bin' / 'python',
+        Path(repo_root) / '.venv' / 'Scripts' / 'python.exe',
+    )
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return str(candidate)
+    return sys.executable
+
+
 def _maybe_json(text: str) -> dict[str, Any] | list[Any] | None:
     raw = str(text or '').strip()
     if not raw:
@@ -75,8 +89,9 @@ class RuntimeLauncher:
         self.process: subprocess.Popen[str] | None = None
         self._logs: list[str] = []
         self._pump_thread: threading.Thread | None = None
+        self.python_executable = _resolve_runtime_python(self.repo_root)
         self.command = [
-            sys.executable,
+            self.python_executable,
             'start.py',
             '--profile',
             self.profile,

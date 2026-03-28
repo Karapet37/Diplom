@@ -46,6 +46,8 @@ def test_chat_engine_spawns_head_updates_emotions_and_learns_reaction(tmp_path, 
     assert 'I answer in the first person as Dracula.' not in payload['examples']
     assert payload['situation_reactions']
     assert payload['situation_reactions'][0]['situation'].startswith('type=neutral_query;')
+    assert payload['situation_reactions'][0]['reaction'] != 'I answer in the first person as Dracula.'
+    assert 'response_style=' in payload['situation_reactions'][0]['reaction']
 
 
 def test_chat_engine_routes_lowercase_entity_mentions(tmp_path, monkeypatch) -> None:
@@ -62,6 +64,116 @@ def test_chat_engine_routes_lowercase_entity_mentions(tmp_path, monkeypatch) -> 
     assert result['persona_name'] == 'dracula'
     assert 'dracula' in [item.lower() for item in result['analysis']['entities']]
     assert load_persona('dracula') is not None
+
+
+def test_chat_engine_prefers_detected_message_language_for_visible_reply(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+    monkeypatch.setattr('agent_system.chat_engine._schedule_background_extraction', lambda session_id, personality_name='': None)
+
+    def fake_model(prompt: str, mode: str = 'chat', *, role: str = 'general') -> str:
+        if mode == 'translation':
+            return 'Я Дракула.'
+        return 'I am Dracula.'
+
+    monkeypatch.setattr('agent_system.llm._call_model', fake_model)
+
+    result = generate_response(
+        message='Привет, кто ты, Дракула?',
+        session_id='session_ru',
+        selected_persona='Dracula',
+        language='en',
+    )
+
+    assert result['analysis']['user_state']['language'] == 'ru'
+    assert result['response_language'] == 'ru'
+    assert result['assistant_reply'] == 'Я Дракула.'
+
+
+def test_chat_engine_uses_internal_translation_for_context_routing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+    monkeypatch.setattr('agent_system.chat_engine._schedule_background_extraction', lambda session_id, personality_name='': None)
+
+    captured: dict[str, str] = {}
+
+    def fake_translate(text: str, target_language: str, source_language: str = 'auto', role: str = 'translator') -> str:
+        if target_language == 'en':
+            return 'What else is part of your working routine?'
+        if target_language == 'ru':
+            return 'Я Дракула.'
+        return text
+
+    def fake_build_context(*, question: str, session_id: str, selected_persona: str = '', explicit_context: str = '', situation=None, store=None):
+        captured['context_question'] = question
+        return {
+            'persona_name': 'dracula',
+            'current_entity': 'dracula',
+            'persona_block': 'You are Dracula.',
+            'graph_context': '',
+            'recent_dialogue': '',
+            'estimated_tokens': 32,
+            'context_debug': {},
+        }
+
+    def fake_build_prompt(*, question: str, internal_question: str = '', persona_block: str = '', graph_context: str = '', recent_dialogue: str = '', language: str = 'en') -> str:
+        captured['prompt_question'] = question
+        captured['prompt_internal_question'] = internal_question
+        return 'prompt'
+
+    monkeypatch.setattr('agent_system.chat_engine.translate_text', fake_translate)
+    monkeypatch.setattr('agent_system.chat_engine.build_context', fake_build_context)
+    monkeypatch.setattr('agent_system.chat_engine.build_chat_prompt', fake_build_prompt)
+    monkeypatch.setattr('agent_system.chat_engine.generate_chat_reply', lambda prompt, language='en', persona_selected=False: 'I am Dracula.')
+
+    result = generate_response(
+        message='Что входит в твою рабочую рутину, Дракула?',
+        session_id='session_ru_internal',
+        selected_persona='Dracula',
+        language='en',
+    )
+
+    assert captured['context_question'] == 'What else is part of your working routine?'
+    assert captured['prompt_question'] == 'Что входит в твою рабочую рутину, Дракула?'
+    assert captured['prompt_internal_question'] == 'What else is part of your working routine?'
+    assert result['response_language'] == 'ru'
+
+
+def test_chat_engine_adds_explicit_persona_fact_to_learned_dossier(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+    monkeypatch.setattr('agent_system.chat_engine._schedule_background_extraction', lambda session_id, personality_name='': None)
+
+    materialize_persona(
+        'Dr. Aram Petrosyan',
+        {
+            'entity_type': 'PERSON',
+            'traits': ['skeptical', 'precise'],
+            'knowledge': 'Aram is an emergency physician from Yerevan.',
+        },
+        explicit=True,
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_update(name: str, fact: str):  # type: ignore[no-untyped-def]
+        captured['name'] = name
+        captured['fact'] = fact
+        return load_persona(name)
+
+    monkeypatch.setattr('agent_system.chat_engine.record_persona_dossier_fact', fake_update)
+
+    result = generate_response(
+        message='For the record, you work night toxicology shifts and keep handwritten shift cards.',
+        session_id='persona_fact',
+        selected_persona='Dr. Aram Petrosyan',
+        language='en',
+    )
+
+    assert captured['name'] == 'dr_aram_petrosyan'
+    assert 'night toxicology shifts' in captured['fact']
+    assert str(captured['fact']).lower().startswith('you work')
+    assert 'for the record' not in str(captured['fact']).lower()
+    assert result['assistant_reply'].startswith('Noted.')
+    assert 'learned_update' in result['side_effects']['persona_updates']
+    assert any('added to the learned dossier' in item for item in result['operator_messages'])
 
 
 def test_chat_engine_surfaces_background_repair_failures(tmp_path, monkeypatch) -> None:

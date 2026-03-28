@@ -11,6 +11,14 @@ LANGUAGE_LABELS = {
     'ru': 'Russian',
     'hy': 'Armenian',
     'zh': 'Chinese',
+    'fr': 'French',
+    'de': 'German',
+    'es': 'Spanish',
+    'it': 'Italian',
+    'pt': 'Portuguese',
+    'ja': 'Japanese',
+    'ko': 'Korean',
+    'tr': 'Turkish',
 }
 
 
@@ -30,6 +38,7 @@ def detect_language_code(text: str, *, fallback: str = 'en') -> str:
 def normalize_language_code(value: str, *, fallback: str = 'en') -> str:
     token = str(value or '').strip().lower()
     aliases = {
+        'auto': fallback,
         'english': 'en',
         'английский': 'en',
         'russian': 'ru',
@@ -38,9 +47,27 @@ def normalize_language_code(value: str, *, fallback: str = 'en') -> str:
         'армянский': 'hy',
         'հայերեն': 'hy',
         'chinese': 'zh',
+        'french': 'fr',
+        'français': 'fr',
+        'german': 'de',
+        'deutsch': 'de',
+        'spanish': 'es',
+        'español': 'es',
     }
-    return aliases.get(token, token if token in LANGUAGE_LABELS else fallback)
+    normalized = aliases.get(token)
+    if normalized:
+        return normalized
+    if token in LANGUAGE_LABELS:
+        return token
+    if re.fullmatch(r'[a-z]{2,5}(?:-[a-z]{2,5})?', token):
+        return token
+    return fallback
 
 
 def language_label(code: str) -> str:
-    return LANGUAGE_LABELS.get(normalize_language_code(code), 'English')
+    normalized = normalize_language_code(code, fallback='en')
+    if normalized in LANGUAGE_LABELS:
+        return LANGUAGE_LABELS[normalized]
+    if normalized:
+        return normalized.upper()
+    return 'English'

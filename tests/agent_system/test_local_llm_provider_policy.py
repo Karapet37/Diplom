@@ -53,3 +53,58 @@ def test_raw_llm_fn_uses_plain_text_path_for_chat_prompts() -> None:
     assert result == 'plain text reply'
     assert calls
     assert 'response_format' not in calls[0]
+    assert calls[0]['messages'][0]['role'] == 'system'
+    assert calls[0]['messages'][1]['role'] == 'user'
+    assert 'Who are you?' in calls[0]['messages'][1]['content']
+
+
+def test_chat_prompt_split_keeps_user_question_separate_from_context() -> None:
+    messages = local_llm_provider._split_chat_prompt_messages(
+        '\n\n'.join(
+            [
+                'Respond in English.',
+                'Do not output JSON.',
+                'User question:',
+                'Who are you, really?',
+                'Persona head:',
+                'You are Dr. Aram Petrosyan.',
+                'Knowledge graph:',
+                '- relation: Aram KEEPS steel watch',
+            ]
+        )
+    )
+
+    assert len(messages) == 2
+    assert messages[0]['role'] == 'system'
+    assert messages[1]['role'] == 'user'
+    assert messages[1]['content'] == 'Who are you, really?'
+    assert 'Persona head:' in messages[0]['content']
+
+
+def test_raw_llm_fn_falls_back_to_user_only_when_system_role_is_unsupported() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    class FakeLlama:
+        def create_chat_completion(self, **kwargs):
+            messages = kwargs['messages']
+            calls.append(messages)
+            if messages[0]['role'] == 'system':
+                raise RuntimeError('System role not supported')
+            return {"choices": [{"message": {"content": "I am Aram Petrosyan."}}]}
+
+    llm_fn = local_llm_provider._make_raw_llm_fn(FakeLlama(), max_tokens=96)
+    result = llm_fn(
+        '\n\n'.join(
+            [
+                'Respond in English.',
+                'User question:',
+                'Who are you?',
+                'Persona head:',
+                'You are Dr. Aram Petrosyan.',
+            ]
+        )
+    )
+
+    assert result == 'I am Aram Petrosyan.'
+    assert calls[0][0]['role'] == 'system'
+    assert calls[1][0]['role'] == 'user'

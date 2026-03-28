@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from agent_system.graph_store import GraphStore
-from agent_system.history_store import append_turn, create_session, parse_active_session, parse_session, recent_dialogue
+from agent_system.history_store import append_turn, create_session, infer_current_entity, parse_active_session, parse_session, recent_dialogue
 from agent_system.memory_layers import describe_memory_layers, load_persona_overflow_archive, load_session_archive
 from agent_system.persona_engine import load_persona, materialize_persona
 
@@ -100,3 +100,16 @@ def test_graph_snapshot_uses_cold_archive_without_touching_active_graph(tmp_path
     assert snapshot['node_count'] >= 1
     assert 'archive_graphs_dir' in description['paths']
     assert snapshot['path'].startswith(description['paths']['archive_graphs_dir'])
+
+
+def test_infer_current_entity_ignores_assistant_generated_phrase_noise(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+
+    create_session('entity_drift', 'Entity Drift')
+    append_turn(
+        'entity_drift',
+        'Tell me about Dracula.',
+        'I focus on stabilizing patients and staying calm under pressure.',
+    )
+
+    assert infer_current_entity('entity_drift') == 'Dracula'

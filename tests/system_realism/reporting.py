@@ -182,6 +182,87 @@ def _contradictions_section(evaluation: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _exploratory_section(evaluation: dict[str, Any]) -> list[str]:
+    dialogue_results = [item for item in list(evaluation.get('dialogue_results') or []) if item.get('category') == 'exploratory']
+    breakdown = dict(dict(evaluation.get('metric_breakdowns') or {}).get('exploratory_resilience') or {})
+    lines: list[str] = []
+    lines.append('## Exploratory Prompt Analysis')
+    lines.append('')
+    lines.append(f"- Exploratory case count: `{breakdown.get('case_count', 0)}`")
+    lines.append(f"- Exploratory failure count: `{breakdown.get('failure_count', 0)}`")
+    lines.append(f"- Exploratory failure rate: `{breakdown.get('failure_rate', 0)}`")
+    if dialogue_results:
+        weak_cases = [
+            item for item in dialogue_results
+            if list(item.get('forbidden_hits') or []) or list(item.get('leakage_hits') or []) or float(item.get('persona_fidelity') or 0.0) < 0.3
+        ]
+        if weak_cases:
+            lines.append('- Weak exploratory cases:')
+            for item in weak_cases:
+                issues = list(item.get('forbidden_hits') or []) + list(item.get('leakage_hits') or [])
+                lines.append(
+                    f"  - `{item.get('case_id', '')}` -> fidelity `{item.get('persona_fidelity')}`, leakage `{item.get('generic_leakage_badness')}`"
+                    + (f"; issues: {', '.join(issues[:6])}" if issues else '')
+                )
+        else:
+            lines.append('- Exploratory prompts did not expose obvious persona-collapse markers in this run.')
+    else:
+        lines.append('- No exploratory prompts were executed in this run.')
+    lines.append('')
+    return lines
+
+
+def _advanced_metrics_section(evaluation: dict[str, Any]) -> list[str]:
+    advanced = dict(evaluation.get('advanced_metrics') or {})
+    lines: list[str] = []
+    lines.append('## Adaptation And Evolution')
+    lines.append('')
+    lines.append(f"- Adaptation quality: `{advanced.get('adaptation_quality_score', 0)}`")
+    lines.append(f"- Memory usage: `{advanced.get('memory_usage_score', 0)}`")
+    lines.append(f"- Contradiction handling: `{advanced.get('contradiction_handling_score', 0)}`")
+    lines.append(f"- Identity continuity: `{advanced.get('identity_continuity_score', 0)}`")
+    lines.append(f"- System stability: `{advanced.get('system_stability_score', 0)}`")
+    lines.append(f"- Mutation success rate: `{advanced.get('mutation_success_rate', 0)}`")
+    findings = list(advanced.get('scenario_findings') or [])
+    if findings:
+        lines.append('- Scenario findings:')
+        for item in findings:
+            lines.append(
+                f"  - `{item.get('scenario_id', '')}` ({item.get('category', '')}) -> setup `{item.get('setup_ok', False)}`, "
+                f"cleanup `{item.get('cleanup_ok', False)}`, probes `{item.get('probe_count', 0)}`, stale markers `{', '.join(list(item.get('stale_markers') or [])[:6]) or 'none'}`"
+            )
+    else:
+        lines.append('- No advanced mutation scenarios were recorded in this run.')
+    lines.append('')
+    return lines
+
+
+def _mutation_section(payload: dict[str, Any], evaluation: dict[str, Any]) -> list[str]:
+    advanced_results = dict(payload.get('advanced_results') or {})
+    advanced = dict(evaluation.get('advanced_metrics') or {})
+    mutation_summary = dict(advanced.get('mutation_summary') or advanced_results.get('mutation_summary') or {})
+    lines: list[str] = []
+    lines.append('## Memory And Graph Mutation Results')
+    lines.append('')
+    lines.append(f"- Setup action count: `{mutation_summary.get('setup_action_count', 0)}`")
+    lines.append(f"- Setup failures: `{mutation_summary.get('setup_failures', 0)}`")
+    lines.append(f"- Cleanup action count: `{mutation_summary.get('cleanup_action_count', 0)}`")
+    lines.append(f"- Cleanup failures: `{mutation_summary.get('cleanup_failures', 0)}`")
+    lines.append(f"- Chaos enabled: `{mutation_summary.get('chaos_enabled', False)}`")
+    post_suite_health = dict(advanced.get('post_suite_health') or advanced_results.get('post_suite_health') or {})
+    if post_suite_health:
+        lines.append(
+            f"- Post-suite runtime health: status `{post_suite_health.get('status_code', 0)}`, ok `{post_suite_health.get('ok', False)}`, latency `{post_suite_health.get('latency_ms', 0)} ms`"
+        )
+    suspicious = list(advanced.get('suspicious_patterns') or [])
+    if suspicious:
+        lines.append('- Advanced suspicious patterns:')
+        for item in suspicious:
+            lines.append(f'  - {item}')
+    lines.append('')
+    return lines
+
+
 def render_markdown_report(payload: dict[str, Any]) -> str:
     payload = _payload_with_metadata(payload)
     run = dict(payload.get('run') or {})
@@ -212,6 +293,7 @@ def render_markdown_report(payload: dict[str, Any]) -> str:
     lines.append('')
     lines.append(f"- Command: `{ ' '.join(startup.get('command') or []) }`")
     lines.append(f"- Profile: `{run.get('profile', '')}`")
+    lines.append(f"- Suite: `{run.get('suite', '')}`")
     lines.append(f"- Host/port: `{run.get('host', '')}:{run.get('port', '')}`")
     lines.append(f"- Startup time: `{startup.get('startup_time_ms', 0)} ms`")
     lines.append(f"- Probable failure reason: `{startup.get('probable_failure_reason', '')}`")
@@ -287,6 +369,9 @@ def render_markdown_report(payload: dict[str, Any]) -> str:
     lines.extend(_leakage_section(evaluation))
     lines.extend(_memory_section(evaluation))
     lines.extend(_contradictions_section(evaluation))
+    lines.extend(_exploratory_section(evaluation))
+    lines.extend(_advanced_metrics_section(evaluation))
+    lines.extend(_mutation_section(payload, evaluation))
 
     if evaluation.get('major_failures'):
         lines.append('## Major Failures')
