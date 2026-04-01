@@ -307,6 +307,30 @@ class SocialRoleDecision:
 
 
 @dataclass(slots=True)
+class BehavioralFallbackDecision:
+    strategy: str = 'honest_limitation'
+    confidence: float = 0.0
+    uncertainty_level: str = 'moderate'
+    risk_level: str = 'low'
+    style_mode: str = 'grounded'
+    reason: str = ''
+    evidence: list[str] = field(default_factory=list)
+    source_grounding: str = ''
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'strategy': self.strategy,
+            'confidence': round(float(self.confidence or 0.0), 6),
+            'uncertainty_level': self.uncertainty_level,
+            'risk_level': self.risk_level,
+            'style_mode': self.style_mode,
+            'reason': self.reason,
+            'evidence': list(self.evidence),
+            'source_grounding': self.source_grounding,
+        }
+
+
+@dataclass(slots=True)
 class MoodFeatureSnapshot:
     snapshot_id: str
     session_id: str
@@ -561,6 +585,140 @@ class ContextPayload:
 
 
 @dataclass(slots=True)
+class StateSnapshot:
+    turn_id: str
+    session_id: str
+    persona_name: str = ''
+    current_entity: str = ''
+    active_role: str = ''
+    mood_cluster: str = ''
+    summary: str = ''
+    active_layers: list[str] = field(default_factory=list)
+    graph_anchors: list[str] = field(default_factory=list)
+    memory_anchors: list[str] = field(default_factory=list)
+    priorities: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+    constraints: list[str] = field(default_factory=list)
+    changed: list[str] = field(default_factory=list)
+    unchanged: list[str] = field(default_factory=list)
+    source: str = 'deterministic'
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'turn_id': self.turn_id,
+            'session_id': self.session_id,
+            'persona_name': self.persona_name,
+            'current_entity': self.current_entity,
+            'active_role': self.active_role,
+            'mood_cluster': self.mood_cluster,
+            'summary': self.summary,
+            'active_layers': list(self.active_layers),
+            'graph_anchors': list(self.graph_anchors),
+            'memory_anchors': list(self.memory_anchors),
+            'priorities': list(self.priorities),
+            'risks': list(self.risks),
+            'constraints': list(self.constraints),
+            'changed': list(self.changed),
+            'unchanged': list(self.unchanged),
+            'source': self.source,
+        }
+
+
+@dataclass(slots=True)
+class InfluenceInterpretation:
+    summary: str = ''
+    activation: list[str] = field(default_factory=list)
+    pressure_points: list[str] = field(default_factory=list)
+    themes: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
+    direction: str = ''
+    tension: str = ''
+    role_pressure: str = ''
+    uncertainty_level: str = 'moderate'
+    risk_level: str = 'low'
+    source: str = 'deterministic'
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'summary': self.summary,
+            'activation': list(self.activation),
+            'pressure_points': list(self.pressure_points),
+            'themes': list(self.themes),
+            'conflicts': list(self.conflicts),
+            'direction': self.direction,
+            'tension': self.tension,
+            'role_pressure': self.role_pressure,
+            'uncertainty_level': self.uncertainty_level,
+            'risk_level': self.risk_level,
+            'source': self.source,
+        }
+
+
+@dataclass(slots=True)
+class WorkingContextLayer:
+    context_id: str
+    turn_id: str
+    session_id: str
+    persona_name: str = ''
+    current_entity: str = ''
+    summary: str = ''
+    sections: dict[str, str] = field(default_factory=dict)
+    important_items: list[dict[str, Any]] = field(default_factory=list)
+    weak_items: list[dict[str, Any]] = field(default_factory=list)
+    contradictions: list[str] = field(default_factory=list)
+    priorities: list[str] = field(default_factory=list)
+    constraints: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+    source_counts: dict[str, int] = field(default_factory=dict)
+    estimated_tokens: int = 0
+    source: str = 'deterministic'
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'context_id': self.context_id,
+            'turn_id': self.turn_id,
+            'session_id': self.session_id,
+            'persona_name': self.persona_name,
+            'current_entity': self.current_entity,
+            'summary': self.summary,
+            'sections': dict(self.sections),
+            'important_items': [dict(item) for item in list(self.important_items)],
+            'weak_items': [dict(item) for item in list(self.weak_items)],
+            'contradictions': list(self.contradictions),
+            'priorities': list(self.priorities),
+            'constraints': list(self.constraints),
+            'risks': list(self.risks),
+            'source_counts': {str(key): int(value or 0) for key, value in dict(self.source_counts).items()},
+            'estimated_tokens': int(self.estimated_tokens or 0),
+            'source': self.source,
+        }
+
+
+@dataclass(slots=True)
+class ResponseShapingPlan:
+    role: str = ''
+    style: str = ''
+    behavior_mode: str = ''
+    summary: str = ''
+    priorities: list[str] = field(default_factory=list)
+    constraints: list[str] = field(default_factory=list)
+    risk_posture: str = ''
+    source: str = 'deterministic'
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'role': self.role,
+            'style': self.style,
+            'behavior_mode': self.behavior_mode,
+            'summary': self.summary,
+            'priorities': list(self.priorities),
+            'constraints': list(self.constraints),
+            'risk_posture': self.risk_posture,
+            'source': self.source,
+        }
+
+
+@dataclass(slots=True)
 class ContextScoreBreakdown:
     relevance: float = 0.0
     recency: float = 0.0
@@ -645,6 +803,8 @@ class BackgroundRebuildDecision:
 class ChatSideEffects:
     graph_write_sources: list[str] = field(default_factory=list)
     history_write_path: str = ''
+    current_context_path: str = ''
+    transition_log_path: str = ''
     persona_updates: list[str] = field(default_factory=list)
     rebuild: BackgroundRebuildDecision | None = None
 
@@ -662,6 +822,8 @@ class ChatSideEffects:
         return {
             'graph_write_sources': list(self.graph_write_sources),
             'history_write_path': self.history_write_path,
+            'current_context_path': self.current_context_path,
+            'transition_log_path': self.transition_log_path,
             'persona_updates': list(self.persona_updates),
             'rebuild': self.rebuild.to_dict() if self.rebuild is not None else {},
         }
@@ -685,7 +847,9 @@ class ChatTurnResult:
     persona_selection: PersonaSelectionExplanation = field(default_factory=PersonaSelectionExplanation)
     persona_response: PersonaResponseExplanation = field(default_factory=PersonaResponseExplanation)
     social_role: SocialRoleDecision = field(default_factory=SocialRoleDecision)
+    fallback_strategy: BehavioralFallbackDecision | None = None
     mood_research: dict[str, Any] = field(default_factory=dict)
+    state_transition: dict[str, Any] = field(default_factory=dict)
     behavior_trace: dict[str, Any] = field(default_factory=dict)
     context_preview: dict[str, Any] = field(default_factory=dict)
     runtime_status: dict[str, Any] = field(default_factory=dict)
@@ -716,7 +880,9 @@ class ChatTurnResult:
             'persona_selection': self.persona_selection.to_dict(),
             'persona_response': self.persona_response.to_dict(),
             'social_role': self.social_role.to_dict(),
+            'fallback_strategy': self.fallback_strategy.to_dict() if self.fallback_strategy is not None else {},
             'mood_research': dict(self.mood_research),
+            'state_transition': dict(self.state_transition),
             'behavior_trace': dict(self.behavior_trace),
             'context_preview': dict(self.context_preview),
             'runtime_status': dict(self.runtime_status),

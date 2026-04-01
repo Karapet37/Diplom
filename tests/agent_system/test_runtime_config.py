@@ -19,6 +19,8 @@ def test_runtime_config_resolves_memory_paths_and_roles(tmp_path, monkeypatch) -
 
     assert config.paths.memory_root == (tmp_path / 'memory').resolve()
     assert config.paths.working_dir.exists()
+    assert config.paths.runtime_logs_dir.exists()
+    assert config.paths.current_context_dir.exists()
     assert config.paths.graphs_dir.exists()
     assert config.paths.heads_dir.exists()
     assert config.paths.archive_sessions_dir.exists()

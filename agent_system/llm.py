@@ -245,7 +245,13 @@ def fallback_chat_reply(*, language: str = 'en', persona_selected: bool = False)
     return translate_text(base, target_language=target_language, source_language='en') or base
 
 
-def generate_chat_reply(prompt: str, *, language: str = 'en', persona_selected: bool = False) -> str:
+def generate_chat_reply(
+    prompt: str,
+    *,
+    language: str = 'en',
+    persona_selected: bool = False,
+    allow_builtin_fallback: bool = True,
+) -> str:
     target_language = normalize_language_code(language, fallback='en')
     reply = normalize_text_reply(_call_model_compat(prompt, mode='chat', role=_chat_role(persona_selected=persona_selected)))
     if reply:
@@ -258,7 +264,9 @@ def generate_chat_reply(prompt: str, *, language: str = 'en', persona_selected: 
             )
             return translated or reply
         return reply
-    return fallback_chat_reply(language=target_language, persona_selected=persona_selected)
+    if allow_builtin_fallback:
+        return fallback_chat_reply(language=target_language, persona_selected=persona_selected)
+    return ''
 
 
 def prewarm_runtime_models_async() -> None:

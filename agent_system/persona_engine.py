@@ -963,11 +963,39 @@ def _persona_dossier_bucket(fact: str) -> str:
         return 'speech_tendencies'
     if any(token in lowered for token in ('trust', 'distrust', 'skeptical of', 'earns attention')):
         return 'trust_model'
-    if any(token in lowered for token in ('watch', 'notebook', 'anchor', 'father', 'mother', 'sister')):
+    if any(token in lowered for token in ('watch', 'notebook', 'anchor', 'father', 'mother', 'sister', 'son', 'daughter', 'child', 'children', 'family')):
         return 'memory_anchors'
     if any(token in lowered for token in ('remember', 'once', 'after', 'during', 'lost', 'learned that')):
         return 'memories'
     return 'personal_history'
+
+
+def _persona_dossier_bucket_updates(fact: str) -> dict[str, list[str]]:
+    normalized_fact = ' '.join(str(fact or '').strip().split())
+    if not normalized_fact:
+        return {}
+    lowered = normalize_name(normalized_fact)
+    updates: dict[str, list[str]] = {
+        _persona_dossier_bucket(normalized_fact): [normalized_fact],
+    }
+    family_terms = ('son', 'daughter', 'child', 'children', 'family', 'wife', 'husband', 'mother', 'father', 'sister', 'brother')
+    softening_terms = ('softer', 'softer toward', 'more patient', 'gentler', 'less harsh', 'protective', 'more protective', 'tender', 'forgiving')
+    vulnerability_terms = ('close people', 'close person', 'vulnerable', 'mistakes', 'family-related', 'family')
+
+    if any(token in lowered for token in family_terms):
+        updates.setdefault('memories', []).append(normalized_fact)
+        updates.setdefault('personal_history', []).append(normalized_fact)
+    if any(token in lowered for token in softening_terms):
+        updates.setdefault('emotional_tendencies', []).append('softens in close and vulnerable contexts without losing directness')
+    if any(token in lowered for token in family_terms) and any(token in lowered for token in softening_terms + vulnerability_terms):
+        updates.setdefault('conflict_behavior', []).append('shows more patience toward close people after family life changed')
+        updates.setdefault('reaction_patterns', []).append('becomes more protective and less cold when close people are vulnerable or imperfect')
+        updates.setdefault('values', []).append('protect close people without abandoning responsibility or practical judgment')
+    return {
+        key: _normalize_string_list(value, limit=_memory_limits().persona_example_limit)
+        for key, value in updates.items()
+        if list(value or [])
+    }
 
 
 def _validated_persona_payload(
@@ -1615,12 +1643,16 @@ def record_persona_dossier_fact(name: str, fact: str) -> HeadBundle | None:
         )
 
         persona_form = dict(bundle.persona_form or {})
-        bucket = _persona_dossier_bucket(normalized_fact)
-        persona_form[bucket] = _prepend_unique_limited(
-            [str(item).strip() for item in list(persona_form.get(bucket) or []) if str(item).strip()],
-            normalized_fact,
-            limit=_memory_limits().persona_example_limit,
-        )
+        for bucket, values in _persona_dossier_bucket_updates(normalized_fact).items():
+            existing_values = [str(item).strip() for item in list(persona_form.get(bucket) or []) if str(item).strip()]
+            merged_values = list(existing_values)
+            for value in reversed(list(values or [])):
+                merged_values = _prepend_unique_limited(
+                    merged_values,
+                    value,
+                    limit=_memory_limits().persona_example_limit,
+                )
+            persona_form[bucket] = merged_values
         write_json(_head_file(clean, 'persona_form.json'), persona_form)
 
         learned = PersonaLearnedPatterns(

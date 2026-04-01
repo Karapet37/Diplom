@@ -492,6 +492,16 @@ def _build_persona_candidates(name: str, situation: Situation | dict[str, Any] |
             for item in list(bundle.persona_form.get('memory_anchors') or [])
             if str(item).strip()
         ]
+        memories = [
+            str(item).strip()
+            for item in list(bundle.persona_form.get('memories') or [])
+            if str(item).strip()
+        ]
+        personal_history = [
+            str(item).strip()
+            for item in list(bundle.persona_form.get('personal_history') or [])
+            if str(item).strip()
+        ]
         style_markers = [
             str(item).strip()
             for item in list(bundle.persona_form.get('recurring_style_markers') or [])
@@ -513,6 +523,10 @@ def _build_persona_candidates(name: str, situation: Situation | dict[str, Any] |
             identity_lines.append(f"Work habits: {' | '.join(prioritized_work_habits[:5])}.")
         if memory_anchors:
             identity_lines.append(f"Memory anchors: {' | '.join(memory_anchors[:5])}.")
+        if memories:
+            identity_lines.append(f"Memories: {' | '.join(_recent_first_items(memories)[:4])}.")
+        if personal_history:
+            identity_lines.append(f"Personal history: {' | '.join(_recent_first_items(personal_history)[:4])}.")
         if style_markers:
             identity_lines.append(f"Recurring style markers: {' | '.join(style_markers[:4])}.")
         if identity_lines:

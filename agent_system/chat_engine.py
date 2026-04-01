@@ -6,6 +6,7 @@ from threading import Lock
 from typing import Any
 
 from .classifier_forest import DEFAULT_CLASSIFIER
+from .behavioral_fallback import choose_behavioral_fallback, render_behavioral_fallback, render_memory_update_acknowledgement
 from .concept_graphs import concept_graph_extraction
 from .context_builder import build_context
 from .duplicate_resolver import normalize_name
@@ -20,6 +21,7 @@ from .message_analyzer import analyze_message_state
 from .mood_research import build_mood_snapshot, load_mood_report, record_mood_snapshot, schedule_mood_research_refresh
 from .models import (
     BackgroundRebuildDecision,
+    BehavioralFallbackDecision,
     ChatSideEffects,
     ChatTurnRequest,
     ChatTurnResult,
@@ -34,6 +36,19 @@ from .prompt_builder import build_chat_prompt
 from .reliability import operator_messages_from_status, runtime_status_snapshot
 from .runtime_config import get_runtime_config
 from .social_roles import choose_social_role, render_social_role_block
+from .state_transition_runtime import (
+    append_transition_log,
+    build_bounded_next_state,
+    build_working_context_layer,
+    interpret_user_influence,
+    persist_current_context,
+    render_response_shaping_block,
+    render_reviewed_context_block,
+    render_state_transition_block,
+    review_working_context,
+    sample_state_snapshot,
+    shape_response_plan,
+)
 from .situation_engine import model_situation
 
 _BACKGROUND_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix='agent-system-rebuild')
@@ -198,7 +213,7 @@ def _apply_emotion_update(persona_name: str, situation: Situation, *, side_effec
 def _effective_response_language(*, requested_language: str, detected_language: str) -> str:
     requested = normalize_language_code(requested_language, fallback='')
     detected = normalize_language_code(detected_language, fallback='en')
-    if detected in {'ru', 'hy', 'zh'}:
+    if detected and detected != 'en':
         return detected
     if requested:
         return requested
@@ -274,9 +289,19 @@ def _capture_persona_dossier_update(
         return False
 
 
-def _persona_dossier_acknowledgement(language: str) -> str:
+def _persona_dossier_acknowledgement(
+    language: str,
+    *,
+    persona_bundle: Any | None = None,
+    social_role: Any | None = None,
+    analysis: MessageAnalysis | None = None,
+) -> str:
     target = normalize_language_code(language, fallback='en')
-    base = 'Noted. I will add that to my personal record and use it in later answers.'
+    base = render_memory_update_acknowledgement(
+        bundle=persona_bundle,
+        social_role=social_role,
+        analysis=analysis,
+    )
     if target == 'en':
         return base
     return translate_text(
@@ -362,6 +387,21 @@ def _call_build_chat_prompt_compat(**kwargs: Any) -> str:
         if key in signature.parameters
     }
     return build_chat_prompt(**accepted)
+
+
+def _call_generate_chat_reply_compat(**kwargs: Any) -> str:
+    try:
+        signature = inspect.signature(generate_chat_reply)
+    except (TypeError, ValueError):
+        return generate_chat_reply(**kwargs)
+    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()):
+        return generate_chat_reply(**kwargs)
+    accepted = {
+        key: value
+        for key, value in kwargs.items()
+        if key in signature.parameters
+    }
+    return generate_chat_reply(**accepted)
 
 
 def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
@@ -493,6 +533,25 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 'primary_name': rows[2],
             },
         )
+        pre_update_persona_bundle = load_persona(primary_name) if primary_name else None
+        pre_update_mood_report = load_mood_report(persona_name=primary_name) if primary_name else None
+        previous_state = observability.time_stage(
+            trace,
+            'current_state_sampling',
+            lambda: sample_state_snapshot(
+                turn_id=trace.request_id,
+                session_id=clean_session_id,
+                bundle=pre_update_persona_bundle,
+                current_entity=analysis.current_entity or primary_name,
+                active_role='',
+                mood_report=pre_update_mood_report,
+            ),
+            meta_builder=lambda item: {
+                'persona_name': item.persona_name,
+                'active_role': item.active_role,
+                'layers': list(item.active_layers),
+            },
+        )
         observability.time_stage(
             trace,
             'persona_update',
@@ -522,6 +581,41 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             situation=analysis.situation,
             mood_report=active_mood_report,
         )
+        influence = observability.time_stage(
+            trace,
+            'influence_interpretation',
+            lambda: interpret_user_influence(
+                previous_state=previous_state,
+                message=clean_message,
+                analysis=analysis,
+                situation=analysis.situation,
+                active_role=social_role.role,
+            ),
+            meta_builder=lambda item: {
+                'themes': list(item.themes),
+                'risk_level': item.risk_level,
+                'uncertainty_level': item.uncertainty_level,
+            },
+        )
+        next_state = observability.time_stage(
+            trace,
+            'bounded_state_transition',
+            lambda: build_bounded_next_state(
+                turn_id=trace.request_id,
+                session_id=clean_session_id,
+                previous_state=previous_state,
+                influence=influence,
+                active_bundle=active_persona_bundle,
+                current_entity=analysis.current_entity or primary_name,
+                social_role=social_role,
+                mood_report=active_mood_report,
+            ),
+            meta_builder=lambda item: {
+                'active_role': item.active_role,
+                'changed': list(item.changed),
+                'risks': list(item.risks),
+            },
+        )
         built = observability.time_stage(
             trace,
             'context_building',
@@ -543,6 +637,67 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 'packed_candidate_counts': dict(dict(dict(payload.get('context_debug') or {}).get('stages') or {}).get('pack_context') or {}),
             },
         )
+        working_context = observability.time_stage(
+            trace,
+            'working_context_construction',
+            lambda: build_working_context_layer(
+                turn_id=trace.request_id,
+                session_id=clean_session_id,
+                current_entity=built.get('current_entity') or primary_name,
+                persona_name=built.get('persona_name') or primary_name,
+                updated_state=next_state,
+                influence=influence,
+                built_context=built,
+            ),
+            meta_builder=lambda item: {
+                'estimated_tokens': item.estimated_tokens,
+                'important_items': len(list(item.important_items)),
+                'source_counts': dict(item.source_counts),
+            },
+        )
+        reviewed_context = observability.time_stage(
+            trace,
+            'context_review',
+            lambda: review_working_context(
+                layer=working_context,
+                updated_state=next_state,
+            ),
+            meta_builder=lambda item: {
+                'important_items': len(list(item.important_items)),
+                'weak_items': len(list(item.weak_items)),
+                'contradictions': len(list(item.contradictions)),
+            },
+        )
+        response_plan = observability.time_stage(
+            trace,
+            'response_shaping',
+            lambda: shape_response_plan(
+                reviewed_context=reviewed_context,
+                influence=influence,
+                social_role=social_role,
+                response_explanation=response_explanation,
+            ),
+            meta_builder=lambda item: {
+                'role': item.role,
+                'style': item.style,
+                'behavior_mode': item.behavior_mode,
+            },
+        )
+        current_context_json_path, _current_context_txt_path = observability.time_stage(
+            trace,
+            'current_context_persistence',
+            lambda: persist_current_context(
+                reviewed_context=reviewed_context,
+                response_plan=response_plan,
+                previous_state=previous_state,
+                influence=influence,
+                next_state=next_state,
+            ),
+            meta_builder=lambda item: {
+                'current_context_json': str(item[0] or ''),
+            },
+        )
+        side_effects.current_context_path = str(current_context_json_path or '')
         prompt = _call_build_chat_prompt_compat(
             question=clean_message,
             internal_question=reasoning_message,
@@ -556,26 +711,81 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             ),
             graph_context=built.get('graph_context') or '',
             recent_dialogue=built.get('recent_dialogue') or '',
+            state_transition_block=render_state_transition_block(
+                previous_state=previous_state,
+                influence=influence,
+                next_state=next_state,
+            ),
+            reviewed_context_block=render_reviewed_context_block(reviewed_context),
+            response_shaping_block=render_response_shaping_block(response_plan),
             language=response_language,
             semantic_focus=dict(dict(built.get('context_debug') or {}).get('semantic_focus') or {}),
         )
 
-        def _generate_reply() -> tuple[str, bool, str, dict[str, Any]]:
+        def _behavioral_fallback(fallback_reason: str, runtime_status: dict[str, Any] | None) -> tuple[str, BehavioralFallbackDecision]:
+            decision = choose_behavioral_fallback(
+                bundle=active_persona_bundle,
+                analysis=analysis,
+                situation=analysis.situation,
+                social_role=social_role,
+                mood_report=active_mood_report,
+                question=clean_message,
+                grounded=grounded,
+                fallback_reason=fallback_reason,
+                runtime_status=runtime_status,
+            )
+            reply = render_behavioral_fallback(
+                decision,
+                bundle=active_persona_bundle,
+                question=clean_message,
+            )
+            if response_language != 'en':
+                translated_reply = translate_text(
+                    reply,
+                    target_language=response_language,
+                    source_language='en',
+                    role=get_runtime_config().roles.translation,
+                )
+                if translated_reply:
+                    reply = translated_reply
+            return reply, decision
+
+        grounded = any(str(part or '').strip() for part in (built.get('persona_block'), built.get('graph_context'), built.get('recent_dialogue')))
+
+        def _generate_reply() -> tuple[str, bool, str, dict[str, Any], BehavioralFallbackDecision | None]:
             if dossier_update_statement:
-                return _persona_dossier_acknowledgement(response_language), False, '', {}
-            fallback_text = fallback_chat_reply(language=response_language, persona_selected=bool(primary_name))
-            grounded = any(str(part or '').strip() for part in (built.get('persona_block'), built.get('graph_context'), built.get('recent_dialogue')))
+                return (
+                    _persona_dossier_acknowledgement(
+                        response_language,
+                        persona_bundle=active_persona_bundle,
+                        social_role=social_role,
+                        analysis=analysis,
+                    ),
+                    False,
+                    '',
+                    {},
+                    None,
+                )
             if not grounded:
-                return fallback_text, True, 'no_grounding', {}
-            reply = generate_chat_reply(prompt, language=response_language, persona_selected=bool(primary_name))
-            used_fallback = str(reply or '').strip() == fallback_text
+                fallback_text, decision = _behavioral_fallback('no_grounding', {})
+                return fallback_text, True, 'no_grounding', {}, decision
+            generic_fallback = fallback_chat_reply(language=response_language, persona_selected=bool(primary_name))
+            reply = _call_generate_chat_reply_compat(
+                prompt=prompt,
+                language=response_language,
+                persona_selected=bool(primary_name),
+                allow_builtin_fallback=False,
+            )
+            used_fallback = not str(reply or '').strip() or str(reply or '').strip() == str(generic_fallback or '').strip()
             status = runtime_status_snapshot() if used_fallback else {}
             fallback_reason = ''
+            fallback_decision: BehavioralFallbackDecision | None = None
             if used_fallback:
                 fallback_reason = 'dependency_unavailable' if str(dict(status or {}).get('mode') or '') == 'degraded' else 'model_fallback'
-            return reply, used_fallback, fallback_reason, status
+                reply, fallback_decision = _behavioral_fallback(fallback_reason, status)
+            return reply, used_fallback, fallback_reason, status, fallback_decision
 
-        assistant_reply, fallback_used, fallback_reason, runtime_status = observability.time_stage(
+        assistant_reply, fallback_used, fallback_reason, runtime_status, fallback_decision = observability.time_stage(
             trace,
             'llm_call',
             _generate_reply,
@@ -583,6 +793,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 'fallback_used': bool(result[1]),
                 'fallback_reason': str(result[2] or ''),
                 'runtime_mode': str(dict(result[3] or {}).get('mode') or 'full'),
+                'fallback_strategy': str((result[4].strategy if result[4] is not None else '') or ''),
             },
         )
         operator_messages = operator_messages_from_status(runtime_status)
@@ -599,6 +810,12 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
         elif fallback_reason == 'dependency_unavailable':
             operator_messages = [
                 'Fallback reply was returned because the local chat provider is unavailable.',
+                *operator_messages,
+            ]
+        if fallback_decision is not None:
+            operator_messages = [
+                f"Under uncertainty the system selected behavioral fallback '{fallback_decision.strategy}' "
+                f"with {fallback_decision.risk_level} risk and {fallback_decision.uncertainty_level} uncertainty.",
                 *operator_messages,
             ]
         repair_status = observability.time_stage(
@@ -624,11 +841,29 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                         session_id=clean_session_id,
                     )
                 ),
+                setattr(
+                    side_effects,
+                    'transition_log_path',
+                    append_transition_log(
+                        turn_id=trace.request_id,
+                        session_id=clean_session_id,
+                        user_message=clean_message,
+                        previous_state=previous_state,
+                        influence=influence,
+                        next_state=next_state,
+                        working_context=working_context,
+                        reviewed_context=reviewed_context,
+                        response_plan=response_plan,
+                        assistant_reply=assistant_reply,
+                    ),
+                ),
                 schedule_mood_research_refresh(persona_name=primary_name, session_id=clean_session_id),
                 _apply_rebuild_schedule(clean_session_id, personality_name=primary_name, side_effects=side_effects),
             )[-1],
             meta_builder=lambda payload: {
                 'history_write_path': side_effects.history_write_path,
+                'current_context_path': side_effects.current_context_path,
+                'transition_log_path': side_effects.transition_log_path,
                 'persona_updates': list(side_effects.persona_updates) + ['mood_research'],
                 'repair_status': str(payload.get('status') or ''),
             },
@@ -676,15 +911,27 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             persona_selection=selection_explanation,
             persona_response=response_explanation,
             social_role=social_role,
+            fallback_strategy=fallback_decision,
             mood_research={
                 'active_report_scope': active_mood_report.scope if active_mood_report is not None else '',
                 'latest_cluster': active_mood_report.latest_cluster_label if active_mood_report is not None else '',
                 'snapshot_count': active_mood_report.snapshot_count if active_mood_report is not None else 0,
             },
+            state_transition={
+                'previous_state': previous_state.to_dict(),
+                'influence': influence.to_dict(),
+                'updated_state': next_state.to_dict(),
+                'working_context': working_context.to_dict(),
+                'reviewed_context': reviewed_context.to_dict(),
+                'response_plan': response_plan.to_dict(),
+            },
             behavior_trace={
                 'semantic_focus': dict(dict(built.get('context_debug') or {}).get('semantic_focus') or {}),
                 'social_role': social_role.to_dict(),
                 'mood_cluster': active_mood_report.latest_cluster_label if active_mood_report is not None else '',
+                'previous_state': previous_state.to_dict(),
+                'influence': influence.to_dict(),
+                'updated_state': next_state.to_dict(),
                 'selected_context_sources': dict(dict(built.get('context_debug') or {}).get('source_counts') or {}),
                 'selected_context_items': [
                     {
@@ -698,6 +945,8 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 ],
                 'dossier_update_candidate': bool(dossier_update_candidate),
                 'response_style': response_explanation.response_style,
+                'response_plan': response_plan.to_dict(),
+                'fallback_strategy': fallback_decision.to_dict() if fallback_decision is not None else {},
             },
             context_preview={
                 'estimated_tokens': int(built.get('estimated_tokens') or 0),
@@ -705,6 +954,10 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 'current_entity': built.get('current_entity') or primary_name,
                 'persona_name': built.get('persona_name') or primary_name,
                 'social_role': social_role.to_dict(),
+                'working_context': working_context.to_dict(),
+                'reviewed_context': reviewed_context.to_dict(),
+                'response_plan': response_plan.to_dict(),
+                'fallback_strategy': fallback_decision.to_dict() if fallback_decision is not None else {},
                 'source_counts': dict(dict(built.get('context_debug') or {}).get('source_counts') or {}),
                 'selected_items': list(dict(built.get('context_debug') or {}).get('selected_items') or []),
             },

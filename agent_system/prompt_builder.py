@@ -1,10 +1,29 @@
 from __future__ import annotations
 
 import json
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from .language_tools import language_label, normalize_language_code
 from .semantic_routing import infer_semantic_focus, render_semantic_focus_guidance
+
+
+_PROMPTS_DIR = Path(__file__).resolve().parent / 'prompts'
+
+
+@lru_cache(maxsize=32)
+def load_prompt_stage(name: str) -> str:
+    path = _PROMPTS_DIR / f'{str(name or "").strip()}.md'
+    if not path.exists():
+        return ''
+    return path.read_text(encoding='utf-8').strip()
+
+
+def _staged_prompt_header(stage_name: str) -> str:
+    shared = load_prompt_stage('shared_rules')
+    stage = load_prompt_stage(stage_name)
+    return '\n\n'.join(part for part in (shared, stage) if str(part).strip())
 
 
 def _truncate_tokens_equivalent(text: str, max_tokens_equivalent: int) -> str:
@@ -39,13 +58,18 @@ def build_chat_prompt(
     mood_research_block: str = '',
     graph_context: str = '',
     recent_dialogue: str = '',
+    state_transition_block: str = '',
+    reviewed_context_block: str = '',
+    response_shaping_block: str = '',
     language: str = 'en',
     semantic_focus: dict[str, Any] | None = None,
 ) -> str:
     reply_language = language_label(normalize_language_code(language, fallback='en'))
     effective_focus = dict(semantic_focus or infer_semantic_focus(question=str(internal_question or question or '')))
     blocks = [
+        _staged_prompt_header('final_generator'),
         f'Respond in {reply_language}.',
+        'Generate the final reply from the reviewed current context, not from the raw user message alone.',
         'Answer as the persona in first person, not as an assistant or helpdesk.',
         'The persona is the speaker and the user is speaking to that person.',
         'Answer the user question directly and concretely before adding any extra explanation.',
@@ -59,6 +83,12 @@ def build_chat_prompt(
     ]
     blocks.extend(render_semantic_focus_guidance(effective_focus))
     blocks.extend(['User question:', _truncate_tokens_equivalent(str(question or '').strip(), 420)])
+    if state_transition_block:
+        blocks.extend(['State transition:', _truncate_tokens_equivalent(state_transition_block, 220)])
+    if response_shaping_block:
+        blocks.extend(['Response shaping:', _truncate_tokens_equivalent(response_shaping_block, 220)])
+    if reviewed_context_block:
+        blocks.extend(['Reviewed current context:', _truncate_tokens_equivalent(reviewed_context_block, 720)])
     if persona_block:
         blocks.extend(['Persona head:', _truncate_tokens_equivalent(persona_block, 760)])
     if social_role_block:
@@ -70,6 +100,119 @@ def build_chat_prompt(
     if recent_dialogue:
         blocks.extend(['Recent dialogue:', _truncate_tokens_equivalent(recent_dialogue, 220)])
     return '\n\n'.join(block for block in blocks if str(block).strip())
+
+
+def build_state_reader_prompt(*, state_payload: dict[str, Any]) -> str:
+    return '\n\n'.join(
+        [
+            _staged_prompt_header('state_reader'),
+            'Return valid JSON only.',
+            'Schema:',
+            '{"summary":"...","active_layers":["persona_baseline"],"graph_anchors":["triage"],"memory_anchors":["father\'s watch"],"priorities":["answer_substance"],"risks":["weak_grounding"],"constraints":["stay_in_first_person"]}',
+            'Current active state payload:',
+            json.dumps(dict(state_payload or {}), ensure_ascii=False, indent=2),
+        ]
+    )
+
+
+def build_influence_interpreter_prompt(
+    *,
+    previous_state: dict[str, Any],
+    message: str,
+    analysis: dict[str, Any],
+    situation: dict[str, Any],
+) -> str:
+    return '\n\n'.join(
+        [
+            _staged_prompt_header('influence_interpreter'),
+            'Return valid JSON only.',
+            'Schema:',
+            '{"summary":"...","activation":["work"],"pressure_points":["uncertainty"],"themes":["decision"],"conflicts":["needs_precision_without_grounding"],"direction":"narrow_then_answer","tension":"moderate","role_pressure":"mentor","uncertainty_level":"moderate","risk_level":"low"}',
+            'Previous state:',
+            json.dumps(dict(previous_state or {}), ensure_ascii=False, indent=2),
+            'User message:',
+            str(message or '').strip(),
+            'Analysis:',
+            json.dumps(dict(analysis or {}), ensure_ascii=False, indent=2),
+            'Situation:',
+            json.dumps(dict(situation or {}), ensure_ascii=False, indent=2),
+        ]
+    )
+
+
+def build_state_transition_prompt(
+    *,
+    previous_state: dict[str, Any],
+    influence: dict[str, Any],
+    updated_state_seed: dict[str, Any],
+) -> str:
+    return '\n\n'.join(
+        [
+            _staged_prompt_header('state_transition_guide'),
+            'Return valid JSON only.',
+            'Schema:',
+            '{"summary":"...","changed":["dynamic_state"],"unchanged":["baseline_definition"],"priorities":["answer_substance"],"risks":["weak_grounding"],"constraints":["stay_in_first_person","preserve_identity_invariants"]}',
+            'Previous state:',
+            json.dumps(dict(previous_state or {}), ensure_ascii=False, indent=2),
+            'Interpreted influence:',
+            json.dumps(dict(influence or {}), ensure_ascii=False, indent=2),
+            'Updated state seed:',
+            json.dumps(dict(updated_state_seed or {}), ensure_ascii=False, indent=2),
+        ]
+    )
+
+
+def build_context_curator_prompt(*, updated_state: dict[str, Any], working_context_seed: dict[str, Any]) -> str:
+    return '\n\n'.join(
+        [
+            _staged_prompt_header('context_curator'),
+            'Return valid JSON only.',
+            'Schema:',
+            '{"summary":"...","important_items":["persona_identity","work_profile"],"priorities":["answer_substance"],"constraints":["stay_in_first_person"],"risks":["weak_grounding"]}',
+            'Updated state:',
+            json.dumps(dict(updated_state or {}), ensure_ascii=False, indent=2),
+            'Working context seed:',
+            json.dumps(dict(working_context_seed or {}), ensure_ascii=False, indent=2),
+        ]
+    )
+
+
+def build_context_reviewer_prompt(*, working_context: dict[str, Any]) -> str:
+    return '\n\n'.join(
+        [
+            _staged_prompt_header('context_reviewer'),
+            'Return valid JSON only.',
+            'Schema:',
+            '{"summary":"...","important_items":["persona_identity"],"weak_items":["bare_graph_node"],"contradictions":["none"],"risks":["weak_grounding"],"constraints":["answer_from_reviewed_context_only"]}',
+            'Working context:',
+            json.dumps(dict(working_context or {}), ensure_ascii=False, indent=2),
+        ]
+    )
+
+
+def build_response_shaper_prompt(
+    *,
+    reviewed_context: dict[str, Any],
+    influence: dict[str, Any],
+    social_role: dict[str, Any],
+    response_explanation: dict[str, Any],
+) -> str:
+    return '\n\n'.join(
+        [
+            _staged_prompt_header('response_shaper'),
+            'Return valid JSON only.',
+            'Schema:',
+            '{"role":"mentor","style":"direct_explanatory","behavior_mode":"grounded_answer","summary":"...","priorities":["answer_substance"],"constraints":["stay_in_first_person","avoid_assistant_tone"],"risk_posture":"measured"}',
+            'Reviewed context:',
+            json.dumps(dict(reviewed_context or {}), ensure_ascii=False, indent=2),
+            'Influence interpretation:',
+            json.dumps(dict(influence or {}), ensure_ascii=False, indent=2),
+            'Selected social role:',
+            json.dumps(dict(social_role or {}), ensure_ascii=False, indent=2),
+            'Persona response explanation:',
+            json.dumps(dict(response_explanation or {}), ensure_ascii=False, indent=2),
+        ]
+    )
 
 
 def build_entity_extraction_prompt(text: str, *, source: str = 'session') -> str:

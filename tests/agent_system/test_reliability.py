@@ -106,7 +106,7 @@ def test_runtime_status_snapshot_reports_degraded_local_llm(monkeypatch) -> None
     assert 'llama_cpp_missing' in codes or 'llm_roles_missing' in codes
 
 
-def test_chat_degrades_to_safe_fallback_when_provider_is_unavailable(tmp_path, monkeypatch) -> None:
+def test_chat_degrades_to_behavioral_fallback_when_provider_is_unavailable(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
     monkeypatch.setattr('agent_system.chat_engine._schedule_background_extraction', lambda session_id, personality_name='': None)
     monkeypatch.setattr(
@@ -135,10 +135,12 @@ def test_chat_degrades_to_safe_fallback_when_provider_is_unavailable(tmp_path, m
 
     payload = generate_response(message='Tell me about Dracula.', session_id='degraded-session', language='en')
 
-    assert payload['assistant_reply'] == 'I will answer in first person from the current persona graph and emotional state.'
+    assert payload['assistant_reply']
+    assert 'graph and emotional state' not in payload['assistant_reply']
     assert payload['runtime_status']['mode'] == 'degraded'
+    assert payload['fallback_strategy']['strategy']
     assert payload['operator_messages']
-    assert 'local chat provider is unavailable' in payload['operator_messages'][0].lower()
+    assert any('local chat provider is unavailable' in item.lower() for item in payload['operator_messages'])
 
 
 def test_rethink_apply_rolls_back_graph_on_mutation_failure(tmp_path, monkeypatch) -> None:

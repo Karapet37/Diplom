@@ -150,6 +150,11 @@ class RuntimePaths:
     config_dir: Path
     runtime_profiles_dir: Path
     runtime_dir: Path
+    runtime_logs_dir: Path
+    state_transitions_log_path: Path
+    current_context_dir: Path
+    current_context_json: Path
+    current_context_txt: Path
     memory_root: Path
     working_dir: Path
     graphs_dir: Path
@@ -407,6 +412,11 @@ def get_runtime_config() -> RuntimeConfig:
         config_dir=config_dir,
         runtime_profiles_dir=runtime_profiles_dir,
         runtime_dir=runtime_dir,
+        runtime_logs_dir=runtime_dir / 'logs',
+        state_transitions_log_path=runtime_dir / 'logs' / 'state_transitions.jsonl',
+        current_context_dir=runtime_dir / 'current_context',
+        current_context_json=runtime_dir / 'current_context' / 'current_context.json',
+        current_context_txt=runtime_dir / 'current_context' / 'current_context.txt',
         memory_root=memory_root,
         working_dir=memory_root / 'working',
         graphs_dir=memory_root / 'graphs',
@@ -503,6 +513,8 @@ def get_runtime_config() -> RuntimeConfig:
         paths.config_dir,
         paths.runtime_profiles_dir,
         paths.runtime_dir,
+        paths.runtime_logs_dir,
+        paths.current_context_dir,
         paths.memory_root,
         paths.working_dir,
         paths.graphs_dir,

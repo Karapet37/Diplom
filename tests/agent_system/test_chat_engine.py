@@ -171,7 +171,8 @@ def test_chat_engine_adds_explicit_persona_fact_to_learned_dossier(tmp_path, mon
     assert 'night toxicology shifts' in captured['fact']
     assert str(captured['fact']).lower().startswith('you work')
     assert 'for the record' not in str(captured['fact']).lower()
-    assert result['assistant_reply'].startswith('Noted.')
+    assert 'record' in result['assistant_reply'].lower()
+    assert 'future' in result['assistant_reply'].lower() or 'later' in result['assistant_reply'].lower()
     assert 'learned_update' in result['side_effects']['persona_updates']
     assert any('added to the learned dossier' in item for item in result['operator_messages'])
 
