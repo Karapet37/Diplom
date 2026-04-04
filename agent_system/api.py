@@ -103,9 +103,26 @@ def _frontend_index_candidates() -> tuple[Path, Path, Path]:
 
 
 def _parse_upload_request(payload: Any) -> UploadRequest:
-    if hasattr(UploadRequest, 'model_validate'):
-        return UploadRequest.model_validate(payload)
-    return UploadRequest.parse_obj(payload)
+    validator = getattr(UploadRequest, 'model_validate', None)
+    if callable(validator):
+        return validator(payload)
+    parser = getattr(UploadRequest, 'parse_obj', None)
+    if callable(parser):
+        return parser(payload)
+    try:
+        return UploadRequest(**dict(payload or {}))
+    except Exception as exc:  # pragma: no cover - defensive compatibility path
+        raise ValueError('UploadRequest validation is unavailable for the installed Pydantic version.') from exc
+
+
+def _upload_response_payload(*, session_id: str, uploads: list[dict[str, Any]]) -> dict[str, Any]:
+    primary = dict(uploads[0] if uploads else {})
+    return {
+        'session_id': session_id,
+        'path': str(primary.get('path') or ''),
+        'result': primary.get('result'),
+        'files': [dict(item) for item in list(uploads or []) if isinstance(item, dict)],
+    }
 
 
 def create_router() -> APIRouter:
@@ -189,10 +206,7 @@ def create_router() -> APIRouter:
                 uploaded.append({'path': str(path), 'result': ingest_file(path)})
             if not uploaded:
                 raise HTTPException(status_code=400, detail='No files were uploaded')
-            return {
-                'session_id': session['session_id'],
-                'files': uploaded,
-            }
+            return _upload_response_payload(session_id=session['session_id'], uploads=uploaded)
 
         try:
             payload = _parse_upload_request(await request.json())
@@ -205,12 +219,10 @@ def create_router() -> APIRouter:
         session = create_session(payload.session_id)
         path = store_uploaded_file(session['session_id'], payload.filename, content)
         result = ingest_file(path)
-        return {
-            'session_id': session['session_id'],
-            'path': str(path),
-            'result': result,
-            'files': [{'path': str(path), 'result': result}],
-        }
+        return _upload_response_payload(
+            session_id=session['session_id'],
+            uploads=[{'path': str(path), 'result': result}],
+        )
 
     @router.get('/graph')
     def graph_endpoint() -> dict[str, Any]:

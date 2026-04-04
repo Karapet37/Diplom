@@ -113,3 +113,16 @@ def test_infer_current_entity_ignores_assistant_generated_phrase_noise(tmp_path,
     )
 
     assert infer_current_entity('entity_drift') == 'Dracula'
+
+
+def test_infer_current_entity_keeps_multiword_name_from_last_user_turn(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+
+    create_session('entity_multiword', 'Entity Multiword')
+    append_turn(
+        'entity_multiword',
+        'Who is Jack Sparrow?',
+        'Jack Sparrow is a pirate. What about him?',
+    )
+
+    assert infer_current_entity('entity_multiword') == 'Jack Sparrow'

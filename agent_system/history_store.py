@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -8,12 +7,9 @@ from typing import Any
 from .duplicate_resolver import normalize_name
 from .memory_layers import append_session_archive, load_session_archive
 from .runtime_config import get_runtime_config
+from .text_resources import capitalized_entity_phrases, compiled_entity_patterns
 
-_ENTITY_PATTERNS = (
-    r'"([^"]{2,80})"',
-    r"'([^']{2,80})'",
-    r'\b(?:about|like|as|with|to|for|regarding|around|про|о|как)\s+([A-Za-zА-Яа-я][\w-]*(?:\s+[A-Za-zА-Яа-я][\w-]*){0,3})',
-)
+_ENTITY_PATTERNS = compiled_entity_patterns()
 
 _ENTITY_STOPWORDS = {
     'a',
@@ -46,6 +42,21 @@ _ENTITY_STOPWORDS = {
     'как',
     'что',
     'кто',
+    'do',
+    'does',
+    'did',
+    'is',
+    'are',
+    'was',
+    'were',
+    'has',
+    'have',
+    'had',
+    'can',
+    'could',
+    'will',
+    'would',
+    'should',
 }
 
 
@@ -141,8 +152,36 @@ def _parse_session_path(path: Path, *, session_id: str) -> dict[str, Any] | None
     return {'session_id': _safe_session_id(session_id), 'title': resolved_title, 'messages': messages, 'updated_at': updated_at, 'path': str(path)}
 
 
+def _compose_session_payload(
+    *,
+    session_id: str,
+    active: dict[str, Any] | None,
+    archive: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    archive_payload = dict(archive or {})
+    archived_messages = [dict(item) for item in list(archive_payload.get('archived_messages') or []) if isinstance(item, dict)]
+    active_messages = list((active or {}).get('messages') or [])
+    if active is None and not archived_messages:
+        return None
+    messages = archived_messages + active_messages
+    title = str((active or {}).get('title') or archive_payload.get('title') or '').strip()
+    if not title:
+        title = next((str(item.get('message') or '')[:60] for item in messages if str(item.get('role') or '').strip() == 'user'), 'New session')
+    updated_at = str((active or {}).get('updated_at') or archive_payload.get('updated_at') or _utc_now()).strip()
+    return {
+        'session_id': _safe_session_id(session_id),
+        'title': title,
+        'messages': messages,
+        'updated_at': updated_at,
+        'path': str(session_text_path(session_id)),
+        'active_message_count': len(active_messages),
+        'archived_message_count': len(archived_messages),
+    }
+
+
 def parse_active_session(session_id: str) -> dict[str, Any] | None:
-    return _parse_session_path(session_text_path(session_id), session_id=session_id)
+    active = _parse_session_path(session_text_path(session_id), session_id=session_id)
+    return _compose_session_payload(session_id=session_id, active=active, archive=None)
 
 
 def _apply_session_retention(session_id: str) -> None:
@@ -208,24 +247,7 @@ def append_turn(session_id: str, user_message: str, assistant_message: str) -> P
 def parse_session(session_id: str, *, include_archived: bool = True) -> dict[str, Any] | None:
     active = parse_active_session(session_id)
     archive = load_session_archive(session_id) if include_archived else {'archived_messages': [], 'title': '', 'updated_at': ''}
-    if active is None and not list(archive.get('archived_messages') or []):
-        return None
-    active_messages = list(active.get('messages') or []) if active else []
-    archived_messages = [dict(item) for item in list(archive.get('archived_messages') or []) if isinstance(item, dict)]
-    messages = archived_messages + active_messages
-    title = str((active or {}).get('title') or archive.get('title') or '').strip()
-    if not title:
-        title = next((str(item.get('message') or '')[:60] for item in messages if str(item.get('role') or '').strip() == 'user'), 'New session')
-    updated_at = str((active or {}).get('updated_at') or archive.get('updated_at') or _utc_now()).strip()
-    return {
-        'session_id': _safe_session_id(session_id),
-        'title': title,
-        'messages': messages,
-        'updated_at': updated_at,
-        'path': str(session_text_path(session_id)),
-        'active_message_count': len(active_messages),
-        'archived_message_count': len(archived_messages),
-    }
+    return _compose_session_payload(session_id=session_id, active=active, archive=archive)
 
 
 def list_sessions() -> list[dict[str, Any]]:
@@ -267,13 +289,13 @@ def infer_current_entity(session_id: str) -> str:
             continue
         message = str(item.get('message') or '').strip()
         for pattern in _ENTITY_PATTERNS:
-            match = re.search(pattern, message, flags=re.IGNORECASE)
+            match = pattern.search(message)
             if match:
                 candidate = _clean_entity_candidate(match.group(1) or '')
                 if candidate:
                     return candidate
-        tokens = [_clean_entity_candidate(token) for token in message.split() if token[:1].isupper()]
-        tokens = [token for token in tokens if token]
-        if tokens:
-            return tokens[-1]
+        phrases = [_clean_entity_candidate(token) for token in capitalized_entity_phrases(message)]
+        phrases = [token for token in phrases if token]
+        if phrases:
+            return phrases[-1]
     return ''

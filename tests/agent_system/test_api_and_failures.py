@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agent_system.reliability import StorageWriteFailure
@@ -164,3 +166,81 @@ def test_api_runtime_failures_are_returned_as_structured_operator_errors(tmp_pat
     assert payload['ok'] is False
     assert payload['error']['code'] == 'storage_write_failed'
     assert payload['error']['details']['reason'] == 'create_node'
+
+
+def test_api_upload_endpoint_returns_consistent_json_shape_for_json_payload(tmp_path, monkeypatch) -> None:
+    fastapi = pytest.importorskip('fastapi')
+    testclient = pytest.importorskip('fastapi.testclient')
+    assert fastapi
+
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+
+    from agent_system import api as api_module
+
+    monkeypatch.setattr(
+        api_module,
+        'store_uploaded_file',
+        lambda session_id, filename, content: Path(tmp_path / 'memory' / 'uploads' / filename),
+    )
+    monkeypatch.setattr(
+        api_module,
+        'ingest_file',
+        lambda path: {'ok': True, 'path': str(path), 'ingested': True},
+    )
+
+    client = testclient.TestClient(api_module.create_app())
+    response = client.post(
+        '/api/cognitive/files/upload',
+        json={
+            'session_id': 'upload_json',
+            'filename': 'notes.txt',
+            'content_base64': 'aGVsbG8=',
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['session_id'] == 'upload_json'
+    assert payload['path'].endswith('notes.txt')
+    assert payload['result']['ok'] is True
+    assert len(payload['files']) == 1
+    assert payload['files'][0]['path'] == payload['path']
+    assert payload['files'][0]['result'] == payload['result']
+
+
+def test_api_upload_endpoint_returns_consistent_json_shape_for_multipart_payload(tmp_path, monkeypatch) -> None:
+    fastapi = pytest.importorskip('fastapi')
+    testclient = pytest.importorskip('fastapi.testclient')
+    pytest.importorskip('python_multipart')
+    assert fastapi
+
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+
+    from agent_system import api as api_module
+
+    monkeypatch.setattr(
+        api_module,
+        'store_uploaded_file',
+        lambda session_id, filename, content: Path(tmp_path / 'memory' / 'uploads' / filename),
+    )
+    monkeypatch.setattr(
+        api_module,
+        'ingest_file',
+        lambda path: {'ok': True, 'path': str(path), 'ingested': True},
+    )
+
+    client = testclient.TestClient(api_module.create_app())
+    response = client.post(
+        '/api/cognitive/files/upload',
+        data={'session_id': 'upload_multi'},
+        files=[('files', ('paper.pdf', b'%PDF', 'application/pdf'))],
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['session_id'] == 'upload_multi'
+    assert payload['path'].endswith('paper.pdf')
+    assert payload['result']['ok'] is True
+    assert len(payload['files']) == 1
+    assert payload['files'][0]['path'] == payload['path']
+    assert payload['files'][0]['result'] == payload['result']

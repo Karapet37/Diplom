@@ -15,8 +15,22 @@ def prepare_heads(
     graph_store: Any,
 ) -> list[dict[str, Any]]:
     prepared: list[dict[str, Any]] = []
+    decisions = list(classifications or [])
     selected_token = normalize_name(analysis.selected_head)
-    for decision in classifications:
+    if selected_token and all(normalize_name(item.entity_name) != selected_token for item in decisions):
+        existing = load_persona(analysis.selected_head)
+        decisions.insert(
+            0,
+            ClassificationDecision(
+                entity_name=str(analysis.selected_head or '').strip(),
+                entity_type=str(existing.entity_type if existing is not None else 'PERSON'),
+                votes={str(existing.entity_type if existing is not None else 'PERSON'): 1},
+                confidence=1.0,
+                features={'explicit_selection': 1.0},
+                evidence=['selected_head'],
+            ),
+        )
+    for decision in decisions:
         is_selected_entity = bool(selected_token and normalize_name(decision.entity_name) == selected_token)
         profession_head_allowed = decision.entity_type == 'PROFESSION' and (
             is_selected_entity
@@ -55,7 +69,7 @@ def select_primary_head(
     analysis: MessageAnalysis,
     prepared_heads: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    selected = str(analysis.selected_head or analysis.primary_entity or '').strip().lower()
+    selected = str(analysis.selected_head or '').strip().lower()
     if selected:
         for item in prepared_heads:
             head = item.get('head')

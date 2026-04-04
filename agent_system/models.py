@@ -94,6 +94,7 @@ class MessageAnalysis:
     selected_head: str = ''
     primary_entity: str = ''
     current_entity: str = ''
+    session_persona: str = ''
     explicit_context: str = ''
     entities: list[MessageEntity] = field(default_factory=list)
     user_state: UserState = field(default_factory=UserState)
@@ -105,10 +106,43 @@ class MessageAnalysis:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            'selected_head': self.selected_head,
             'primary_entity': self.primary_entity,
+            'current_entity': self.current_entity,
+            'session_persona': self.session_persona,
             'user_state': self.user_state.to_dict(),
             'situation': self.situation.to_dict(),
             'entities': [entity.name for entity in self.entities],
+        }
+
+
+@dataclass(slots=True)
+class InteractionFrame:
+    message_kind: str = 'statement'
+    question_present: bool = False
+    explicit_persona_switch: bool = False
+    requested_persona: str = ''
+    keep_session_persona: bool = False
+    topic_entity: str = ''
+    topic_mode: str = 'unknown'
+    followup_mode: str = 'none'
+    routed_message: str = ''
+    evidence: list[str] = field(default_factory=list)
+    source: str = 'deterministic'
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'message_kind': self.message_kind,
+            'question_present': bool(self.question_present),
+            'explicit_persona_switch': bool(self.explicit_persona_switch),
+            'requested_persona': self.requested_persona,
+            'keep_session_persona': bool(self.keep_session_persona),
+            'topic_entity': self.topic_entity,
+            'topic_mode': self.topic_mode,
+            'followup_mode': self.followup_mode,
+            'routed_message': self.routed_message,
+            'evidence': list(self.evidence),
+            'source': self.source,
         }
 
 
@@ -655,6 +689,38 @@ class InfluenceInterpretation:
 
 
 @dataclass(slots=True)
+class TaskProcedurePlan:
+    procedure_family: str = ''
+    requested_outcome: str = ''
+    response_form: str = ''
+    response_language: str = 'en'
+    form_drivers: list[str] = field(default_factory=list)
+    content_sources: list[str] = field(default_factory=list)
+    forbidden_mixins: list[str] = field(default_factory=list)
+    success_criteria: list[str] = field(default_factory=list)
+    execution_steps: list[str] = field(default_factory=list)
+    uncertainty_strategy: str = ''
+    summary: str = ''
+    source: str = 'deterministic'
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'procedure_family': self.procedure_family,
+            'requested_outcome': self.requested_outcome,
+            'response_form': self.response_form,
+            'response_language': self.response_language,
+            'form_drivers': list(self.form_drivers),
+            'content_sources': list(self.content_sources),
+            'forbidden_mixins': list(self.forbidden_mixins),
+            'success_criteria': list(self.success_criteria),
+            'execution_steps': list(self.execution_steps),
+            'uncertainty_strategy': self.uncertainty_strategy,
+            'summary': self.summary,
+            'source': self.source,
+        }
+
+
+@dataclass(slots=True)
 class WorkingContextLayer:
     context_id: str
     turn_id: str
@@ -699,9 +765,12 @@ class ResponseShapingPlan:
     role: str = ''
     style: str = ''
     behavior_mode: str = ''
+    response_form: str = ''
     summary: str = ''
     priorities: list[str] = field(default_factory=list)
     constraints: list[str] = field(default_factory=list)
+    forbidden_mixins: list[str] = field(default_factory=list)
+    success_criteria: list[str] = field(default_factory=list)
     risk_posture: str = ''
     source: str = 'deterministic'
 
@@ -710,9 +779,12 @@ class ResponseShapingPlan:
             'role': self.role,
             'style': self.style,
             'behavior_mode': self.behavior_mode,
+            'response_form': self.response_form,
             'summary': self.summary,
             'priorities': list(self.priorities),
             'constraints': list(self.constraints),
+            'forbidden_mixins': list(self.forbidden_mixins),
+            'success_criteria': list(self.success_criteria),
             'risk_posture': self.risk_posture,
             'source': self.source,
         }

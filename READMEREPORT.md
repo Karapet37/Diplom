@@ -1,624 +1,130 @@
-# Persona-Graph Agent System: AI Report
+# ԳԼՈՒԽ 3. PERSONA-GRAPH-AGENT ՀԱՄԱԿԱՐԳԻ ՃԱՐՏԱՐԱՊԵՏԱԿԱՆ ԵՎ ԾՐԱԳՐԱՅԻՆ ՆԿԱՐԱԳՐՈՒԹՅՈՒՆԸ
 
-Этот файл больше не является 3-й главой диплома. Теперь это рабочий системный отчёт для AI-агента или нового разработчика, который должен быстро понять:
+## 3.1. Առաջարկվող համակարգի ընդհանուր գաղափարը
 
-1. где что лежит в проекте;
-2. какие части реально участвуют в активном runtime;
-3. как проходит запрос от пользователя до ответа;
-4. где хранятся память, persona, graph и файлы;
-5. какие зоны являются полезными, а какие вторичными, историческими или шумовыми.
+Այս աշխատանքում ներկայացվում է `Persona-Graph-Agent` համակարգը, որը կառուցված է ոչ թե անմիջական `հաղորդագրություն -> պատասխան` սկզբունքով, այլ վիճակային անցումների վերահսկվող ճարտարապետությամբ։
 
-Ниже приоритет отдан не “красивому описанию”, а практической ориентации по проекту.
+Համակարգի հիմնական գաղափարն այն է, որ օգտատիրոջ հաղորդագրությունը դիտարկվում է որպես ազդեցություն համակարգի ընթացիկ վիճակի վրա։ Հաղորդագրությունը պետք է պարզի.
 
----
+- ինչ է փոխվում ընթացիկ վիճակում,
+- որ persona-ն է խոսողը,
+- որն է քննարկվող թեման,
+- ինչ ռիսկեր և առաջնահերթություններ են ակտիվանում,
+- ինչ նյութեր պետք է մտնեն ընթացիկ աշխատանքային համատեքստ։
 
-## 1. Что в проекте главное
+Միայն այս փուլերից հետո է թույլատրվում ձևավորել վերջնական պատասխանը։
 
-Текущий активный продукт в этом репозитории — это `persona-graph agent system`, который:
-
-- принимает чат-сообщение;
-- детерминированно выделяет сущности и ситуацию;
-- выбирает или материализует persona-head;
-- строит ограниченный context;
-- вызывает локальную LLM через строгий provider path;
-- отвечает;
-- хранит структурированную память в графе и файловом storage;
-- даёт UI для просмотра и редактирования графа.
-
-Ключевая архитектурная идея:
+Համակարգի ընդհանուր սկզբունքը հետևյալն է.
 
 ```text
-LLM не управляет системой.
-LLM только заполняет строгие формы или генерирует ответ.
-Все изменения graph/persona делает deterministic code.
+օգտատիրոջ հաղորդագրություն
+-> ընթացիկ վիճակի ընթերցում
+-> ազդեցության մեկնաբանում
+-> սահմանափակ state transition
+-> working context-ի կառուցում
+-> working context-ի review
+-> response shaping
+-> final generation
+-> transition logging
+-> current context persistence
 ```
 
----
+Այստեղ լեզվային մոդելը դիտարկվում է որպես ստորադաս հաշվարկային բաղադրիչ, ոչ թե որպես ամբողջ համակարգը ղեկավարող օբյեկտ։
 
-## 2. Структура репозитория
+Համակարգի կառուցման նպատակը երեք հիմնական խնդիր լուծելն է.
 
-Ниже перечислены важные директории и их роль.
+- persona-ն ներկայացնել որպես կառուցվածքային և երկարատև օբյեկտ,
+- հիշողությունը բաժանել հստակ շերտերի,
+- պատասխանն ստանալ ոչ թե անմիջապես մուտքային հարցից, այլ վերանայված աշխատանքային համատեքստից։
 
-### 2.1 Корневая структура
+Գործնական տեսանկյունից սա նշանակում է, որ runtime-ը պետք է կարողանա.
 
-| Путь | Роль | Статус |
-| --- | --- | --- |
-| `start.py` | Главный entrypoint локального запуска | Активно используется |
-| `agent_system/` | Основная backend-логика persona-graph runtime | Основная активная зона |
-| `src/utils/` | Local LLM provider, token budgeting, env utils | Основная активная зона |
-| `src/web/` | Склейка backend + frontend routes | Активно используется |
-| `webapp/` | React frontend, Graph Workspace, chat UI | Активно используется |
-| `config/runtime-profiles/` | Профили запуска: development, local-demo, local-heavy, server | Активно используется |
-| `scripts/` | Bootstrap и profile-aware run scripts | Активно используется |
-| `tests/agent_system/` | Основные регрессионные тесты текущей системы | Активно используется |
-| `tests/system_realism/` | End-to-end realism и evolution harness для живого runtime | Активно используется |
-| `memory/` | Runtime storage: graph, heads, sessions, files | Активно используется |
-| `runtime/` | Generated runtime artifacts: reports, isolated test memory, logs | Активно используется |
-| `docs/` | Документы, схемы, заметки | Вспомогательно |
-| `models/` | GGUF-модели и внешние reference artifacts | Частично активно |
-| `data/` | Исследовательские/служебные данные, не hot path чата | Вторично |
-| `src/living_system/` | Старая/параллельная исследовательская линия | Не в hot path текущего runtime |
-| `src/autonomous_graph/` | Отдельный экспериментальный слой | Не в hot path текущего runtime |
-| `roaches_viz/` | Отдельный side-project | Не относится к текущему runtime |
-| `packages/` | SDK и интеграционные пакеты | Вспомогательно |
-| `infra/` | Nginx, Prometheus, Grafana | Инфраструктурно |
+- պահպանել նույնականությունը երկար session-ների ընթացքում,
+- տարբերակել խոսող persona-ն և քննարկվող թեման,
+- չխառնել long-term memory-ն և current context-ը,
+- թույլ չտալ, որ model-ը ինքնուրույն վերագրի իրեն նոր բնութագրեր կամ վերագրի չստուգված փաստեր graph-ին,
+- պահել պատճառական կապը state, memory և final answer-ի միջև։
 
-### 2.2 Что запускать
+Այս մոտեցումը հատկապես կարևոր է persona-driven համակարգերի դեպքում, քանի որ այստեղ պատասխանի աղբյուրը միայն knowledge base-ը չէ։ Պատասխանի ձևավորման աղբյուր են նաև.
 
-Основной запуск сейчас идёт через:
+- persona traits-ը,
+- decision patterns-ը,
+- learned interaction patterns-ը,
+- session continuity-ը,
+- current role-ը,
+- mood dynamics-ը։
 
-```text
-start.py --profile <name> [--env-file ...] [--config ...]
-  -> bootstrap_runtime_environment()
-  -> get_runtime_config()
-  -> src.web.combined_app.create_combined_app()
-    -> agent_system.api.create_app()
-    -> src.web.api.attach_frontend_routes()
-```
+## 3.2. Persona-Graph-Agent համակարգի կառուցվածքային նկարագրությունը
 
-То есть локальный runtime — это не просто API, а combined app:
+### 3.2.1. Համակարգի հիմնական շերտերը
 
-- backend API из `agent_system/api.py`;
-- frontend routes из `src/web/api.py`;
-- UI из `webapp/dist` или `webapp/index.html`.
+Գործող համակարգը կազմված է հետևյալ հիմնական շերտերից.
 
-Для productionized локального запуска теперь существуют явные профили:
+1. `persona structure`
+2. `graph logic`
+3. `file-based memory`
+4. `state transition runtime`
+5. `current working context layer`
+6. `staged prompt system`
+7. `mood research layer`
+8. `operator UI և diagnostics`
 
-- `development`
-- `local-demo`
-- `local-heavy`
-- `server`
+Այս շերտերը համատեղ ապահովում են, որ համակարգը չդառնա սովորական polite assistant, այլ գործի որպես վերահսկվող persona-runtime։
 
-А операторские команды запуска стандартизированы через:
+### 3.2.2. Persona կառուցվածքը
 
-- `python start.py --list-profiles`
-- `python start.py --profile development --check`
-- `./scripts/run_profile.sh development`
-- `./scripts/bootstrap_local.sh`
+Persona-ն համակարգում ներկայացված է որպես բազմաշերտ stateful կառուցվածք։ Այն բաժանված է երեք հիմնական շերտերի.
 
-### 2.3 Активные backend-модули
+- `baseline definition`
+- `dynamic emotional state`
+- `learned interaction patterns`
 
-| Путь | Для чего нужен |
-| --- | --- |
-| `agent_system/chat_engine.py` | Главная orchestration-функция chat path |
-| `agent_system/message_analyzer.py` | Анализ user message, выделение `user_state` и сущностей |
-| `agent_system/semantic_routing.py` | Семантическое определение focus и behavioral guidance без привязки к точной формулировке prompt-а |
-| `agent_system/situation_engine.py` | Преобразует user analysis в structured situation |
-| `agent_system/feature_extractor.py` | Детерминированные признаки для classifier |
-| `agent_system/classifier_forest.py` | Vote-based классификация entity type |
-| `agent_system/head_caller.py` | Решает, нужен ли persona head и какой head главный |
-| `agent_system/persona_engine.py` | Persona storage, layered baseline/dynamic/learned state, emotion update, triad, revisions, indicators, explainability |
-| `agent_system/context_builder.py` | Собирает bounded context через deterministic stages: collect, score, rank, compress, pack |
-| `agent_system/social_roles.py` | Детерминированный выбор социальной роли для текущего хода на основе persona graph, mood signals и situation context |
-| `agent_system/mood_research.py` | File-backed mood research: snapshots, clustering, transition analysis, role-fit summaries, interpretable regressions |
-| `agent_system/graph_store.py` | Global graph storage, merge, hygiene, editing |
-| `agent_system/duplicate_resolver.py` | Duplicate resolution и semantic normalization |
-| `agent_system/entity_extractor.py` | Structured extraction из текста в graph proposals |
-| `agent_system/file_ingestion.py` | File learning pipeline и rebuild |
-| `agent_system/node_rethinker.py` | Ограниченный rethink mode для узлов graph |
-| `agent_system/graph_localizer.py` | Canonical English + localized node explanations |
-| `agent_system/language_tools.py` | Language detection/normalization |
-| `agent_system/llm.py` | Узкий адаптер от runtime к local LLM provider |
-| `agent_system/memory_layers.py` | Layered memory policies, archive paths, cold-storage lifecycle rules |
-| `agent_system/observability.py` | Request tracing, stage timings, counters, debug diagnostics |
-| `agent_system/reliability.py` | Failure policies, degraded runtime modes, safe mutation rollback and recovery signaling |
-| `agent_system/prompt_builder.py` | Жёсткие prompt-формы для chat, extraction, rethink, persona synthesis |
-| `agent_system/runtime_config.py` | Единая runtime-конфигурация: paths, budgets, model roles, feature flags |
-| `agent_system/history_store.py` | Session history и recent dialogue |
-| `agent_system/api.py` | FastAPI endpoints |
-| `agent_system/models.py` | Typed contracts и dataclasses для core runtime |
+Այս բաժանումը թույլ է տալիս տարբերակել.
 
-### 2.4 Активные frontend-модули
+- what the persona is,
+- how the persona currently feels,
+- what the persona has learned from interaction.
 
-| Путь | Для чего нужен |
-| --- | --- |
-| `webapp/src/App.jsx` | Главная orchestration-логика UI |
-| `webapp/src/api.js` | Вызовы backend endpoints |
-| `webapp/src/components/Operator/ChatSurface.jsx` | Operator surface для chat, persona selection inspection, context preview и request trace inspection |
-| `webapp/src/components/Operator/GraphOperatorSurface.jsx` | Operator surface для graph navigation, node health, hygiene actions и rethink preview/apply |
-| `webapp/src/components/Operator/PersonaInspectionSurface.jsx` | Operator surface для layered persona inspection, revisions и maturity/confidence indicators |
-| `webapp/src/components/Operator/FilesIngestionSurface.jsx` | Operator surface для file upload, ingestion inspection и last-run visibility |
-| `webapp/src/components/Operator/DiagnosticsSurface.jsx` | Operator surface для runtime metrics, graph health и trace inspection |
-| `webapp/src/components/Graph/GraphWorkspace.jsx` | Основная рабочая зона graph |
-| `webapp/src/components/Chat/ChatGraphPanel.jsx` | Chat + graph panel |
-| `webapp/src/lib/operatorFormatters.js` | Безопасное форматирование node/persona/context previews для operator UI |
-| `webapp/src/lib/graphView.js` | Layout, neighbourhood extraction, path logic |
-| `webapp/src/lib/i18n.js` | UI localization |
-| `webapp/src/styles.css` | Основные стили |
+Persona-ի կառուցվածքում առկա են.
 
-### 2.5 Runtime storage
+- traits,
+- roles,
+- habits,
+- reaction patterns,
+- values,
+- conflicts,
+- topic affinities,
+- speech tendencies,
+- memories,
+- relations,
+- decision patterns,
+- local graph links։
 
-Текущая активная память системы лежит в `memory/`.
+Persona subsystem-ի կարևոր առանձնահատկությունն այն է, որ այն չի պահվում մեկ միասնական “description” դաշտում։ Յուրաքանչյուր շերտ ունի իր դերը.
 
-#### `memory/graphs/`
+- baseline-ը պահպանում է համեմատաբար կայուն նույնականությունը,
+- dynamic state-ը պահպանում է ընթացիկ հուզական և իրավիճակային փոփոխությունները,
+- learned patterns-ը պահպանում է փոխազդեցությունից ստացված սահմանափակ սովորած վարքագիծը։
 
-- `nodes.json` — глобальные узлы графа;
-- `edges.json` — глобальные связи графа.
+Այս բաժանումը թույլ է տալիս միաժամանակ պահպանել persona-ի կայունությունը և թույլատրել սահմանափակ ադապտացիա։
 
-#### `memory/heads/{head_slug}/`
+### 3.2.3. Graph memory
 
-Для каждой persona head:
+Graph memory-ն հանդիսանում է երկարաժամկետ կառուցվածքային հիշողության հիմնական շերտը։ Այն պահվում է `memory/graphs/` կատալոգում և բաղկացած է.
 
-- `traits.json` — traits и `entity_type`;
-- `relations.json` — aliases и relations;
-- `examples.json` — примеры и `situation_reactions`;
-- `knowledge.txt` — краткое текстовое знание;
-- `emotion_vector.json` — текущее состояние эмоций;
-- `baseline.json` — baseline definition persona;
-- `dynamic_state.json` — dynamic emotional state и последний style/situation;
-- `learned_patterns.json` — bounded learned interaction patterns;
-- `log_tuples.json` — сжатые поведенческие сигнатуры без дублей, с `frequency`;
-- `persona_form.json` — подробная анкета persona;
-- `decision_explanation.txt` — простое объяснение decision-patterns;
-- `revisions.json` — revision counters и bounded snapshots изменённых слоёв;
-- `meta.json` — служебные метаданные;
-- `local_graph.json` — локальный persona subgraph.
+- `nodes.json`
+- `edges.json`
 
-#### `memory/sessions/`
+Graph layer-ը պատասխանատու է.
 
-- текстовые session histories.
+- գիտելիքի կառուցվածքային պահպանման,
+- entity և relation grounding-ի,
+- duplicate resolution-ի,
+- node lifecycle-ի,
+- hygiene-ի,
+- rethink preview/apply հոսքերի համար։
 
-#### `memory/files/uploaded_documents/`
-
-- загруженные файлы по session id.
-
-#### `memory/proposals/`
-
-- persona proposals для materialization.
-
-#### `memory/mood_research/`
-
-- `datasets/global.jsonl` — общий накопительный mood dataset;
-- `personas/{persona}.jsonl` — mood snapshots по persona;
-- `sessions/{session}.jsonl` — mood snapshots по session;
-- `reports/global.json` — глобальный clustering / transition / regression report;
-- `reports/persona__*.json`, `reports/session__*.json` — локальные reports для role selection и operator inspection.
-
-#### `memory/archive/`
-
-- cold session archives;
-- persona overflow archives;
-- graph snapshots;
-- persona snapshots before risky persona mutations;
-- lifecycle and recovery artifacts that are intentionally excluded from hot-path context reads.
-
-### 2.6 Что в репозитории вторично или шумно
-
-AI-агенту не стоит тратить основной фокус на эти зоны, если задача не относится к ним напрямую:
-
-- `src/living_system/` — отдельная исследовательская линия, не в активном chat-path;
-- `src/autonomous_graph/` — отдельный экспериментальный контур;
-- `roaches_viz/` — другой проект;
-- `memory/personalities/` — исторический storage, не основной для текущего `agent_system`;
-- `models/PersonaAgentwGraphRAG-DE6F/` — reference-материалы и внешняя база сравнения, не hot path;
-- `node_modules/` на корне — шум для основного Python runtime;
-- `data/` — исследовательские и служебные данные, не основной current runtime path.
-
-Если задача касается именно текущей системы, основной фокус должен быть на:
-
-```text
-agent_system/
-src/utils/
-src/web/
-webapp/src/
-memory/
-tests/agent_system/
-tests/system_realism/
-start.py
-```
-
----
-
-## 3. Как система работает
-
-### 3.1 Общий pipeline чата
-
-Текущий pipeline:
-
-```text
-chat request
-  -> ChatTurnRequest
-  -> message_analyzer
-  -> situation_engine
-  -> semantic_routing
-  -> feature_extractor
-  -> classifier_forest
-  -> head_caller
-  -> explicit persona emotion update
-  -> social_roles
-  -> context_builder
-  -> llm.generate_chat_reply
-  -> mood_research snapshot + background refresh
-  -> explicit storage writes
-  -> ChatTurnResult
-  -> response
-  -> optional background rebuild
-```
-
-`generate_response()` остаётся совместимым внешним API и по-прежнему возвращает словарь, но внутренняя hot-path orchestration теперь строится вокруг typed contracts:
-
-- `ChatTurnRequest` — вход в chat runtime;
-- `UserState` — нормализованное состояние пользователя;
-- `Situation` — структурированная интерпретация ситуации;
-- `semantic_focus` — explainable смысловой фокус вопроса, выведенный из persona structure и wording without fixed-answer fitting;
-- `ChatSideEffects` — явное описание write-side effects;
-- `ChatTurnResult` — итог runtime-прохода до сериализации в API response.
-
-`context_builder.py` внутри этого lifecycle теперь выполняет не неявную склейку секций, а явный pipeline:
-
-```text
-collect candidates
-  -> score candidates
-  -> rank candidates
-  -> compress candidates
-  -> pack bounded final context
-```
-
-### 3.2 Что делает каждый модуль в chat-path
-
-#### `agent_system/chat_engine.py`
-
-Это главный orchestration-слой.
-
-Он делает:
-
-1. создаёт или грузит session;
-2. запускает deterministic concept graph extraction по самому сообщению;
-3. получает `analysis` из analyzer;
-4. классифицирует найденные сущности;
-5. подготавливает heads;
-6. выбирает primary persona;
-7. обновляет её emotion vector;
-8. выбирает социальную роль на основе persona graph, mood signals и текущей ситуации;
-9. строит context;
-10. вызывает LLM;
-11. сохраняет turn в history;
-12. записывает situation-reaction;
-13. пишет mood snapshot и обновляет mood research artifacts;
-14. решает, нужен ли background rebuild.
-
-Теперь эти side effects выделены явно, а не “растворены” в одной длинной процедуре. На chat-path отдельно видны:
-
-- graph prewrite;
-- history write;
-- persona emotion update;
-- persona reaction memory write;
-- social role decision;
-- mood research write и background report refresh;
-- rebuild scheduling decision.
-- degraded fallback decision, если local chat provider недоступен или вернул пустой unusable output.
-
-Ключевой момент:
-
-```text
-background rebuild не запускается безусловно после каждого сообщения.
-Он теперь отложен и периодичен, чтобы не душить latency.
-```
-
-#### `agent_system/message_analyzer.py`
-
-Analyzer не решает, как persona должна чувствовать себя.
-
-Он возвращает типизированный `UserState`:
-
-```python
-UserState(
-    tone=...,
-    intent=...,
-    signals=...,
-    language=...,
-)
-```
-
-и также список сущностей.
-
-#### `agent_system/situation_engine.py`
-
-`situation_engine` переводит user analysis в типизированный `Situation`:
-
-```python
-Situation(
-    type=...,
-    target=...,
-    severity=...,
-)
-```
-
-Это принципиально важно, потому что:
-
-```text
-persona реагирует не на raw user emotion,
-а на интерпретированную ситуацию.
-```
-
-#### `agent_system/feature_extractor.py` + `classifier_forest.py`
-
-Здесь идут deterministic features и vote-based classification.
-
-Classifier:
-
-- классифицирует entity types;
-- помогает в routing;
-- не управляет эмоциями persona.
-
-#### `agent_system/head_caller.py`
-
-Решает:
-
-- оставлять entity как graph node;
-- materialize как persona head;
-- какой head считать primary в текущем turn.
-
-#### `agent_system/persona_engine.py`
-
-Это один из центральных модулей.
-
-Он отвечает за:
-
-- загрузку и сохранение heads;
-- baseline definition;
-- dynamic emotional state;
-- learned interaction patterns;
-- materialization;
-- emotion evolution;
-- reaction policy;
-- triad persona storage;
-- revision metadata и bounded snapshots;
-- confidence/maturity indicators;
-- persona selection and response explainability;
-- formal persona model;
-- persona graph sync.
-
-### 3.3 Формальная модель persona
-
-В системе persona понимается как stateful system:
-
-```text
-Persona = (T, E, R, M)
-```
-
-где:
-
-- `T` — traits и static parameters;
-- `E` — emotion vector;
-- `R` — deterministic reaction policy;
-- `M` — memory: examples, relations, situation-reactions, graph links, triad.
-
-Формальная реакция:
-
-```text
-R: (situation, T, E) -> (ΔE, response_style)
-```
-
-Emotion update:
-
-```text
-E(t+1) = clamp( D(E(t)) + R(situation, T) )
-```
-
-То есть:
-
-- есть drift к baseline;
-- есть boundedness `[0,1]`;
-- есть trait-conditioned reaction;
-- нет прямого наследования user emotion.
-
-Жёсткое правило:
-
-```text
-persona_emotion = f(persona_traits, situation)
-NOT f(user_emotion)
-```
-
-### 3.4 Persona triad
-
-В текущем состоянии persona хранит не только traits и knowledge, но и triad:
-
-#### 1. `log_tuples`
-
-Сжатые logs как tuple signatures без дублей.
-
-Повторы не дублируются строками, а увеличивают `frequency`.
-
-Пример логики:
-
-```text
-("utterance_pattern", "answer directly") -> frequency = 3
-```
-
-или
-
-```text
-("situation_reaction", "type=insult;target=persona", "firm boundary") -> frequency = 2
-```
-
-#### 2. `persona_form`
-
-Подробная анкета личности.
-
-Типичные поля:
-
-- `identity_class`
-- `interaction_style`
-- `core_dispositions`
-- `decision_patterns`
-- `clarification_policy`
-- `sarcasm_profile`
-- `response_priorities`
-- `knowledge_domains`
-- `risk_controls`
-
-#### 3. `decision_explanation`
-
-Короткое простое объяснение для человека:
-
-```text
-как эта persona принимает решения,
-в каком порядке что проверяет,
-когда отвечает по сути,
-когда уточняет,
-когда допускает сарказм.
-```
-
-Это нужно не только для объяснимости, но и для более стабильного prompt grounding.
-
-### 3.5 Как persona triad используется в ответе
-
-Поверх triad persona head теперь имеет явное layered-state разделение:
-
-- `baseline_definition`
-  - устойчивые traits, relations, aliases, knowledge;
-- `dynamic_state`
-  - текущий `emotion_vector`, `last_situation`, `last_response_style`;
-- `learned_patterns`
-  - examples, `situation_reactions`, `log_tuples`, `persona_form`, `decision_explanation`, `learned_traits`.
-
-Это разделение нужно для того, чтобы random interaction events не превращались в uncontrolled persona drift. Baseline должен оставаться устойчивым, dynamic state должен быстро обновляться на hot path, а learned patterns — адаптироваться ограниченно и reviewable way.
-
-У persona head также есть versioned operational meta:
-
-- `revision`
-- `baseline_revision`
-- `dynamic_revision`
-- `learned_revision`
-- `confidence_score`
-- `maturity_score`
-- `maturity_level`
-- `adaptation_locked`
-
-Ключевое bounded-adaptation правило такое:
-
-```text
-случайные chat-события могут обновлять learned patterns,
-но не должны тихо переписывать baseline traits/knowledge
-```
-
-Поэтому `update_persona_from_examples()` теперь прежде всего обновляет learned layer, а не baseline. Если синтез дал новые рискованные trait-сигналы, они попадают в `learned_traits` и revision trail, а не незаметно заменяют baseline definition.
-
-`context_builder.py` сначала раздельно собирает candidates из:
-
-- short-term session history;
-- persona memory;
-- persona triad;
-- global graph facts;
-- local graph neighborhood;
-- file-ingested knowledge.
-
-После этого каждый candidate получает explainable score по факторам:
-
-- relevance;
-- recency;
-- importance;
-- confidence;
-- persona alignment;
-- graph connectivity.
-
-Затем выполняются deterministic ranking, compression и bounded packing. Это важно, потому что теперь выбор элементов `persona_block`, `graph_context` и `recent_dialogue` можно разбирать по `context_debug`, а не только смотреть на итоговый prompt.
-
-В `persona_block` попадает:
-
-- identity class;
-- sarcasm profile;
-- clarification policy;
-- decision patterns;
-- response priorities;
-- короткое decision explanation;
-- часть log tuples;
-- emotion vector;
-- maturity/confidence summary;
-- revision summary;
-- relevant reactions.
-
-То есть LLM получает не абстрактную “личность в вакууме”, а уже структурированную operational persona.
-
----
-
-## 4. Как работает graph memory
-
-### 4.1 Где главный graph
-
-Глобальный graph лежит в:
-
-- `memory/graphs/nodes.json`
-- `memory/graphs/edges.json`
-
-Узлы содержат:
-
-- `id`
-- `name`
-- `type`
-- `aliases`
-- `description`
-- `facts`
-- `translation_line`
-- `importance`
-- `confidence`
-- `frequency`
-- `context`
-
-### 4.2 Что делает `graph_store.py`
-
-`agent_system/graph_store.py` отвечает за:
-
-- загрузку и сохранение graph state;
-- merge extraction results;
-- lifecycle classification узлов;
-- node/edge editing;
-- validation;
-- graph hygiene;
-- quarantine/review flow для низкоконфидентных и review-range узлов;
-- archival и merged event logging;
-- deterministic cluster labeling для больших graph states;
-- manual merge/delete/connect operations;
-- subgraph retrieval;
-- node views.
-
-### 4.3 Graph hygiene
-
-Graph hygiene — это не набор случайных хаков, а controlled optimization process.
-
-Формально:
-
-```text
-Quality(G) = α * relevance - β * redundancy + γ * connectivity
-```
-
-Где:
-
-- `relevance` — насколько graph полезен для retrieval;
-- `redundancy` — сколько там дублей и low-value мусора;
-- `connectivity` — насколько хорошо сохранены meaningful relations.
-
-В активной реализации это выражается через:
-
-- decay;
-- duplicate merge;
-- duplicate review marking;
-- garbage collection;
-- compression;
-- semantic repair.
-
-Также graph layer теперь использует явные lifecycle states:
+Գրաֆի հանգույցների համար կիրառվում են lifecycle states.
 
 - `active`
 - `weak`
@@ -626,783 +132,389 @@ Quality(G) = α * relevance - β * redundancy + γ * connectivity
 - `archived`
 - `merged`
 
-Из них только `active` и `weak` попадают в hot-path retrieval. `suspect` остаётся видимым для оператора в полном graph view, но исключается из `search_nodes()` и `subgraph()`. `archived` и `merged` фиксируются в lifecycle archive log и не возвращаются как обычные active nodes.
+Graph-ը համակարգում կատարում է միանգամից մի քանի դեր.
 
-### 4.4 Что именно считалось мусором на практике
+- entity grounding,
+- knowledge organization,
+- persona-local relation storage,
+- context support,
+- operator inspection surface։
 
-Во время реальной работы уже были замечены следующие плохие артефакты:
+Համակարգում կարևոր է, որ graph-ը դիտվում է որպես semantic memory layer, ոչ թե միայն visualization resource։
 
-- sentence-fragment nodes;
-- дубли вроде `human` и `люди` в роли разных узлов;
-- abstract concepts, ошибочно типизированные как `PERSON`;
-- пустые placeholder descriptions;
-- reinterpretation drift после слишком свободного rethink mode;
-- избыточные summary nodes на маленьких графах.
-- low-confidence extractions, которые не должны сразу становиться полноценным knowledge слоем;
-- review-range duplicate pairs, которые требуют ручной проверки, а не мгновенного auto-merge.
+### 3.2.4. Հիշողության շերտերը
 
-Эти проблемы не считаются “мелкими UI дефектами”. Для системы они критичны, потому что ухудшают:
+Համակարգի հիշողությունը բաժանված է մի քանի մակարդակի.
 
-- retrieval quality;
-- persona grounding;
-- subgraph usefulness;
-- explainability.
+- `working memory`
+- `session memory`
+- `persona memory`
+- `graph knowledge memory`
+- `archive / cold memory`
 
-Именно поэтому:
+Այս շերտավորումը թույլ է տալիս մեկտեղել.
 
-- `duplicate_resolver.py`
+- ընթացիկ երկխոսության ակտիվ բովանդակությունը,
+- երկարաժամկետ persona knowledge-ը,
+- graph-grounded facts-ը,
+- արխիվային և ցուրտ storage-ը։
+
+Layered memory model-ը կանխում է երկու հիմնական խառնաշփոթ.
+
+- երբ ամբողջ անցյալը միանգամից լցվում է prompt-ի մեջ,
+- երբ համակարգը չի տարբերակում, թե որն է ընթացիկ ակտիվ context-ը, իսկ որը՝ արխիվային նյութ։
+
+### 3.2.5. Mood research layer
+
+Համակարգում առկա է նաև ֆոնային mood research շերտ, որի նպատակն է ուսումնասիրել.
+
+- օգտատիրոջ վարքային և հուզական ազդակները,
+- persona-ի ներքին դինամիկան,
+- mood cluster-ները,
+- role choice-ի և response style-ի կապերը։
+
+Այս շերտը պահվում է `memory/mood_research/` կատալոգում և ապահովում է.
+
+- snapshots,
+- clustering,
+- transition analysis,
+- interpretable summaries,
+- role-effect reports։
+
+Mood research layer-ը runtime-ում օգտագործվում է ոչ թե որպես ազատ մեկնաբանող agent, այլ որպես աջակցող analytical layer, որը կարող է ազդել.
+
+- social role ընտրության,
+- uncertainty posture-ի,
+- response style-ի,
+- diagnostics-ի վրա։
+
+### 3.2.6. Operator interface
+
+Frontend-ը կառուցված է որպես operator workspace, ոչ թե որպես պարզ chat window։ Այն ներառում է առանձին մակերեսներ հետևյալ խնդիրների համար.
+
+- chat,
+- graph workspace,
+- persona inspection,
+- file ingestion,
+- diagnostics։
+
+Operator interface-ի առկայությունը ճարտարապետական տեսանկյունից կարևոր է, քանի որ համակարգը նախատեսված է ոչ միայն runtime execution-ի, այլ նաև դիտարկելիության, ստուգման և վերահսկման համար։
+
+## 3.3. Persona-Graph-Agent համակարգի ծրագրային նկարագրությունը
+
+### 3.3.1. Գլխավոր runtime path-ը
+
+Համակարգի հիմնական գործարկման կետը `start.py` ֆայլն է։ Գործող runtime path-ը հետևյալն է.
+
+```text
+start.py
+  -> bootstrap_runtime_environment()
+  -> get_runtime_config()
+  -> src.web.combined_app.create_combined_app()
+    -> agent_system.api.create_app()
+    -> src.web.api.attach_frontend_routes()
+```
+
+Այսպիսով, տեղային գործարկման դեպքում համակարգը իրենից ներկայացնում է combined app, որտեղ միևնույն runtime միջավայրում միավորված են.
+
+- backend API,
+- frontend routes,
+- operator UI։
+
+Այս runtime path-ը կարևոր է, որովհետև այն ցույց է տալիս, որ համակարգի իրական աշխատանքային միջավայրը միասնական է. backend-ը, diagnostics-ը և operator surface-ը միմյանցից անջատ չեն։
+
+### 3.3.2. Backend-ի հիմնական մոդուլները
+
+Գլխավոր backend տրամաբանությունը կենտրոնացած է `agent_system/` կատալոգում։
+
+Հիմնական ակտիվ մոդուլներն են.
+
+- `chat_engine.py`
+- `interaction_routing.py`
+- `message_analyzer.py`
+- `situation_engine.py`
+- `state_transition_runtime.py`
+- `context_builder.py`
+- `persona_engine.py`
 - `graph_store.py`
-- `node_rethinker.py`
-- `memory_layers.py`
+- `llm.py`
+- `prompt_builder.py`
+- `history_store.py`
+- `mood_research.py`
+- `observability.py`
+- `reliability.py`
 
-являются таким же ядром системы, как и chat path.
+Այս մոդուլների պատասխանատվությունները պայմանականորեն կարելի է բաժանել հինգ խմբի.
 
-### 4.5 Graph lifecycle и review flow
+1. orchestration and runtime,
+2. state interpretation,
+3. persona and behavior,
+4. graph and memory,
+5. observability and failure handling։
 
-Graph layer больше не считается просто “append-only knowledge map”. Для узлов действуют explicit lifecycle rules.
+### 3.3.3. Chat runtime-ի հիմնական քայլերը
 
-- low-confidence extraction -> `suspect` + `review_status=quarantine`
-- review-range duplicate -> более слабый node маркируется как `suspect` с `review_reason=duplicate_candidate`
-- aged low-value node -> выводится из active graph и записывается как `archived`
-- deterministic merge -> secondary node фиксируется как `merged`
+Մեկ chat turn-ի ընթացքում համակարգը կատարում է հետևյալ քայլերը.
 
-Это позволяет не пропускать шум в context, но при этом не терять audit trail и оставлять manual review возможным.
+1. ստեղծում կամ բեռնում է session,
+2. բեռնում է ընթացիկ state snapshot-ը,
+3. route-ավորում է interaction-ը,
+4. վերլուծում է հաղորդագրությունը,
+5. կառուցում է structured situation,
+6. ընտրում կամ materialize է persona-head-ը,
+7. թարմացնում է persona dynamic state-ը,
+8. կառուցում է bounded context,
+9. review-ում է context-ը,
+10. ձևավորում է response plan-ը,
+11. կանչում է final generator-ը,
+12. գրում է session history, current context և transition log։
 
----
+Այս հերթականությունը կարևոր է, որովհետև final answer-ը ստացվում է արդեն վերափոխված և review եղած context-ից, ոչ թե անմիջապես raw user input-ից։
 
-## 4.6 Layered memory lifecycle
+### 3.3.4. Interaction routing
 
-Текущая память больше не рассматривается как один плоский storage layer. Она разделена на:
+`interaction_routing.py` մոդուլը առանձնացնում է.
 
-- working memory;
-- session memory;
-- persona memory;
-- graph knowledge memory;
-- archive / cold memory.
+- խոսող persona-ն,
+- քննարկվող entity-ն,
+- follow-up mode-ը,
+- explicit persona switch-ը։
 
-Ключевое правило такое:
+Այս մոտեցումը կարևոր է, քանի որ համակարգը պետք է տարբերակի օրինակ հետևյալ երկու դեպքերը.
 
-```text
-archive memory не читается напрямую в обычный chat context.
-В prompt могут попадать только bounded active layers.
-```
+- երբ օգտատերը խոսում է տվյալ persona-ի հետ,
+- երբ օգտատերը խոսում է մեկ persona-ի հետ, բայց հարցնում է մեկ այլ թեմայի կամ կերպարի մասին։
 
-Практически это означает следующее.
+Այս բաժանումը թույլ է տալիս լուծել context continuity-ի այն խնդիրները, որոնք սովորաբար առաջանում են pronoun follow-up հարցերում, persona switch-ի դեպքերում և topic continuity-ի ընթացքում։
 
-- `working memory` — это ephemeral turn-local state в typed runtime objects; он не является долгосрочным knowledge store.
-- `session memory` хранится в `memory/sessions/` как active hot tail, а старые turns уходят в `memory/archive/sessions/`.
-- `persona memory` хранится в `memory/heads/{head}/`, но overflow по examples, reactions, log tuples и oversized knowledge уходит в `memory/archive/heads/`.
-- `graph knowledge memory` остаётся активным source of truth в `memory/graphs/`, а cold snapshots попадают в `memory/archive/graphs/` только по явной maintenance-команде.
-- `archive / cold memory` существует для auditability, migration safety и offline maintenance, а не для прямого prompt grounding.
+### 3.3.5. Context builder
 
-Отдельная техническая записка по этим правилам находится в `docs/memory_lifecycle.md`.
-
----
-
-## 5. Как документ learning добавляет знания
-
-### 5.1 Горячий путь
-
-`agent_system/file_ingestion.py` делает:
-
-```text
-file
-  -> text conversion
-  -> chunking
-  -> extract_knowledge()
-  -> validate_extraction()
-  -> graph_store.merge_extraction()
-  -> optional head updates
-```
-
-### 5.2 Роль `entity_extractor.py`
-
-`entity_extractor.py` объединяет:
-
-- deterministic concept extraction;
-- LLM structured extraction;
-- validation;
-- fallback heuristics.
-
-Важно:
+`context_builder.py` մոդուլը աշխատում է հետևյալ deterministic pipeline-ով.
 
 ```text
-LLM здесь не пишет graph напрямую.
-Он только предлагает structured content.
+collect -> score -> rank -> compress -> pack
 ```
 
-Все `entities` и `relations` проходят validation:
+Context sources-ը ներառում են.
 
-- отбрасываются sentence fragments;
-- нормализуются relation fields;
-- повторно определяется тип сущности;
-- мусор не materialize-ится как persona.
+- session short-term history,
+- persona memory,
+- persona triad,
+- global graph facts,
+- local graph neighborhood,
+- file-ingested knowledge,
+- social role,
+- mood research։
 
-### 5.3 Какая модель используется
+Context builder-ի նպատակը ոչ թե “շատ բան հավաքելն” է, այլ ճիշտ բաները սահմանափակ քանակով ընտրելն ու pack անելն այնպես, որ final generator-ը ստանա պատճառականորեն օգտակար context։
 
-Structured extraction и persona synthesis сейчас идут через fast role path, а не через тяжёлый “общий” режим по умолчанию.
+### 3.3.6. Staged prompt system
 
-Это нужно для двух причин:
+Համակարգում չի օգտագործվում մեկ մեծ prompt։ Փոխարենը կիրառվում է staged prompt architecture, որի հիմնական փուլերն են.
 
-1. уменьшить latency;
-2. уменьшить нестабильность JSON output.
+- `INTERACTION_ROUTER`
+- `STATE_READER`
+- `INFLUENCE_INTERPRETER`
+- `STATE_TRANSITION_GUIDE`
+- `CONTEXT_CURATOR`
+- `CONTEXT_REVIEWER`
+- `RESPONSE_SHAPER`
+- `FINAL_GENERATOR`
 
----
+Այս փուլերի prompt-երը պահվում են `agent_system/prompts/` կատալոգում։
 
-## 6. Как работает rethink mode
+Staged prompt system-ը առանձնացնում է.
 
-`agent_system/node_rethinker.py` — это ограниченный слой переосмысления нод.
+- state reading,
+- influence interpretation,
+- bounded transition guidance,
+- context curation,
+- context review,
+- response shaping,
+- final generation։
 
-Критический принцип:
+Այսպիսով, model-ը չի ստանում մեկ խառնված prompt, այլ մասնակցում է սահմանափակ և ստուգելի փուլերի։
 
-```text
-LLM не возвращает готовые graph mutations как приказы.
-LLM возвращает только content improvements и link suggestions.
-```
+### 3.3.7. Current working context-ի առանձին պահպանում
 
-Дальше deterministic code делает:
+Համակարգում current working context-ը պահվում է առանձին operational շերտում.
 
-- валидацию имён;
-- отсев fragment-like названий;
-- нормализацию role;
-- маппинг `role -> relation_type`;
-- типизацию узлов;
-- `patch_node`;
-- `create_node` / `upsert`;
-- `connect_nodes`.
+- `runtime/current_context/current_context.json`
+- `runtime/current_context/current_context.txt`
 
-### 6.1 Режимы rethink
+Իսկ state transition history-ն պահվում է.
 
-Есть два режима:
+- `runtime/logs/state_transitions.jsonl`
 
-- `preview` — показывает план без записи в graph;
-- `apply` — применяет только разрешённые изменения.
+Այս լուծումը թույլ է տալիս չխառնել.
 
-### 6.2 Почему это важно
+- long-term memory-ն,
+- session history-ն,
+- և ընթացիկ ակտիվ context-ը։
 
-Старый более свободный rethink pipeline уже успел создать semantic defects.
+Current context layer-ի առանձին պահպանումը նաև թույլ է տալիս operator-ին տեսնել, թե կոնկրետ որ context-ն է օգտագործվել տվյալ turn-ի ժամանակ։
 
-Поэтому текущий rethink mode deliberately constrained:
+### 3.3.8. Reliability և observability
 
-- content-only suggestions;
-- no raw graph control;
-- whitelist link roles;
-- preview first;
-- apply second.
+Համակարգում ներդրված են նաև reliability և observability շերտեր։
 
----
+`reliability.py` ապահովում է.
 
-## 7. Graph Workspace и UI
+- degraded mode support,
+- snapshot-before-mutation logic,
+- rollback / recovery paths,
+- operator-visible failure signaling։
 
-Frontend в `webapp/` — это не декоративный слой, а реальный операторский интерфейс системы.
+`observability.py` ապահովում է.
 
-### 7.1 Что умеет Graph Workspace
+- request tracing,
+- stage timing,
+- fallback tracking,
+- graph health diagnostics,
+- debug endpoints։
 
-Через `webapp/src/components/Graph/GraphWorkspace.jsx` и соседние модули доступны:
+## 3.4. Պահոցների և ֆայլային կառուցվածքի նկարագրությունը
 
-- просмотр графа;
-- zoom/pan;
-- локализованный скролл;
-- branch windows;
-- drill-down по узлам двойным кликом;
-- manual graph editing;
-- node rethink preview/apply;
-- node cards с canonical English explanation;
-- localized explanation block;
-- translation line для узлов.
-- lifecycle state labels для `active / weak / suspect`;
-- graph diagnostics summary;
-- cluster labels для больших graph views.
+### 3.4.1. Գլխավոր ակտիվ կատալոգները
 
-Но operator-grade UI теперь организован не как одна смешанная страница, а как набор отдельных рабочих поверхностей:
-
-- `chat`
-  - conversation flow, persona selection inspection, response shaping, safe context preview, request trace inspection;
-- `graph workspace`
-  - graph navigation, node health/state inspection, merge/quarantine/delete/connect actions, rethink preview/apply;
-- `persona inspection`
-  - layered persona state, baseline/dynamic/learned split, revisions, maturity/confidence indicators;
-- `files / ingestion`
-  - upload flow, last ingestion result, per-file ingestion inspection;
-- `diagnostics`
-  - runtime metrics, graph health, recent traces, selected trace details.
-
-### 7.2 Зачем нужен frontend с точки зрения AI-системы
-
-Он важен не только для человека, но и как operational surface:
-
-- позволяет визуально замечать мусор;
-- быстрее ловит semantic drift;
-- показывает, что retrieval useful, а что нет;
-- даёт человеку право финального контроля;
-- делает видимыми reasoning inputs без раскрытия hidden chain-of-thought;
-- позволяет оператору вручную применять hygiene actions и inspect/debug runtime без прямого доступа к storage-файлам.
-
-### 7.3 Что именно оператор может проверить через UI
-
-Через новый layout оператор может видеть:
-
-- почему была выбрана именно эта persona;
-- каким response style shaped текущий ответ;
-- какие context items реально попали в bounded prompt;
-- какой trace сопровождал запрос и какие stage timings он набрал;
-- в каком lifecycle state находится выбранный graph node;
-- какая у узла `importance`, `confidence`, `frequency`;
-- какие persona layers и revisions влияли на текущее поведение.
-
-Важно, что UI показывает не hidden chain-of-thought, а безопасные структурированные explanations и runtime artifacts, которые система уже считает допустимыми для operator inspection.
-
----
-
-## 8. Как подключена LLM
-
-### 8.1 Активный путь
-
-Основной local provider:
-
-- `src/utils/local_llm_provider.py`
-
-Тонкий runtime adapter:
-
-- `agent_system/llm.py`
-
-Budgeting и retries:
-
-- `src/utils/prompt_budgeter.py`
-- `src/utils/token_budget.py`
-
-### 8.2 Главный принцип доступа к LLM
-
-Система не “является LLM”.
-Система подключает LLM как подчинённый вычислительный модуль.
-
-Использование делится на режимы:
-
-- `chat`
-- `knowledge`
-- `translation`
-
-и на role paths:
-
-- `analyst`
-- `general`
-- `translator`
-- другие role advisors при наличии.
-
-### 8.3 Что было проблемой по скорости
-
-Главные источники лагов раньше были такими:
-
-- слишком тяжёлый chat role;
-- слишком раздутый context;
-- rebuild после каждого turn;
-- structured-output forcing для обычного chat prompt;
-- лишние retry rounds.
-
-### 8.4 Что сейчас исправлено
-
-Сейчас runtime уже зажат:
-
-- chat path идёт через fast role по умолчанию;
-- context budget урезан до `4000`;
-- rebuild не крутится безусловно после каждого turn;
-- JSON forcing включается только для действительно структурных prompt-ов;
-- retry path укорочен по умолчанию;
-- fallback reply возвращается сразу, если grounding недостаточен.
-
-То есть задержка больше не должна появляться из-за того, что обычный chat prompt сначала принудительно гоняется через JSON-only path.
-
-### 8.5 Наблюдаемость и диагностика
-
-Для текущего runtime добавлен отдельный слой наблюдаемости:
-
-- `agent_system/observability.py`
-- `agent_system/reliability.py`
-- `docs/observability.md`
-- `docs/context_pipeline.md`
-- `docs/memory_lifecycle.md`
-- `docs/graph_lifecycle.md`
-- `docs/reliability.md`
-
-Он не меняет продуктовую логику и не превращает систему в “дашборд ради дашборда”. Его задача — сделать измеримыми:
-
-- latency по стадиям;
-- fallback rate;
-- usage context budget;
-- rebuild frequency;
-- rethink preview/apply outcomes;
-- graph health.
-
-Основные debug endpoints:
-
-- `GET /api/cognitive/debug/metrics`
-- `GET /api/cognitive/debug/traces`
-- `GET /api/cognitive/debug/graph-health`
-- `GET /api/cognitive/debug/runtime-status`
-- `POST /api/cognitive/graph/nodes/{node_id}/state`
-
-Именно через них удобно проверять, где висит chat-path, не выросла ли redundancy графа и не начал ли rethink mode деградировать качество graph state.
-
-### 8.6 Надёжность, degraded mode и recovery
-
-Отдельный reliability-слой нужен потому, что для долгоживущей системы важнее предсказуемая деградация, чем попытка “любой ценой продолжать работать”.
-
-Failure-классы живут в `agent_system/reliability.py`:
-
-- `DependencyUnavailableFailure`
-- `StorageWriteFailure`
-- `MutationRejectedFailure`
-- `RecoveryFailure`
-
-Практический смысл такой:
-
-- слабые зависимости переводят runtime в degraded mode;
-- рискованные graph/persona мутации либо завершаются валидно, либо откатываются;
-- silent corruption считается недопустимой.
-
-Что уже защищено:
-
-- risky graph writes делают pre-mutation snapshot;
-- risky persona mutations сохраняют persona snapshot и, при необходимости, graph snapshot;
-- `rethink/apply` восстанавливает graph snapshot, если mutation stage падает;
-- chat-path при недоступности local provider сразу возвращает safe fallback reply, а не остаётся в подвешенном состоянии.
-
-Operator recovery endpoints:
-
-- `GET /api/cognitive/graph/snapshots`
-- `POST /api/cognitive/graph/restore`
-- `GET /api/cognitive/personalities/{name}/revisions`
-- `GET /api/cognitive/personalities/{name}/snapshots`
-- `POST /api/cognitive/personalities/{name}/restore/{revision}`
-
----
-
-## 9. Какой модуль где участвует
-
-### 9.1 Если приходит обычное чат-сообщение
-
-Участвуют:
+Գործող runtime-ի համար հիմնական ակտիվ շերտերն են.
 
 - `start.py`
-- `src/web/combined_app.py`
-- `agent_system/api.py`
-- `agent_system/runtime_config.py`
-- `agent_system/chat_engine.py`
-- `agent_system/message_analyzer.py`
-- `agent_system/situation_engine.py`
-- `agent_system/feature_extractor.py`
-- `agent_system/classifier_forest.py`
-- `agent_system/head_caller.py`
-- `agent_system/persona_engine.py`
-- `agent_system/context_builder.py`
-- `agent_system/prompt_builder.py`
-- `agent_system/llm.py`
-- `src/utils/local_llm_provider.py`
-- `src/utils/prompt_budgeter.py`
-- `agent_system/history_store.py`
-
-Точный lifecycle здесь такой:
-
-1. `start.py` поднимает combined runtime через `src/web/combined_app.py`.
-2. `agent_system/api.py` принимает `POST /api/cognitive/chat/respond`.
-3. Внешний request конвертируется в `ChatTurnRequest`.
-4. `chat_engine.py` создаёт или грузит session.
-5. При необходимости выполняется deterministic graph prewrite по самому сообщению.
-6. `message_analyzer.py` строит `UserState` и entity list.
-7. `situation_engine.py` строит `Situation`.
-8. `feature_extractor.py` и `classifier_forest.py` классифицируют сущности.
-9. `head_caller.py` выбирает primary persona-head.
-10. `persona_engine.py` обновляет emotion vector до вызова LLM.
-11. `context_builder.py` строит bounded context.
-12. `llm.py` вызывает local provider.
-13. `history_store.py` записывает turn в session storage.
-14. `persona_engine.py` записывает `situation_reaction`.
-15. `chat_engine.py` формирует explainability-блоки `persona_selection` и `persona_response`.
-16. `chat_engine.py` принимает явное решение о background rebuild и только затем возвращает `ChatTurnResult`.
-
-Storage writes на этом пути происходят в строго фиксированных местах:
-
-- `memory/graphs/*` — только если был deterministic graph prewrite;
-- `memory/sessions/{session_id}.txt` — после получения assistant reply;
-- `memory/heads/{head}/emotion_vector.json` — при emotion update;
-- `memory/heads/{head}/examples.json` — при записи `situation_reaction`;
-- `memory/proposals/*` и rebuild artifacts — только по явному решению scheduler-а.
-
-### 9.2 Если загружается файл
-
-Участвуют:
-
-- `agent_system/api.py`
-- `agent_system/file_ingestion.py`
-- `agent_system/entity_extractor.py`
-- `agent_system/prompt_builder.py`
-- `agent_system/llm.py`
-- `agent_system/graph_store.py`
-- `agent_system/persona_engine.py`
-
-### 9.3 Если пользователь работает с графом
-
-Участвуют:
-
-- `webapp/src/App.jsx`
-- `webapp/src/components/Graph/GraphWorkspace.jsx`
-- `webapp/src/api.js`
-- `agent_system/api.py`
-- `agent_system/graph_store.py`
-- `agent_system/graph_localizer.py`
-- `agent_system/node_rethinker.py`
-- `agent_system/memory_layers.py`
-
-### 9.4 Если материализуется или обновляется persona
-
-Участвуют:
-
-- `agent_system/persona_engine.py`
-- `agent_system/prompt_builder.py`
-- `agent_system/llm.py`
-- `agent_system/graph_store.py`
-
-Именно здесь создаются:
-
-- traits;
-- relations;
-- examples;
-- emotion vector;
-- baseline definition;
-- dynamic state;
-- learned patterns;
-- revision trail;
-- maturity/confidence indicators;
-- log tuples;
-- persona form;
-- decision explanation.
-
----
-
-## 10. Ограничения и правила системы
-
-### 10.1 Что нельзя отдавать на волю LLM
-
-Нельзя:
-
-- прямое управление graph mutations;
-- direct emotion inheritance from user;
-- свободную типизацию сущностей без validation;
-- raw relation injection;
-- неограниченный rethink mode.
-
-### 10.2 Что разрешено LLM
-
-Разрешено:
-
-- structured extraction;
-- structured persona synthesis;
-- translation;
-- final reply generation;
-- content suggestions для rethink mode.
-
-### 10.3 Что должно делаться кодом
-
-Кодом должны делаться:
-
-- routing;
-- validation;
-- graph merge;
-- graph hygiene;
-- duplicate resolution;
-- persona materialization;
-- emotion update;
-- preview/apply logic;
-- storage writes.
-
----
-
-## 11. Текущие тесты
-
-Главные живые зоны тестов:
-
+- `agent_system/`
+- `src/web/`
+- `src/utils/`
+- `webapp/`
+- `memory/`
+- `runtime/`
 - `tests/agent_system/`
 - `tests/system_realism/`
 
-`tests/agent_system/` покрывает:
+Այս կատալոգներն են կազմում current canonical runtime-ի հիմնական տարածքը, և հենց դրանց վրա պետք է հենվել համակարգի ծրագրային նկարագրությունը գրելու ժամանակ։
 
-- chat engine;
-- classifier and heads;
-- context builder;
-- social role selection;
-- mood research persistence and clustering;
-- concept graphs;
-- graph editor;
-- graph hygiene;
-- graph lifecycle;
-- graph localizer;
-- local llm provider policy;
-- node rethinker;
-- API failures.
+### 3.4.2. Persona storage
 
-Базовая команда:
+Persona head-երը պահվում են `memory/heads/{head_slug}/` կառուցվածքով։
 
-```bash
+Տիպային persona bundle-ը ներառում է.
+
+- `baseline.json`
+- `dynamic_state.json`
+- `learned_patterns.json`
+- `traits.json`
+- `relations.json`
+- `examples.json`
+- `emotion_vector.json`
+- `knowledge.txt`
+- `log_tuples.json`
+- `persona_form.json`
+- `decision_explanation.txt`
+- `revisions.json`
+- `meta.json`
+- `local_graph.json`
+
+Այս կառուցվածքը ցույց է տալիս, որ persona-ն համակարգում ոչ թե մեկ տեքստային նկարագրություն է, այլ բազմաֆայլ state bundle։
+
+### 3.4.3. Session storage
+
+Session history-ն պահվում է `memory/sessions/` կատալոգում։
+
+### 3.4.4. Graph storage
+
+Graph storage-ի հիմնական ֆայլերն են.
+
+- `memory/graphs/nodes.json`
+- `memory/graphs/edges.json`
+
+### 3.4.5. File ingestion storage
+
+Բեռնված փաստաթղթերը պահվում են.
+
+- `memory/files/uploaded_documents/`
+
+### 3.4.6. Archive storage
+
+Սառը և վերականգնելի storage շերտերը պահվում են.
+
+- `memory/archive/`
+
+### 3.4.7. Runtime operational artifacts
+
+Runtime-ի ընթացքում ստեղծվող գործող ֆայլերը պահվում են առանձին շերտում.
+
+- `runtime/current_context/current_context.json`
+- `runtime/current_context/current_context.txt`
+- `runtime/logs/state_transitions.jsonl`
+- `runtime/system_realism_reports/`
+
+Այս շերտը կարևոր է, քանի որ այստեղ պահպանվում են ոչ թե long-term memory օբյեկտները, այլ ընթացիկ աշխատանքի և ստուգման արտեֆակտները։
+
+## 3.5. Թեստավորում և ընթացիկ փորձնական արդյունքները
+
+### 3.5.1. Backend regression tests
+
+Համակարգի հիմնական backend test layer-ը գտնվում է.
+
+- `tests/agent_system/`
+
+Այստեղ ստուգվում են.
+
+- chat runtime-ը,
+- state transition-ը,
+- interaction routing-ը,
+- memory lifecycle-ը,
+- graph lifecycle-ը,
+- context pipeline-ը,
+- reliability-ը,
+- API failures-ը։
+
+Վերջին փաստացի արդյունքը.
+
+```text
 python3 -m pytest tests/agent_system -q
+91 passed, 6 skipped
 ```
 
-`tests/system_realism/` — это уже не unit/regression слой, а живой operator-grade harness, который:
+### 3.5.2. End-to-end realism tests
 
-- запускает настоящий runtime через `start.py`;
-- создаёт каноническую persona fixture в реальном storage формате;
-- шлёт реальные chat-запросы через HTTP;
-- оценивает persona fidelity, style consistency, memory continuity, generic leakage и latency;
-- гоняет mutation/evolution scenarios через реальные graph/persona механизмы;
-- пишет JSON и Markdown отчёты в `runtime/system_realism_reports/`.
+Կենդանի runtime-level ստուգումները կատարվում են.
 
-Что сейчас входит в advanced realism/evolution layer:
+- `tests/system_realism/`
 
-- generated unexpected / rare prompts;
-- unseen prompt generalization через детерминированные paraphrase/mutation cases;
-- persona evolution через live dossier fact injection;
-- memory injection tests;
-- memory deletion через restore persona revision;
-- graph editor simulation: create / connect / merge / patch / delete;
-- contradiction resistance;
-- identity continuity after mutations;
-- optional rare chaos path.
+Այստեղ ստուգվում են.
 
-Базовая команда:
+- իրական startup path-ը,
+- endpoint reachability-ը,
+- persona materialization-ը,
+- live dialogue behavior-ը,
+- persona fidelity-ը,
+- memory continuity-ը,
+- contradiction handling-ը,
+- mutation/evolution scenarios-ը։
 
-```bash
+Վերջին փաստացի արդյունքը.
+
+```text
 python3 -m pytest tests/system_realism -q
+18 passed
 ```
 
-По умолчанию `pytest` entrypoint использует облегчённый live suite:
+Այս երկու test layer-երը միասին տալիս են հետևյալ պատկերը.
 
-- `suite=advanced`
-- `mutation_subset=smoke`
-- короткий live timeout, чтобы GGUF-run не зависал на десятках тяжёлых turns
+- backend logic-ը ստուգվում է deterministic regression-ներով,
+- live runtime behavior-ը ստուգվում է realism harness-ով,
+- persona behavior, memory continuity և mutation flows-ը ստանում են առանձին verification surface։
 
-Если нужен полный ручной прогон с richer artifacts, используется direct runner:
+## 3.6. Գլխի եզրակացություն
 
-```bash
-python3 -m tests.system_realism --profile local-demo --suite full --mutation-subset all --tag manual
-```
+Կատարված ուսումնասիրությունը ցույց է տալիս, որ մեծ համատեքստով և ընդհանրացված օգնականային համակարգերը բավարար չեն, եթե դրանցում բացակայում է persona-ի, հիշողության, graph grounding-ի և state transition-ի խիստ կազմակերպված շերտավորումը։
 
----
+`Persona-Graph-Agent` համակարգում առաջարկված է այլ ճարտարապետական մոտեցում, որտեղ.
 
-## 12. Как читать проект AI-агенту
+- persona-ն ներկայացվում է որպես կառուցվածքային stateful օբյեկտ,
+- graph-ը գործում է որպես երկարաժամկետ կառուցվածքային հիշողություն,
+- current working context-ը առանձնացված է long-term storage-ից,
+- պատասխանն առաջանում է staged runtime pipeline-ից,
+- transition history-ն պահվում է առանձին,
+- LLM-ը ենթարկվում է սահմանափակված prompt stages-ի։
 
-Если AI-агенту нужно быстро войти в проект, лучший порядок чтения такой:
-
-1. `start.py`
-2. `agent_system/runtime_config.py`
-3. `agent_system/api.py`
-4. `agent_system/chat_engine.py`
-5. `agent_system/message_analyzer.py`
-6. `agent_system/situation_engine.py`
-7. `agent_system/persona_engine.py`
-8. `agent_system/context_builder.py`
-9. `agent_system/graph_store.py`
-10. `agent_system/node_rethinker.py`
-11. `agent_system/llm.py`
-12. `src/utils/local_llm_provider.py`
-13. `agent_system/observability.py`
-14. `agent_system/memory_layers.py`
-15. `docs/runtime_flow.md`
-16. `docs/observability.md`
-17. `docs/context_pipeline.md`
-18. `docs/persona_lifecycle.md`
-19. `docs/memory_lifecycle.md`
-20. `docs/graph_lifecycle.md`
-21. `webapp/src/App.jsx`
-22. `webapp/src/components/Graph/GraphWorkspace.jsx`
-23. `tests/agent_system/`
-24. `tests/system_realism/`
-
-Если задача только по runtime-speed, то фокус должен быть на:
-
-- `agent_system/llm.py`
-- `src/utils/local_llm_provider.py`
-- `src/utils/prompt_budgeter.py`
-- `agent_system/context_builder.py`
-- `agent_system/chat_engine.py`
-- `agent_system/reliability.py`
-
-Если задача только по graph quality, то фокус должен быть на:
-
-- `agent_system/graph_store.py`
-- `agent_system/duplicate_resolver.py`
-- `agent_system/node_rethinker.py`
-- `agent_system/entity_extractor.py`
-
-Если задача только по persona behavior, то фокус должен быть на:
-
-- `agent_system/persona_engine.py`
-- `agent_system/message_analyzer.py`
-- `agent_system/situation_engine.py`
-- `agent_system/context_builder.py`
-
----
-
-## 13. Краткий вывод
-
-Этот проект — не “обёртка вокруг LLM”.
-Это детерминированная AI-система с:
-
-- file-first memory;
-- graph-grounded storage;
-- persona heads;
-- situation-based emotion model;
-- constrained rethink pipeline;
-- role-based local LLM access;
-- UI для ручного контроля и graph editing.
-
-Главная практическая ошибка при работе с этим репозиторием — воспринимать его как pure prompt system. Это неверно.
-
-Правильная модель такая:
-
-```text
-Это orchestration system,
-в которой LLM — лишь один из подчинённых модулей.
-```
-
----
-
-## 14. Последние результаты тестов
-
-Ниже перечислены последние реально выполненные прогоны, а не “идеальные ожидаемые” результаты.
-
-### 14.1 Structural и targeted realism tests
-
-Команда:
-
-```bash
-python3 -m pytest \
-  tests/system_realism/test_scenario_generators.py \
-  tests/system_realism/test_evolution_metrics.py \
-  tests/system_realism/test_reporting.py \
-  tests/system_realism/test_evaluator.py \
-  tests/system_realism/test_runtime_launcher.py \
-  tests/system_realism/test_dialogue_cases_fixture.py \
-  -q
-```
-
-Результат:
-
-```text
-17 passed in 0.07s
-```
-
-Это подтверждает, что:
-
-- сценарные генераторы детерминированы;
-- evolution metrics считаются корректно;
-- Markdown/JSON reporting не разваливается;
-- runtime launcher и benchmark fixtures совместимы с текущим кодом.
-
-### 14.2 Full realism/evolution pytest suite
-
-Команда:
-
-```bash
-python3 -m pytest tests/system_realism -q
-```
-
-Результат:
-
-```text
-18 passed in 81.26s (0:01:21)
-```
-
-Это означает, что:
-
-- вся папка `tests/system_realism/` сейчас собирается как единая система;
-- top-level live runtime test проходит;
-- JSON/Markdown realism reports действительно генерируются;
-- mutation/evolution layer не ломает existing realism harness.
-
-### 14.3 Live runtime realism integration test
-
-Команда:
-
-```bash
-python3 -m pytest tests/system_realism/test_runtime_realism.py -q
-```
-
-Результат:
-
-```text
-1 passed in 82.27s (0:01:22)
-```
-
-Это важный proof-point, потому что здесь действительно:
-
-- поднимается `start.py`;
-- открывается реальный localhost port;
-- выполняются live requests;
-- запускаются advanced mutation scenarios;
-- формируется operator report.
-
-### 14.4 Manual degraded smoke run через real runtime
-
-Команда:
-
-```bash
-python3 -m tests.system_realism \
-  --profile local-demo \
-  --suite advanced \
-  --mutation-subset smoke \
-  --unexpected-cases 0 \
-  --generalization-cases 0 \
-  --request-timeout 2 \
-  --tag evolution-smoke-fast
-```
-
-Результат:
-
-```text
-Verdict: api_unreachable
-Startup success: True
-```
-
-Artifacts:
-
-- `runtime/system_realism_reports/20260326T010719Z-evolution-smoke-fast/realism_report.md`
-- `runtime/system_realism_reports/20260326T010719Z-evolution-smoke-fast/realism_report.json`
-- `runtime/system_realism_reports/20260326T010719Z-evolution-smoke-fast/server.log`
-
-Этот прогон считается полезным, а не “плохим”, потому что он показал честное degraded поведение:
-
-- сервер стартовал;
-- persona revision restore и debug endpoints отработали;
-- live chat path не уложился в жёсткий `2s` timeout;
-- harness не упал traceback’ом, а выдал нормальный инженерный отчёт.
-
-### 14.5 Что это значит practically
-
-На текущий момент можно утверждать следующее:
-
-- regression layer `tests/agent_system/` остаётся основной для детерминированной логики;
-- `tests/system_realism/` уже стал живым end-to-end слоем для проверки поведения системы как продукта;
-- узкое место в live realism runs сейчас не startup и не storage safety, а latency local GGUF inference на нескольких последовательных persona turns;
-- сама test architecture уже умеет честно фиксировать и хорошие, и degraded исходы без фейковых pass conditions.
-
-### 14.6 Последний локальный regression run
-
-Команда:
-
-```bash
-python3 -m pytest tests/agent_system -q
-```
-
-Результат:
-
-```text
-74 passed, 4 skipped
-```
-
-Этот прогон уже включает социальный persona-graph слой:
-
-- structural social persona graph;
-- social role selection;
-- file-backed mood research;
-- semantic routing without fixed prompt matching;
-- structured behavior trace в chat response;
-- chat integration этих слоёв в active runtime path.
+Այսպիսով, համակարգը նպատակ ունի բարձրացնել ոչ թե միայն պատասխանների արտաքին բնականությունը, այլ դրանց պատճառական կապը ներքին վիճակի, persona structure-ի, graph memory-ի և session continuity-ի հետ։ Հենց այս հատկությունն է այն դարձնում ոչ թե սովորական prompt-based chat interface, այլ վերահսկվող persona-graph runtime։

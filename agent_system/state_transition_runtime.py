@@ -19,17 +19,20 @@ from .models import (
     Situation,
     SocialRoleDecision,
     StateSnapshot,
+    TaskProcedurePlan,
     WorkingContextLayer,
 )
 from .prompt_builder import (
     build_context_curator_prompt,
     build_context_reviewer_prompt,
     build_influence_interpreter_prompt,
+    build_procedure_reconstructor_prompt,
     build_response_shaper_prompt,
     build_state_reader_prompt,
     build_state_transition_prompt,
 )
 from .runtime_config import get_runtime_config
+from .task_procedures import seed_task_procedure
 
 _TRANSITION_LOG_LOCK = Lock()
 _CURRENT_CONTEXT_LOCK = Lock()
@@ -48,6 +51,37 @@ def _stage_model_enabled(stage_name: str) -> bool:
 
 def _utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+
+
+def infer_session_active_persona(session_id: str) -> str:
+    clean_session_id = str(session_id or '').strip()
+    if not clean_session_id:
+        return ''
+    path = get_runtime_config().paths.state_transitions_log_path
+    if not path.exists():
+        return ''
+    try:
+        lines = path.read_text(encoding='utf-8').splitlines()
+    except OSError:
+        return ''
+    for line in reversed(lines[-256:]):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if str(payload.get('session_id') or '').strip() != clean_session_id:
+            continue
+        for section_name in ('new_state', 'reviewed_context', 'previous_state'):
+            section = payload.get(section_name)
+            if not isinstance(section, dict):
+                continue
+            persona_name = str(section.get('persona_name') or '').strip()
+            if persona_name:
+                return persona_name
+    return ''
 
 
 def _normalize_items(values: list[Any], *, limit: int = 8) -> list[str]:
@@ -281,12 +315,62 @@ def interpret_user_influence(
     return base
 
 
+def reconstruct_task_procedure(
+    *,
+    message: str,
+    reply_language: str,
+    analysis: MessageAnalysis,
+    situation: Situation,
+    previous_state: StateSnapshot,
+    influence: InfluenceInterpretation,
+    persona_bundle: HeadBundle | None,
+    dossier_update_statement: bool = False,
+) -> tuple[TaskProcedurePlan, dict[str, Any]]:
+    plan, semantic_focus = seed_task_procedure(
+        message=message,
+        reply_language=reply_language,
+        analysis=analysis,
+        situation=situation,
+        previous_state=previous_state,
+        influence=influence,
+        persona_bundle=persona_bundle,
+        dossier_update_statement=dossier_update_statement,
+    )
+    payload = None
+    if _stage_model_enabled('procedure_reconstructor'):
+        prompt = build_procedure_reconstructor_prompt(
+            previous_state=previous_state.to_dict(),
+            influence=influence.to_dict(),
+            analysis=analysis.to_dict(),
+            semantic_focus=semantic_focus,
+            procedure_seed=plan.to_dict(),
+        )
+        payload = call_json_model_for_role(prompt, role=get_runtime_config().roles.extraction)
+    if isinstance(payload, dict):
+        summary = _clip_text(str(payload.get('summary') or ''), limit=900)
+        if summary:
+            plan.summary = summary
+            plan.source = 'llm_guided'
+        plan.procedure_family = str(payload.get('procedure_family') or plan.procedure_family).strip() or plan.procedure_family
+        plan.requested_outcome = _clip_text(str(payload.get('requested_outcome') or plan.requested_outcome), limit=220)
+        plan.response_form = str(payload.get('response_form') or plan.response_form).strip() or plan.response_form
+        plan.response_language = str(payload.get('response_language') or plan.response_language).strip() or plan.response_language
+        plan.form_drivers = _normalize_items(list(payload.get('form_drivers') or plan.form_drivers), limit=8)
+        plan.content_sources = _normalize_items(list(payload.get('content_sources') or plan.content_sources), limit=8)
+        plan.forbidden_mixins = _normalize_items(list(payload.get('forbidden_mixins') or plan.forbidden_mixins), limit=10)
+        plan.success_criteria = _normalize_items(list(payload.get('success_criteria') or plan.success_criteria), limit=8)
+        plan.execution_steps = _normalize_items(list(payload.get('execution_steps') or plan.execution_steps), limit=8)
+        plan.uncertainty_strategy = _clip_text(str(payload.get('uncertainty_strategy') or plan.uncertainty_strategy), limit=220)
+    return plan, semantic_focus
+
+
 def build_bounded_next_state(
     *,
     turn_id: str,
     session_id: str,
     previous_state: StateSnapshot,
     influence: InfluenceInterpretation,
+    task_procedure: TaskProcedurePlan,
     active_bundle: HeadBundle | None,
     current_entity: str,
     social_role: SocialRoleDecision,
@@ -300,12 +384,12 @@ def build_bounded_next_state(
         active_role=social_role.role,
         mood_cluster=str(mood_report.latest_cluster_label or '').strip() if mood_report is not None else previous_state.mood_cluster,
         summary='',
-        active_layers=_normalize_items(previous_state.active_layers + ['working_context'], limit=8),
+        active_layers=_normalize_items(previous_state.active_layers + ['working_context', 'task_procedure'], limit=8),
         graph_anchors=_bundle_graph_anchors(active_bundle) or list(previous_state.graph_anchors),
         memory_anchors=_bundle_memory_anchors(active_bundle) or list(previous_state.memory_anchors),
-        priorities=_normalize_items((list(previous_state.priorities) + list(influence.themes) + _bundle_priorities(active_bundle)), limit=8),
+        priorities=_normalize_items((list(previous_state.priorities) + list(influence.themes) + _bundle_priorities(active_bundle) + list(task_procedure.success_criteria[:3])), limit=8),
         risks=_normalize_items(list(previous_state.risks) + list(influence.pressure_points) + [influence.risk_level], limit=8),
-        constraints=_normalize_items(list(previous_state.constraints) + ['respond_from_reviewed_context_only'], limit=8),
+        constraints=_normalize_items(list(previous_state.constraints) + ['respond_from_reviewed_context_only', f"match_form:{task_procedure.response_form}"] + list(task_procedure.forbidden_mixins[:3]), limit=8),
         changed=[],
         unchanged=[],
         source='deterministic',
@@ -326,6 +410,7 @@ def build_bounded_next_state(
     posture = ', '.join(_emotion_posture(active_bundle)) or 'composed'
     next_state.summary = _clip_text(
         f"Active role is {next_state.active_role}. The message pushes {', '.join(influence.themes or ['general interaction'])}. "
+        f"Task procedure is {task_procedure.procedure_family} in form {task_procedure.response_form}. "
         f"Current dynamic posture is {posture}. Priorities now are {', '.join(next_state.priorities[:4])}.",
         limit=900,
     )
@@ -358,6 +443,7 @@ def build_working_context_layer(
     persona_name: str,
     updated_state: StateSnapshot,
     influence: InfluenceInterpretation,
+    task_procedure: TaskProcedurePlan,
     built_context: dict[str, Any],
 ) -> WorkingContextLayer:
     source_counts = {str(key): int(value or 0) for key, value in dict(dict(built_context.get('context_debug') or {}).get('source_counts') or {}).items()}
@@ -373,8 +459,9 @@ def build_working_context_layer(
         if isinstance(item, dict)
     ]
     summary = _clip_text(
-        f"Working context is built from the updated state, with role {updated_state.active_role}, "
-        f"themes {', '.join(influence.themes or ['general'])}, and sources {', '.join(key for key, value in source_counts.items() if value)}.",
+        f"Working context is built from the updated state, task procedure {task_procedure.procedure_family}, "
+        f"role {updated_state.active_role}, themes {', '.join(influence.themes or ['general'])}, "
+        f"and sources {', '.join(key for key, value in source_counts.items() if value)}.",
         limit=900,
     )
     layer = WorkingContextLayer(
@@ -387,15 +474,25 @@ def build_working_context_layer(
         sections={
             'updated_state_summary': updated_state.summary,
             'influence_summary': influence.summary,
+            'task_procedure_summary': task_procedure.summary,
             'persona_block': str(built_context.get('persona_block') or '').strip(),
             'graph_context': str(built_context.get('graph_context') or '').strip(),
             'recent_dialogue': str(built_context.get('recent_dialogue') or '').strip(),
         },
-        important_items=selected_items[:8],
+        important_items=[
+            {
+                'source': 'task_procedure',
+                'item_type': 'task_contract',
+                'title': task_procedure.procedure_family,
+                'score': {'confidence': 1.0, 'relevance': 1.0},
+                'reasons': list(task_procedure.success_criteria[:4]),
+            },
+            *selected_items[:7],
+        ],
         weak_items=[],
         contradictions=[],
-        priorities=list(updated_state.priorities),
-        constraints=list(updated_state.constraints),
+        priorities=_normalize_items(list(updated_state.priorities) + list(task_procedure.execution_steps[:2]), limit=8),
+        constraints=_normalize_items(list(updated_state.constraints) + list(task_procedure.forbidden_mixins[:3]), limit=8),
         risks=list(updated_state.risks),
         source_counts=source_counts,
         estimated_tokens=int(built_context.get('estimated_tokens') or 0),
@@ -420,6 +517,7 @@ def review_working_context(
     *,
     layer: WorkingContextLayer,
     updated_state: StateSnapshot,
+    task_procedure: TaskProcedurePlan,
 ) -> WorkingContextLayer:
     contradictions: list[str] = []
     important_items = list(layer.important_items)
@@ -454,8 +552,8 @@ def review_working_context(
         important_items=important_items[:8],
         weak_items=weak_items[:8],
         contradictions=contradictions[:6],
-        priorities=list(layer.priorities),
-        constraints=_normalize_items(list(layer.constraints) + ['answer_from_reviewed_context_only'], limit=8),
+        priorities=_normalize_items(list(layer.priorities) + list(task_procedure.success_criteria[:2]), limit=8),
+        constraints=_normalize_items(list(layer.constraints) + ['answer_from_reviewed_context_only'] + list(task_procedure.forbidden_mixins[:3]), limit=8),
         risks=list(layer.risks),
         source_counts=dict(layer.source_counts),
         estimated_tokens=int(layer.estimated_tokens or 0),
@@ -480,6 +578,7 @@ def shape_response_plan(
     *,
     reviewed_context: WorkingContextLayer,
     influence: InfluenceInterpretation,
+    task_procedure: TaskProcedurePlan,
     social_role: SocialRoleDecision,
     response_explanation: PersonaResponseExplanation,
 ) -> ResponseShapingPlan:
@@ -499,12 +598,16 @@ def shape_response_plan(
         role=social_role.role,
         style=response_explanation.response_style or 'direct_explanatory',
         behavior_mode=behavior_mode,
+        response_form=task_procedure.response_form,
         summary=_clip_text(
-            f"Respond as {social_role.role} in a {response_explanation.response_style or 'grounded'} style, using reviewed context only and prioritizing {', '.join(reviewed_context.priorities[:3])}.",
+            f"Respond as {social_role.role} in a {response_explanation.response_style or 'grounded'} style, using reviewed context only. "
+            f"Treat the task as {task_procedure.procedure_family} with form {task_procedure.response_form} and prioritize {', '.join(reviewed_context.priorities[:3])}.",
             limit=900,
         ),
         priorities=_normalize_items(list(reviewed_context.priorities), limit=8),
         constraints=_normalize_items(list(reviewed_context.constraints) + ['stay_in_first_person', 'avoid_assistant_tone'], limit=8),
+        forbidden_mixins=_normalize_items(list(task_procedure.forbidden_mixins), limit=10),
+        success_criteria=_normalize_items(list(task_procedure.success_criteria), limit=8),
         risk_posture=risk_posture,
         source='deterministic',
     )
@@ -513,6 +616,7 @@ def shape_response_plan(
         prompt = build_response_shaper_prompt(
             reviewed_context=reviewed_context.to_dict(),
             influence=influence.to_dict(),
+            task_procedure=task_procedure.to_dict(),
             social_role=social_role.to_dict(),
             response_explanation=response_explanation.to_dict(),
         )
@@ -521,6 +625,7 @@ def shape_response_plan(
         role = str(payload.get('role') or '').strip()
         style = str(payload.get('style') or '').strip()
         behavior = str(payload.get('behavior_mode') or '').strip()
+        response_form = str(payload.get('response_form') or '').strip()
         summary = _clip_text(str(payload.get('summary') or ''), limit=900)
         if role:
             plan.role = role
@@ -528,11 +633,15 @@ def shape_response_plan(
             plan.style = style
         if behavior:
             plan.behavior_mode = behavior
+        if response_form:
+            plan.response_form = response_form
         if summary:
             plan.summary = summary
             plan.source = 'llm_guided'
         plan.priorities = _normalize_items(list(payload.get('priorities') or plan.priorities), limit=8)
         plan.constraints = _normalize_items(list(payload.get('constraints') or plan.constraints), limit=8)
+        plan.forbidden_mixins = _normalize_items(list(payload.get('forbidden_mixins') or plan.forbidden_mixins), limit=10)
+        plan.success_criteria = _normalize_items(list(payload.get('success_criteria') or plan.success_criteria), limit=8)
         plan.risk_posture = str(payload.get('risk_posture') or plan.risk_posture).strip() or plan.risk_posture
     return plan
 
@@ -552,7 +661,7 @@ def render_state_transition_block(*, previous_state: StateSnapshot, influence: I
 
 def render_reviewed_context_block(reviewed_context: WorkingContextLayer) -> str:
     parts = [reviewed_context.summary]
-    for key in ('updated_state_summary', 'influence_summary', 'persona_block', 'graph_context', 'recent_dialogue'):
+    for key in ('updated_state_summary', 'influence_summary', 'task_procedure_summary', 'persona_block', 'graph_context', 'recent_dialogue'):
         text = str(reviewed_context.sections.get(key) or '').strip()
         if text:
             parts.append(f'{key}: {text}')
@@ -568,6 +677,7 @@ def render_response_shaping_block(plan: ResponseShapingPlan) -> str:
         f'Selected response role: {plan.role}.',
         f'Style: {plan.style}.',
         f'Behavior mode: {plan.behavior_mode}.',
+        f'Response form: {plan.response_form}.',
         f'Risk posture: {plan.risk_posture}.',
         f'Summary: {plan.summary}',
     ]
@@ -575,10 +685,37 @@ def render_response_shaping_block(plan: ResponseShapingPlan) -> str:
         lines.append(f"Priorities: {' | '.join(plan.priorities[:4])}.")
     if plan.constraints:
         lines.append(f"Constraints: {' | '.join(plan.constraints[:5])}.")
+    if plan.forbidden_mixins:
+        lines.append(f"Forbidden mixins: {' | '.join(plan.forbidden_mixins[:5])}.")
+    if plan.success_criteria:
+        lines.append(f"Success criteria: {' | '.join(plan.success_criteria[:5])}.")
     return '\n'.join(lines).strip()
 
 
-def persist_current_context(*, reviewed_context: WorkingContextLayer, response_plan: ResponseShapingPlan, previous_state: StateSnapshot, influence: InfluenceInterpretation, next_state: StateSnapshot) -> tuple[str, str]:
+def render_task_procedure_block(plan: TaskProcedurePlan) -> str:
+    lines = [
+        f'Task family: {plan.procedure_family}.',
+        f'Requested outcome: {plan.requested_outcome}',
+        f'Visible form: {plan.response_form}.',
+        f'Visible language: {plan.response_language}.',
+        f'Summary: {plan.summary}',
+    ]
+    if plan.form_drivers:
+        lines.append(f"Form drivers: {' | '.join(plan.form_drivers[:5])}.")
+    if plan.content_sources:
+        lines.append(f"Content sources: {' | '.join(plan.content_sources[:5])}.")
+    if plan.forbidden_mixins:
+        lines.append(f"Do not mix in: {' | '.join(plan.forbidden_mixins[:5])}.")
+    if plan.success_criteria:
+        lines.append(f"Success looks like: {' | '.join(plan.success_criteria[:5])}.")
+    if plan.execution_steps:
+        lines.append(f"Execution procedure: {' | '.join(plan.execution_steps[:6])}.")
+    if plan.uncertainty_strategy:
+        lines.append(f"Uncertainty strategy: {plan.uncertainty_strategy}")
+    return '\n'.join(lines).strip()
+
+
+def persist_current_context(*, reviewed_context: WorkingContextLayer, response_plan: ResponseShapingPlan, task_procedure: TaskProcedurePlan, previous_state: StateSnapshot, influence: InfluenceInterpretation, next_state: StateSnapshot) -> tuple[str, str]:
     config = get_runtime_config()
     json_path = config.paths.current_context_json
     txt_path = config.paths.current_context_txt
@@ -590,6 +727,7 @@ def persist_current_context(*, reviewed_context: WorkingContextLayer, response_p
         'current_entity': reviewed_context.current_entity,
         'previous_state': previous_state.to_dict(),
         'influence': influence.to_dict(),
+        'task_procedure': task_procedure.to_dict(),
         'updated_state': next_state.to_dict(),
         'reviewed_context': reviewed_context.to_dict(),
         'response_plan': response_plan.to_dict(),
@@ -601,6 +739,7 @@ def persist_current_context(*, reviewed_context: WorkingContextLayer, response_p
             f"Current entity: {reviewed_context.current_entity or 'unknown'}",
             f"Previous state: {previous_state.summary}",
             f"Influence: {influence.summary}",
+            f"Task procedure: {task_procedure.summary}",
             f"Updated state: {next_state.summary}",
             f"Reviewed context: {reviewed_context.summary}",
             f"Response plan: {response_plan.summary}",
@@ -619,6 +758,7 @@ def append_transition_log(
     user_message: str,
     previous_state: StateSnapshot,
     influence: InfluenceInterpretation,
+    task_procedure: TaskProcedurePlan,
     next_state: StateSnapshot,
     working_context: WorkingContextLayer,
     reviewed_context: WorkingContextLayer,
@@ -634,6 +774,7 @@ def append_transition_log(
         'user_message': str(user_message or '').strip(),
         'previous_state': previous_state.to_dict(),
         'interpreted_influence': influence.to_dict(),
+        'task_procedure': task_procedure.to_dict(),
         'new_state': next_state.to_dict(),
         'working_context': working_context.to_dict(),
         'reviewed_context': reviewed_context.to_dict(),

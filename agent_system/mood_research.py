@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import json
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -15,8 +16,23 @@ from .models import HeadBundle, MessageAnalysis, MoodCluster, MoodFeatureSnapsho
 from .runtime_config import get_runtime_config
 
 _MOOD_RESEARCH_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix='agent-system-mood-research')
+_MOOD_RESEARCH_EXECUTOR_CLOSED = False
 _MOOD_RESEARCH_LOCK = Lock()
 _REPORT_SNAPSHOT_LIMIT = 240
+
+
+def _shutdown_mood_research_executor() -> None:
+    global _MOOD_RESEARCH_EXECUTOR_CLOSED
+    with _MOOD_RESEARCH_LOCK:
+        if _MOOD_RESEARCH_EXECUTOR_CLOSED:
+            return
+        shutdown = getattr(_MOOD_RESEARCH_EXECUTOR, 'shutdown', None)
+        if callable(shutdown):
+            shutdown(wait=False, cancel_futures=True)
+        _MOOD_RESEARCH_EXECUTOR_CLOSED = True
+
+
+atexit.register(_shutdown_mood_research_executor)
 
 
 def _utc_now() -> str:
@@ -351,7 +367,13 @@ def schedule_mood_research_refresh(*, persona_name: str = '', session_id: str = 
         except Exception:
             return
 
-    _MOOD_RESEARCH_EXECUTOR.submit(_runner)
+    with _MOOD_RESEARCH_LOCK:
+        if _MOOD_RESEARCH_EXECUTOR_CLOSED:
+            return
+        try:
+            _MOOD_RESEARCH_EXECUTOR.submit(_runner)
+        except RuntimeError:
+            return
 
 
 def load_mood_report(*, persona_name: str = '', session_id: str = '') -> MoodResearchReport | None:

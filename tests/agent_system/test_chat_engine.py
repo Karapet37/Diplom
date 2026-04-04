@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import agent_system.chat_engine as chat_engine_module
 from agent_system.chat_engine import generate_response
 from agent_system.history_store import parse_session
 from agent_system.persona_engine import load_persona, materialize_persona
@@ -177,6 +178,44 @@ def test_chat_engine_adds_explicit_persona_fact_to_learned_dossier(tmp_path, mon
     assert any('added to the learned dossier' in item for item in result['operator_messages'])
 
 
+def test_chat_engine_exposes_task_procedure_and_anti_mixing_contract(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+    monkeypatch.setattr('agent_system.chat_engine._schedule_background_extraction', lambda session_id, personality_name='': None)
+    monkeypatch.setattr('agent_system.llm._call_model', lambda prompt, mode='chat': 'I distrust vague promises because they hide risk, blur responsibility, and tempt people to skip verification.')
+
+    materialize_persona(
+        'Dr. Aram Petrosyan',
+        {
+            'entity_type': 'PERSON',
+            'traits': ['skeptical', 'precise', 'empathetic'],
+            'persona_form': {
+                'social_roles': ['mentor', 'critic'],
+                'decision_patterns': ['sorts facts before committing to a judgment'],
+                'values': ['protect the vulnerable first'],
+            },
+        },
+        explicit=True,
+    )
+
+    result = generate_response(
+        message='Briefly explain why, when facts are incomplete, you distrust vague promises.',
+        session_id='task_contract_live',
+        selected_persona='Dr. Aram Petrosyan',
+        language='en',
+    )
+
+    assert result['state_transition']['task_procedure']['procedure_family']
+    assert result['state_transition']['task_procedure']['response_form'] in {
+        'first_person_explanation',
+        'direct_answer',
+        'clarifying_answer',
+    }
+    assert 'generic_assistant_tone' in result['state_transition']['task_procedure']['forbidden_mixins']
+    assert result['behavior_trace']['task_procedure']['success_criteria']
+    assert result['context_preview']['task_procedure']['content_sources']
+    assert result['state_transition']['response_plan']['forbidden_mixins']
+
+
 def test_chat_engine_surfaces_background_repair_failures(tmp_path, monkeypatch) -> None:
     class ImmediateExecutor:
         def submit(self, fn):
@@ -200,6 +239,30 @@ def test_chat_engine_surfaces_background_repair_failures(tmp_path, monkeypatch) 
     assert 'repair exploded' in result['repair_status']['error']
 
 
+def test_chat_engine_marks_background_rebuild_degraded_when_executor_is_closed(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+    monkeypatch.setattr(chat_engine_module, '_REPAIR_STATUS', {})
+    monkeypatch.setattr(chat_engine_module, '_BACKGROUND_EXECUTOR_CLOSED', True)
+
+    chat_engine_module._schedule_background_extraction('closed_executor_case', 'Dracula')
+
+    repair_status = chat_engine_module._get_repair_status('closed_executor_case')
+    assert repair_status['status'] == 'degraded'
+    assert repair_status['error'] == 'background_executor_unavailable'
+
+
+def test_chat_engine_bounds_background_repair_status_memory(monkeypatch) -> None:
+    monkeypatch.setattr(chat_engine_module, '_REPAIR_STATUS', {})
+
+    for index in range(chat_engine_module._REPAIR_STATUS_LIMIT + 7):
+        chat_engine_module._set_repair_status(f'session-{index}', {'status': 'ok', 'index': index})
+
+    stored = dict(chat_engine_module._REPAIR_STATUS)
+    assert len(stored) == chat_engine_module._REPAIR_STATUS_LIMIT
+    assert 'session-0' not in stored
+    assert f"session-{chat_engine_module._REPAIR_STATUS_LIMIT + 6}" in stored
+
+
 def test_chat_engine_skips_background_rebuild_for_short_turns(tmp_path, monkeypatch) -> None:
     scheduled: list[tuple[str, str]] = []
 
@@ -216,6 +279,93 @@ def test_chat_engine_skips_background_rebuild_for_short_turns(tmp_path, monkeypa
     assert scheduled == []
     assert result['repair_status']['status'] == 'skipped'
     assert result['repair_status']['reason'] in {'deferred_for_latency', 'rebuild_already_pending'}
+
+
+def test_chat_engine_uses_session_context_for_follow_up_entity_questions(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+    monkeypatch.setattr('agent_system.chat_engine._schedule_background_extraction', lambda session_id, personality_name='': None)
+
+    prompts: list[str] = []
+
+    def fake_reply(prompt: str, language: str = 'en', persona_selected: bool = False) -> str:
+        prompts.append(prompt)
+        lowered = prompt.lower()
+        if 'does he have a brother?' in lowered:
+            assert 'recent dialogue:' in lowered
+            assert 'who is jack sparrow?' in lowered
+            assert 'jack sparrow is a pirate. what about him?' in lowered
+            assert 'jack sparrow' in lowered
+            return "Yes. Jack Sparrow has a brother, and the family is strange. His brother carries around their mother's shrunken head."
+        if 'who is jack sparrow?' in lowered:
+            return 'Jack Sparrow is a pirate. What about him?'
+        return 'Unexpected reply path.'
+
+    monkeypatch.setattr('agent_system.chat_engine.generate_chat_reply', fake_reply)
+
+    first = generate_response(
+        message='Who is Jack Sparrow?',
+        session_id='jack_context',
+        language='en',
+    )
+    second = generate_response(
+        message='Does he have a brother?',
+        session_id='jack_context',
+        language='en',
+    )
+
+    parsed = parse_session('jack_context')
+
+    assert first['assistant_reply'] == 'Jack Sparrow is a pirate. What about him?'
+    assert second['state_transition']['previous_state']['current_entity'] == 'Jack Sparrow'
+    assert second['context_preview']['current_entity'] == 'Jack Sparrow'
+    assert second['assistant_reply'].startswith('Yes. Jack Sparrow has a brother')
+    assert 'whose brother' not in second['assistant_reply'].lower()
+    assert parsed is not None
+    assert len(parsed['messages']) == 4
+    assert len(prompts) == 2
+
+
+def test_chat_engine_persists_speaker_persona_across_session_while_topic_entity_changes(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+    monkeypatch.setenv('COGNITIVE_RUNTIME_DIR', str(tmp_path / 'runtime'))
+    monkeypatch.setattr('agent_system.chat_engine._schedule_background_extraction', lambda session_id, personality_name='': None)
+
+    prompts: list[str] = []
+
+    def fake_reply(prompt: str, language: str = 'en', persona_selected: bool = False) -> str:
+        prompts.append(prompt)
+        lowered = prompt.lower()
+        if 'why is he dangerous?' in lowered:
+            assert 'persona head:' in lowered
+            assert 'peter parker' in lowered
+            assert 'recent dialogue:' in lowered
+            assert 'mysterio' in lowered
+            return 'Mysterio is dangerous because he weaponizes spectacle and lies, and I learned that the hard way.'
+        if 'who is mysterio?' in lowered:
+            assert 'peter parker' in lowered
+            return 'I am Peter Parker. Mysterio is a manipulator who hides behind illusions.'
+        return 'Unexpected reply path.'
+
+    monkeypatch.setattr('agent_system.chat_engine.generate_chat_reply', fake_reply)
+
+    first = generate_response(
+        message="Okay, you're Peter Parker. Who is Mysterio?",
+        session_id='speaker_topic_session',
+        language='en',
+    )
+    second = generate_response(
+        message='Why is he dangerous?',
+        session_id='speaker_topic_session',
+        language='en',
+    )
+
+    assert first['persona_name'] == 'peter_parker'
+    assert second['persona_name'] == 'peter_parker'
+    assert first['context_preview']['current_entity'] == 'Mysterio'
+    assert second['context_preview']['current_entity'] == 'Mysterio'
+    assert second['state_transition']['previous_state']['persona_name'] == 'Peter Parker'
+    assert second['assistant_reply'].startswith('Mysterio is dangerous because')
+    assert len(prompts) == 2
 
 
 def test_user_insults_persona_reaction_depends_on_persona_not_mirroring(tmp_path, monkeypatch) -> None:

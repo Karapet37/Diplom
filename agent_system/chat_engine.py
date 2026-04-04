@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 from concurrent.futures import ThreadPoolExecutor
 import inspect
 from threading import Lock
@@ -15,6 +16,7 @@ from .file_ingestion import rebuild_artifacts
 from .graph_store import GraphStore, normalize_personality_name, personality_proposals_dir
 from .head_caller import prepare_heads, select_primary_head
 from .history_store import append_turn, create_session, infer_current_entity, parse_session
+from .interaction_routing import route_interaction
 from .language_tools import normalize_language_code
 from .llm import fallback_chat_reply, generate_chat_reply, translate_text
 from .message_analyzer import analyze_message_state
@@ -40,20 +42,27 @@ from .state_transition_runtime import (
     append_transition_log,
     build_bounded_next_state,
     build_working_context_layer,
+    infer_session_active_persona,
     interpret_user_influence,
     persist_current_context,
+    reconstruct_task_procedure,
     render_response_shaping_block,
     render_reviewed_context_block,
     render_state_transition_block,
+    render_task_procedure_block,
     review_working_context,
     sample_state_snapshot,
     shape_response_plan,
 )
 from .situation_engine import model_situation
+from .text_resources import SECOND_PERSON_TOKENS
 
 _BACKGROUND_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix='agent-system-rebuild')
+_BACKGROUND_EXECUTOR_LOCK = Lock()
+_BACKGROUND_EXECUTOR_CLOSED = False
 _REPAIR_STATUS_LOCK = Lock()
 _REPAIR_STATUS: dict[str, dict[str, Any]] = {}
+_REPAIR_STATUS_LIMIT = 128
 _PERSONA_DOSSIER_FACT_MARKERS = (
     'you are',
     'you work',
@@ -77,13 +86,6 @@ _PERSONA_DOSSIER_UPDATE_MARKERS = (
     'note that',
     'keep in mind',
 )
-_SECOND_PERSON_TOKENS = {
-    'you',
-    'your',
-    'yourself',
-}
-
-
 def _normalized_marker_hits(text: str, markers: tuple[str, ...]) -> list[str]:
     normalized_text = normalize_name(text)
     hits: list[str] = []
@@ -113,12 +115,35 @@ def _strip_leading_persona_update_scaffolding(text: str) -> str:
 
 def _set_repair_status(session_id: str, payload: dict[str, Any]) -> None:
     with _REPAIR_STATUS_LOCK:
-        _REPAIR_STATUS[session_id] = dict(payload)
+        clean_session_id = str(session_id or '').strip()
+        if clean_session_id in _REPAIR_STATUS:
+            _REPAIR_STATUS.pop(clean_session_id, None)
+        _REPAIR_STATUS[clean_session_id] = dict(payload)
+        while len(_REPAIR_STATUS) > _REPAIR_STATUS_LIMIT:
+            oldest_key = next(iter(_REPAIR_STATUS), '')
+            if not oldest_key:
+                break
+            _REPAIR_STATUS.pop(oldest_key, None)
 
 
 def _get_repair_status(session_id: str) -> dict[str, Any]:
     with _REPAIR_STATUS_LOCK:
         return dict(_REPAIR_STATUS.get(session_id, {}))
+
+
+def _shutdown_background_executor() -> None:
+    global _BACKGROUND_EXECUTOR_CLOSED
+    with _BACKGROUND_EXECUTOR_LOCK:
+        if _BACKGROUND_EXECUTOR_CLOSED:
+            return
+        executor = _BACKGROUND_EXECUTOR
+        shutdown = getattr(executor, 'shutdown', None)
+        if callable(shutdown):
+            shutdown(wait=False, cancel_futures=True)
+        _BACKGROUND_EXECUTOR_CLOSED = True
+
+
+atexit.register(_shutdown_background_executor)
 
 
 def _user_turn_count(session_id: str) -> int:
@@ -148,6 +173,7 @@ def _should_schedule_background_extraction(session_id: str, *, personality_name:
 
 
 def _schedule_background_extraction(session_id: str, personality_name: str = '') -> None:
+    global _BACKGROUND_EXECUTOR_CLOSED
     if str(_get_repair_status(session_id).get('status') or '').strip() == 'pending':
         return
     _set_repair_status(
@@ -186,7 +212,31 @@ def _schedule_background_extraction(session_id: str, personality_name: str = '')
             },
         )
 
-    _BACKGROUND_EXECUTOR.submit(_runner)
+    with _BACKGROUND_EXECUTOR_LOCK:
+        if _BACKGROUND_EXECUTOR_CLOSED:
+            _set_repair_status(
+                session_id,
+                {
+                    'status': 'degraded',
+                    'session_id': session_id,
+                    'personality_name': personality_name,
+                    'error': 'background_executor_unavailable',
+                },
+            )
+            return
+        try:
+            _BACKGROUND_EXECUTOR.submit(_runner)
+        except RuntimeError:
+            _BACKGROUND_EXECUTOR_CLOSED = True
+            _set_repair_status(
+                session_id,
+                {
+                    'status': 'degraded',
+                    'session_id': session_id,
+                    'personality_name': personality_name,
+                    'error': 'background_executor_unavailable',
+                },
+            )
 
 
 def _write_concept_graph_from_message(message: str, *, graph_store: GraphStore, side_effects: ChatSideEffects) -> None:
@@ -243,7 +293,7 @@ def _looks_like_persona_dossier_update(message: str, *, persona_name: str, analy
     lowered = normalize_name(clean)
     persona_token = normalize_name(persona_name)
     has_persona_reference = bool(persona_token and persona_token in lowered)
-    has_second_person = any(token in lowered.split() for token in _SECOND_PERSON_TOKENS)
+    has_second_person = any(token in lowered.split() for token in SECOND_PERSON_TOKENS)
     if not has_persona_reference and not has_second_person:
         return False
     if len(clean.split()) < 5:
@@ -429,22 +479,53 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             meta_builder=lambda _result: {'graph_write_sources': list(side_effects.graph_write_sources)},
         )
         current_entity = infer_current_entity(clean_session_id)
+        session_persona = infer_session_active_persona(clean_session_id)
         known_nodes = graph_store.load_nodes()
+        interaction_frame = observability.time_stage(
+            trace,
+            'interaction_routing',
+            lambda: route_interaction(
+                message=clean_message,
+                selected_persona_hint=str(request.selected_persona or '').strip(),
+                session_persona=session_persona,
+                current_entity=current_entity,
+                known_entities=known_nodes,
+            ),
+            meta_builder=lambda item: {
+                'message_kind': item.message_kind,
+                'explicit_persona_switch': bool(item.explicit_persona_switch),
+                'requested_persona': item.requested_persona,
+                'topic_entity': item.topic_entity,
+                'followup_mode': item.followup_mode,
+                'source': item.source,
+            },
+        )
+        effective_selected_persona = str(
+            request.selected_persona
+            or interaction_frame.requested_persona
+            or (session_persona if interaction_frame.keep_session_persona else '')
+            or ''
+        ).strip()
+        analysis_message = str(interaction_frame.routed_message or clean_message).strip()
         prepared = observability.time_stage(
             trace,
             'analysis',
             lambda: analyze_message_state(
-                message=clean_message,
+                message=analysis_message,
                 session_id=clean_session_id,
-                selected_head=request.selected_persona,
-                current_entity=current_entity,
+                selected_head=effective_selected_persona,
+                current_entity=str(interaction_frame.topic_entity or current_entity or '').strip(),
+                session_persona=session_persona,
                 explicit_context=request.explicit_context,
+                interaction_frame=interaction_frame,
                 known_entities=known_nodes,
             ),
             meta_builder=lambda payload: {
                 'entity_count': len(list(payload.get('entities') or [])),
                 'tone': payload['user_state'].tone,
                 'intent': payload['user_state'].intent,
+                'selected_head': str(payload.get('selected_head') or ''),
+                'session_persona': str(payload.get('session_persona') or ''),
             },
         )
         situation = observability.time_stage(
@@ -468,6 +549,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             selected_head=str(prepared['selected_head'] or ''),
             primary_entity=str(prepared['primary_entity'] or ''),
             current_entity=str(prepared['current_entity'] or ''),
+            session_persona=str(prepared['session_persona'] or ''),
             explicit_context=str(prepared['explicit_context'] or ''),
             entities=list(prepared['entities'] or []),
             user_state=prepared['user_state'],
@@ -478,7 +560,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             detected_language=analysis.user_state.language,
         )
         reasoning_message = _internal_reasoning_message(
-            clean_message,
+            analysis_message,
             detected_language=analysis.user_state.language,
         )
         dossier_update_candidate = _looks_like_persona_dossier_update(
@@ -597,6 +679,25 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 'uncertainty_level': item.uncertainty_level,
             },
         )
+        task_procedure, semantic_focus = observability.time_stage(
+            trace,
+            'task_procedure_reconstruction',
+            lambda: reconstruct_task_procedure(
+                message=reasoning_message,
+                reply_language=response_language,
+                analysis=analysis,
+                situation=analysis.situation,
+                previous_state=previous_state,
+                influence=influence,
+                persona_bundle=active_persona_bundle,
+                dossier_update_statement=dossier_update_statement,
+            ),
+            meta_builder=lambda item: {
+                'procedure_family': item[0].procedure_family,
+                'response_form': item[0].response_form,
+                'content_sources': list(item[0].content_sources),
+            },
+        )
         next_state = observability.time_stage(
             trace,
             'bounded_state_transition',
@@ -605,6 +706,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 session_id=clean_session_id,
                 previous_state=previous_state,
                 influence=influence,
+                task_procedure=task_procedure,
                 active_bundle=active_persona_bundle,
                 current_entity=analysis.current_entity or primary_name,
                 social_role=social_role,
@@ -647,6 +749,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 persona_name=built.get('persona_name') or primary_name,
                 updated_state=next_state,
                 influence=influence,
+                task_procedure=task_procedure,
                 built_context=built,
             ),
             meta_builder=lambda item: {
@@ -661,6 +764,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             lambda: review_working_context(
                 layer=working_context,
                 updated_state=next_state,
+                task_procedure=task_procedure,
             ),
             meta_builder=lambda item: {
                 'important_items': len(list(item.important_items)),
@@ -674,6 +778,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             lambda: shape_response_plan(
                 reviewed_context=reviewed_context,
                 influence=influence,
+                task_procedure=task_procedure,
                 social_role=social_role,
                 response_explanation=response_explanation,
             ),
@@ -689,6 +794,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             lambda: persist_current_context(
                 reviewed_context=reviewed_context,
                 response_plan=response_plan,
+                task_procedure=task_procedure,
                 previous_state=previous_state,
                 influence=influence,
                 next_state=next_state,
@@ -716,10 +822,11 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 influence=influence,
                 next_state=next_state,
             ),
+            procedure_block=render_task_procedure_block(task_procedure),
             reviewed_context_block=render_reviewed_context_block(reviewed_context),
             response_shaping_block=render_response_shaping_block(response_plan),
             language=response_language,
-            semantic_focus=dict(dict(built.get('context_debug') or {}).get('semantic_focus') or {}),
+            semantic_focus=dict(semantic_focus or dict(dict(built.get('context_debug') or {}).get('semantic_focus') or {})),
         )
 
         def _behavioral_fallback(fallback_reason: str, runtime_status: dict[str, Any] | None) -> tuple[str, BehavioralFallbackDecision]:
@@ -850,6 +957,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                         user_message=clean_message,
                         previous_state=previous_state,
                         influence=influence,
+                        task_procedure=task_procedure,
                         next_state=next_state,
                         working_context=working_context,
                         reviewed_context=reviewed_context,
@@ -918,19 +1026,23 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 'snapshot_count': active_mood_report.snapshot_count if active_mood_report is not None else 0,
             },
             state_transition={
+                'interaction_frame': interaction_frame.to_dict(),
                 'previous_state': previous_state.to_dict(),
                 'influence': influence.to_dict(),
+                'task_procedure': task_procedure.to_dict(),
                 'updated_state': next_state.to_dict(),
                 'working_context': working_context.to_dict(),
                 'reviewed_context': reviewed_context.to_dict(),
                 'response_plan': response_plan.to_dict(),
             },
             behavior_trace={
-                'semantic_focus': dict(dict(built.get('context_debug') or {}).get('semantic_focus') or {}),
+                'interaction_frame': interaction_frame.to_dict(),
+                'semantic_focus': dict(semantic_focus or dict(dict(built.get('context_debug') or {}).get('semantic_focus') or {})),
                 'social_role': social_role.to_dict(),
                 'mood_cluster': active_mood_report.latest_cluster_label if active_mood_report is not None else '',
                 'previous_state': previous_state.to_dict(),
                 'influence': influence.to_dict(),
+                'task_procedure': task_procedure.to_dict(),
                 'updated_state': next_state.to_dict(),
                 'selected_context_sources': dict(dict(built.get('context_debug') or {}).get('source_counts') or {}),
                 'selected_context_items': [
@@ -953,7 +1065,9 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 'graph_context': built.get('graph_context') or '',
                 'current_entity': built.get('current_entity') or primary_name,
                 'persona_name': built.get('persona_name') or primary_name,
+                'interaction_frame': interaction_frame.to_dict(),
                 'social_role': social_role.to_dict(),
+                'task_procedure': task_procedure.to_dict(),
                 'working_context': working_context.to_dict(),
                 'reviewed_context': reviewed_context.to_dict(),
                 'response_plan': response_plan.to_dict(),

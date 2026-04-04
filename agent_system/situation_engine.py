@@ -5,10 +5,7 @@ from typing import Any
 from .classifier_forest import DEFAULT_SITUATION_CLASSIFIER
 from .duplicate_resolver import normalize_name
 from .models import Situation, SituationDecision, SituationFeatures, UserState
-
-SECOND_PERSON_TOKENS = {'you', 'your', 'yourself', 'ты', 'тебя', 'твой', 'вам', 'քեզ', 'դու', 'քո'}
-SELF_REFERENCE_TOKENS = {'i', 'me', 'my', 'myself', 'я', 'мне', 'мой', 'меня', 'ես', 'ինձ', 'իմ'}
-
+from .text_resources import SECOND_PERSON_TOKENS, SELF_REFERENCE_TOKENS
 
 def _clean_message(message: str) -> str:
     return ' '.join(str(message or '').strip().split())

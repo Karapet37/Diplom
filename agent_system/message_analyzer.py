@@ -1,19 +1,13 @@
 from __future__ import annotations
-
-import re
 from typing import Any
 
 from .duplicate_resolver import normalize_name
 from .language_tools import detect_language_code
-from .models import MessageAnalysis, MessageEntity, UserState
+from .models import InteractionFrame, MessageAnalysis, MessageEntity, UserState
 from .situation_engine import model_situation
+from .text_resources import SECOND_PERSON_TOKENS, SELF_REFERENCE_TOKENS, capitalized_entity_phrases, compiled_entity_patterns
 
-ENTITY_PATTERNS = (
-    re.compile(r'"([^"]{2,80})"'),
-    re.compile(r"'([^']{2,80})'"),
-    re.compile(r'\b(?:about|like|as|with|to|for)\s+([A-ZА-Я][\w-]*(?:\s+[A-ZА-Я][\w-]*){0,3})'),
-    re.compile(r'\b(?:about|regarding|around|про|о|как)\s+([A-Za-zА-Яа-я][\w-]*(?:\s+[A-Za-zА-Яа-я][\w-]*){0,3})', re.IGNORECASE),
-)
+ENTITY_PATTERNS = compiled_entity_patterns()
 
 ENTITY_STOPWORDS = {
     'a',
@@ -48,6 +42,21 @@ ENTITY_STOPWORDS = {
     'today',
     'tomorrow',
     'yesterday',
+    'do',
+    'does',
+    'did',
+    'is',
+    'are',
+    'was',
+    'were',
+    'has',
+    'have',
+    'had',
+    'can',
+    'could',
+    'will',
+    'would',
+    'should',
 }
 
 ENTITY_BREAKWORDS = {'the', 'a', 'an'}
@@ -66,7 +75,6 @@ ENTITY_DESCRIPTOR_WORDS = {
     'concept',
 }
 
-QUESTION_WORDS = ('who', 'what', 'why', 'how', 'when', 'where', 'кто', 'что', 'почему', 'как', 'когда', 'где')
 INSULT_WORDS = (
     'stupid',
     'idiot',
@@ -119,17 +127,8 @@ MORAL_VIOLATION_WORDS = (
     'мучил',
     'украл',
 )
-SECOND_PERSON_HINTS = {'you', 'your', 'yourself', 'ты', 'тебя', 'твой', 'вам', 'дու', 'քեզ', 'քո'}
-SELF_REFERENCE_HINTS = {'i', 'me', 'my', 'myself', 'я', 'мне', 'мой', 'меня', 'ես', 'ինձ', 'իմ'}
-
-
 def _clean_message(message: str) -> str:
     return ' '.join(str(message or '').strip().split())
-
-
-def _capitalized_entities(message: str) -> list[str]:
-    matches = re.findall(r'\b[A-ZА-Я][\w-]*(?:\s+[A-ZА-Я][\w-]*){0,3}\b', message)
-    return [match.strip() for match in matches if len(match.strip()) > 1]
 
 
 def _clean_candidate_phrase(value: str) -> str:
@@ -163,7 +162,7 @@ def _extract_entities(message: str, known_entities: list[dict[str, Any]]) -> lis
     candidates: list[str] = []
     for pattern in ENTITY_PATTERNS:
         candidates.extend(_clean_candidate_phrase(match) for match in pattern.findall(message) if str(match).strip())
-    candidates.extend(_capitalized_entities(message))
+    candidates.extend(capitalized_entity_phrases(message))
     candidates.extend(_match_known_entities(message, known_entities))
 
     ordered: list[MessageEntity] = []
@@ -197,20 +196,28 @@ def _token_overlap(text: str, values: set[str]) -> float:
     return float(bool(tokens & values))
 
 
-def _analyze_user_state(message: str, *, primary_entity: str = '', selected_head: str = '') -> UserState:
+def _analyze_user_state(
+    message: str,
+    *,
+    primary_entity: str = '',
+    selected_head: str = '',
+    interaction_frame: InteractionFrame | None = None,
+) -> UserState:
     clean = _clean_message(message)
     lowered = normalize_name(clean)
     persona_token = normalize_name(selected_head or primary_entity)
+    question_present = bool(interaction_frame.question_present) if interaction_frame is not None else False
+    message_kind = str(interaction_frame.message_kind or '').strip().lower() if interaction_frame is not None else ''
     signals = {
-        'contains_question': float('?' in clean or any(word in lowered for word in QUESTION_WORDS)),
+        'contains_question': float('?' in clean or question_present or message_kind in {'question', 'command'}),
         'contains_insult': _contains_any(clean, INSULT_WORDS),
         'contains_anger': _contains_any(clean, ANGER_WORDS),
         'contains_distress': _contains_any(clean, DISTRESS_WORDS),
         'contains_help_request': _contains_any(clean, HELP_WORDS),
         'contains_celebratory': _contains_any(clean, CELEBRATORY_WORDS),
         'contains_moral_violation': _contains_any(clean, MORAL_VIOLATION_WORDS),
-        'contains_persona_reference': float(bool(persona_token and persona_token in lowered) or _token_overlap(clean, SECOND_PERSON_HINTS)),
-        'contains_self_reference': _token_overlap(clean, SELF_REFERENCE_HINTS),
+        'contains_persona_reference': float(bool(persona_token and persona_token in lowered) or _token_overlap(clean, SECOND_PERSON_TOKENS)),
+        'contains_self_reference': _token_overlap(clean, SELF_REFERENCE_TOKENS),
     }
 
     if signals['contains_distress']:
@@ -249,32 +256,45 @@ def analyze_message_state(
     session_id: str,
     selected_head: str = '',
     current_entity: str = '',
+    session_persona: str = '',
     explicit_context: str = '',
+    interaction_frame: InteractionFrame | None = None,
     known_entities: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    clean = _clean_message(message)
+    frame = interaction_frame or InteractionFrame(
+        message_kind='question' if '?' in _clean_message(message) else 'statement',
+        question_present='?' in _clean_message(message),
+        keep_session_persona=bool(session_persona),
+        routed_message=_clean_message(message),
+    )
+    clean = _clean_message(frame.routed_message or message)
     known = list(known_entities or [])
     entities = _extract_entities(clean, known)
+    selected_token = normalize_name(selected_head)
 
-    if selected_head.strip():
-        selected = selected_head.strip()
-        selected_token = normalize_name(selected)
-        if all(normalize_name(entity.name) != selected_token for entity in entities):
-            entities.insert(0, MessageEntity(name=selected, source_text=selected))
-
-    primary = selected_head.strip()
+    primary = str(frame.topic_entity or '').strip()
     if not primary and entities:
-        primary = entities[0].name
-    if not primary:
+        if selected_token:
+            topic_entity = next((entity.name for entity in entities if normalize_name(entity.name) != selected_token), '')
+            primary = str(topic_entity or entities[0].name).strip()
+        else:
+            primary = entities[0].name
+    elif not primary and current_entity.strip() and str(frame.followup_mode or '').strip() != 'none':
         primary = current_entity.strip()
 
-    user_state = _analyze_user_state(clean, primary_entity=primary, selected_head=selected_head.strip())
+    user_state = _analyze_user_state(
+        clean,
+        primary_entity=primary,
+        selected_head=selected_head.strip(),
+        interaction_frame=frame,
+    )
     return {
         'message': clean,
         'session_id': session_id,
         'selected_head': selected_head.strip(),
         'primary_entity': primary,
         'current_entity': current_entity.strip(),
+        'session_persona': session_persona.strip(),
         'explicit_context': explicit_context.strip(),
         'entities': entities,
         'user_state': user_state,
@@ -287,7 +307,9 @@ def analyze_message(
     session_id: str,
     selected_head: str = '',
     current_entity: str = '',
+    session_persona: str = '',
     explicit_context: str = '',
+    interaction_frame: InteractionFrame | None = None,
     known_entities: list[dict[str, Any]] | None = None,
 ) -> MessageAnalysis:
     prepared = analyze_message_state(
@@ -295,7 +317,9 @@ def analyze_message(
         session_id=session_id,
         selected_head=selected_head,
         current_entity=current_entity,
+        session_persona=session_persona,
         explicit_context=explicit_context,
+        interaction_frame=interaction_frame,
         known_entities=known_entities,
     )
     situation = model_situation(
@@ -310,6 +334,7 @@ def analyze_message(
         selected_head=str(prepared['selected_head'] or ''),
         primary_entity=str(prepared['primary_entity'] or ''),
         current_entity=str(prepared['current_entity'] or ''),
+        session_persona=str(prepared['session_persona'] or ''),
         explicit_context=str(prepared['explicit_context'] or ''),
         entities=list(prepared['entities'] or []),
         user_state=prepared['user_state'],

@@ -941,9 +941,10 @@ def _collect_candidates(
     store: GraphStore,
     social_role: SocialRoleDecision | None,
     mood_report: MoodResearchReport | None,
+    analysis: MessageAnalysis | None,
 ) -> dict[str, Any]:
     clipped_question = _clip(question, _context_config()[1])
-    current_entity = infer_current_entity(session_id)
+    current_entity = str((analysis.primary_entity if analysis is not None else '') or infer_current_entity(session_id) or '').strip()
     resolved = infer_persona_name(question, selected_name=selected_persona, current_entity=current_entity)
     if resolved and not persona_exists(resolved):
         resolved = ''
@@ -1306,6 +1307,7 @@ def build_context(
         store=graph_store,
         social_role=social_role,
         mood_report=mood_report,
+        analysis=analysis,
     )
 
     ranked, score_debug = _score_rank_compress(

@@ -59,6 +59,7 @@ def build_chat_prompt(
     graph_context: str = '',
     recent_dialogue: str = '',
     state_transition_block: str = '',
+    procedure_block: str = '',
     reviewed_context_block: str = '',
     response_shaping_block: str = '',
     language: str = 'en',
@@ -85,6 +86,8 @@ def build_chat_prompt(
     blocks.extend(['User question:', _truncate_tokens_equivalent(str(question or '').strip(), 420)])
     if state_transition_block:
         blocks.extend(['State transition:', _truncate_tokens_equivalent(state_transition_block, 220)])
+    if procedure_block:
+        blocks.extend(['Task procedure:', _truncate_tokens_equivalent(procedure_block, 260)])
     if response_shaping_block:
         blocks.extend(['Response shaping:', _truncate_tokens_equivalent(response_shaping_block, 220)])
     if reviewed_context_block:
@@ -136,6 +139,71 @@ def build_influence_interpreter_prompt(
             json.dumps(dict(analysis or {}), ensure_ascii=False, indent=2),
             'Situation:',
             json.dumps(dict(situation or {}), ensure_ascii=False, indent=2),
+        ]
+    )
+
+
+def build_interaction_router_prompt(
+    *,
+    message: str,
+    session_persona: str,
+    current_entity: str,
+    known_entities: list[dict[str, Any]],
+    routed_seed: dict[str, Any],
+) -> str:
+    compact_entities = [
+        {
+            'name': str(item.get('name') or '').strip(),
+            'aliases': [str(alias).strip() for alias in list(item.get('aliases') or [])[:4] if str(alias).strip()],
+            'type': str(item.get('type') or '').strip(),
+        }
+        for item in list(known_entities or [])[:48]
+        if str(item.get('name') or '').strip()
+    ]
+    return '\n\n'.join(
+        [
+            _staged_prompt_header('interaction_router'),
+            'Return valid JSON only.',
+            'Schema:',
+            '{"message_kind":"question","question_present":true,"explicit_persona_switch":false,"requested_persona":"","keep_session_persona":true,"topic_entity":"Mysterio","topic_mode":"external_topic","followup_mode":"followup_on_previous_topic","routed_message":"Why is he dangerous?","evidence":["short follow-up with prior topic"],"source":"llm_guided"}',
+            'Current session speaker persona:',
+            str(session_persona or '').strip() or '(none)',
+            'Current topic entity:',
+            str(current_entity or '').strip() or '(none)',
+            'Known graph entities:',
+            json.dumps(compact_entities, ensure_ascii=False, indent=2),
+            'User message:',
+            str(message or '').strip(),
+            'Deterministic routing seed:',
+            json.dumps(dict(routed_seed or {}), ensure_ascii=False, indent=2),
+        ]
+    )
+
+
+def build_procedure_reconstructor_prompt(
+    *,
+    previous_state: dict[str, Any],
+    influence: dict[str, Any],
+    analysis: dict[str, Any],
+    semantic_focus: dict[str, Any],
+    procedure_seed: dict[str, Any],
+) -> str:
+    return '\n\n'.join(
+        [
+            _staged_prompt_header('procedure_reconstructor'),
+            'Return valid JSON only.',
+            'Schema:',
+            '{"summary":"...","procedure_family":"persona_decision_answer","requested_outcome":"...","response_form":"first_person_explanation","response_language":"ru","form_drivers":["reply_language:ru"],"content_sources":["updated_state","persona_learned_patterns"],"forbidden_mixins":["generic_assistant_tone"],"success_criteria":["visible_reply_language_is_ru"],"execution_steps":["recover decision patterns"],"uncertainty_strategy":"admit uncertainty without inventing facts"}',
+            'Previous state:',
+            json.dumps(dict(previous_state or {}), ensure_ascii=False, indent=2),
+            'Influence interpretation:',
+            json.dumps(dict(influence or {}), ensure_ascii=False, indent=2),
+            'Message analysis:',
+            json.dumps(dict(analysis or {}), ensure_ascii=False, indent=2),
+            'Semantic focus:',
+            json.dumps(dict(semantic_focus or {}), ensure_ascii=False, indent=2),
+            'Procedure seed:',
+            json.dumps(dict(procedure_seed or {}), ensure_ascii=False, indent=2),
         ]
     )
 
@@ -194,6 +262,7 @@ def build_response_shaper_prompt(
     *,
     reviewed_context: dict[str, Any],
     influence: dict[str, Any],
+    task_procedure: dict[str, Any],
     social_role: dict[str, Any],
     response_explanation: dict[str, Any],
 ) -> str:
@@ -202,11 +271,13 @@ def build_response_shaper_prompt(
             _staged_prompt_header('response_shaper'),
             'Return valid JSON only.',
             'Schema:',
-            '{"role":"mentor","style":"direct_explanatory","behavior_mode":"grounded_answer","summary":"...","priorities":["answer_substance"],"constraints":["stay_in_first_person","avoid_assistant_tone"],"risk_posture":"measured"}',
+            '{"role":"mentor","style":"direct_explanatory","behavior_mode":"grounded_answer","response_form":"first_person_explanation","summary":"...","priorities":["answer_substance"],"constraints":["stay_in_first_person","avoid_assistant_tone"],"forbidden_mixins":["generic_assistant_tone"],"success_criteria":["answer_is_in_first_person"],"risk_posture":"measured"}',
             'Reviewed context:',
             json.dumps(dict(reviewed_context or {}), ensure_ascii=False, indent=2),
             'Influence interpretation:',
             json.dumps(dict(influence or {}), ensure_ascii=False, indent=2),
+            'Task procedure:',
+            json.dumps(dict(task_procedure or {}), ensure_ascii=False, indent=2),
             'Selected social role:',
             json.dumps(dict(social_role or {}), ensure_ascii=False, indent=2),
             'Persona response explanation:',
