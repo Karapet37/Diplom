@@ -11,7 +11,7 @@ from .token_budget import select_n_ctx, token_count, truncate_to_fit
 MIN_ROUTER_N_CTX = 1024
 MAX_ROUTER_N_CTX = 2048
 MIN_REASONING_N_CTX = 2048
-MAX_REASONING_N_CTX = 5000
+MAX_REASONING_N_CTX = 7000
 SAFE_ERROR_REPLY = "I couldn't produce a safe grounded response. Please retry with a shorter prompt."
 
 
@@ -21,6 +21,8 @@ class BoundedPrompt:
     prompt_tokens: int
     token_budget: int
     reserve_tokens_for_output: int
+    max_prompt_tokens: int
+    prompt_nearly_fills_window: bool
     truncated: bool
     included_sections: int
 
@@ -41,6 +43,8 @@ def build_bounded_prompt(
             prompt_tokens=0,
             token_budget=normalized_budget,
             reserve_tokens_for_output=reserve,
+            max_prompt_tokens=max_prompt_tokens,
+            prompt_nearly_fills_window=False,
             truncated=False,
             included_sections=0,
         )
@@ -77,6 +81,8 @@ def build_bounded_prompt(
         prompt_tokens=prompt_tokens,
         token_budget=normalized_budget,
         reserve_tokens_for_output=reserve,
+        max_prompt_tokens=max_prompt_tokens,
+        prompt_nearly_fills_window=(prompt_tokens + reserve) >= max(int(normalized_budget * 0.9), reserve),
         truncated=truncated or included < len(clean_sections),
         included_sections=included,
     )
@@ -123,6 +129,10 @@ def retry_infer(
                     "n_ctx": n_ctx,
                     "status": "ready",
                     "prompt_tokens": bounded.prompt_tokens,
+                    "max_prompt_tokens": bounded.max_prompt_tokens,
+                    "reserved_output_budget": bounded.reserve_tokens_for_output,
+                    "actual_max_tokens": int(max_tokens or 0),
+                    "prompt_nearly_fills_window": bool(bounded.prompt_nearly_fills_window),
                     "truncated": bounded.truncated,
                 }
             )
@@ -132,13 +142,26 @@ def retry_infer(
                 attempts[-1]["status"] = "error"
                 attempts[-1]["error"] = str(exc)
                 result = ""
+            infer_meta = dict(getattr(llm_fn, "_last_infer_meta", {}) or {})
+            if infer_meta:
+                attempts[-1]["finish_reason"] = str(infer_meta.get("finish_reason") or "").strip()
+                attempts[-1]["completion_tokens"] = int(infer_meta.get("completion_tokens") or 0)
+                attempts[-1]["output_truncated"] = bool(str(infer_meta.get("finish_reason") or "").strip().lower() == "length")
             if result and result != SAFE_ERROR_REPLY:
                 return {
                     "ok": True,
                     "text": result,
                     "n_ctx": n_ctx,
                     "prompt_tokens": bounded.prompt_tokens,
+                    "max_prompt_tokens": bounded.max_prompt_tokens,
+                    "reserved_output_budget": bounded.reserve_tokens_for_output,
+                    "actual_max_tokens": int(max_tokens or 0),
+                    "prompt_nearly_fills_window": bool(bounded.prompt_nearly_fills_window),
                     "truncated": bounded.truncated,
+                    "finish_reason": str(infer_meta.get("finish_reason") or "").strip(),
+                    "completion_tokens": int(infer_meta.get("completion_tokens") or 0),
+                    "output_truncated": bool(str(infer_meta.get("finish_reason") or "").strip().lower() == "length"),
+                    "output_budget_too_small": bool(str(infer_meta.get("finish_reason") or "").strip().lower() == "length"),
                     "attempts": attempts,
                 }
             attempts[-1]["status"] = "retry"
@@ -150,6 +173,14 @@ def retry_infer(
         "text": SAFE_ERROR_REPLY,
         "n_ctx": allowed_contexts[-1],
         "prompt_tokens": token_count(None, current_prompt),
+        "max_prompt_tokens": max(0, int(allowed_contexts[-1] - max(int(max_tokens or 0), 0))),
+        "reserved_output_budget": int(max_tokens or 0),
+        "actual_max_tokens": int(max_tokens or 0),
+        "prompt_nearly_fills_window": True,
         "truncated": True,
+        "finish_reason": "",
+        "completion_tokens": 0,
+        "output_truncated": False,
+        "output_budget_too_small": False,
         "attempts": attempts,
     }

@@ -15,16 +15,47 @@ _PERSONA_SWITCH_PATTERNS = (
     r'^\s*(?:ok|okay|fine|alright|well)?[\s,:\-]*(?:you are|you\'re|be|act as|speak as|pretend to be)\s+([A-Za-zА-Яа-я][\w\'-]*(?:\s+[A-Za-zА-Яа-я][\w\'-]*){0,3})(?:[.!?]\s*(.*))?$',
     r'^\s*(?:ладно|хорошо|ну ладно)?[\s,:\-]*(?:ты|ты теперь|будь|говори как|веди себя как)\s+([A-Za-zА-Яа-я][\w\'-]*(?:\s+[A-Za-zА-Яа-я][\w\'-]*){0,3})(?:[.!?]\s*(.*))?$',
 )
+_SECOND_PERSON_IDENTITY_PREFIXES = (
+    'you are ',
+    "you're ",
+    'ты ',
+    'ты теперь ',
+)
 _KNOWN_MESSAGE_KINDS = {'statement', 'question', 'command', 'mixed'}
 _KNOWN_TOPIC_MODES = {'unknown', 'persona_self', 'external_topic', 'session_followup', 'persona_switch'}
 _KNOWN_FOLLOWUP_MODES = {'none', 'followup_on_previous_topic', 'followup_on_persona'}
 _QUESTION_PREFIXES = ('who ', 'what ', 'why ', 'how ', 'when ', 'where ', 'does ', 'do ', 'did ', 'is ', 'are ', 'can ', 'could ', 'would ', 'should ', 'will ', 'has ', 'have ', 'had ')
 _REQUEST_PREFIXES = ('explain ', 'describe ', 'tell ', 'show ', 'outline ', 'list ', 'compare ', 'lay out ', 'walk me through ')
 _REQUEST_ADVERBS = {'briefly', 'clearly', 'concretely', 'simply', 'just'}
+_FOLLOWUP_QUERY_MARKERS = (
+    '?',
+    ' who ',
+    ' what ',
+    ' why ',
+    ' how ',
+    ' when ',
+    ' where ',
+    ' does ',
+    ' do ',
+    ' did ',
+    ' can ',
+    ' could ',
+    ' would ',
+    ' should ',
+    ' will ',
+    ' как ',
+    ' кто ',
+    ' что ',
+    ' почему ',
+    ' когда ',
+    ' где ',
+    ' можешь ',
+    ' будешь ',
+)
 
 
 def _enabled_model_stages() -> set[str]:
-    raw = str(os.getenv('COGNITIVE_STAGE_MODEL_STEPS', 'interaction_router,response_shaper') or '').strip().lower()
+    raw = str(os.getenv('COGNITIVE_STAGE_MODEL_STEPS', '') or '').strip().lower()
     if not raw:
         return set()
     return {item.strip() for item in raw.split(',') if item.strip()}
@@ -102,7 +133,36 @@ def _extract_explicit_persona_switch(message: str, known_entities: list[dict[str
         if candidate:
             remainder = _clean_message(match.group(2) or '')
             return candidate, remainder
+    lowered = clean.casefold()
+    for prefix in _SECOND_PERSON_IDENTITY_PREFIXES:
+        if not lowered.startswith(prefix):
+            continue
+        tail = clean[len(prefix) :].strip()
+        if not tail:
+            return '', clean
+        candidate_raw = re.split(r'[,.!?;:]', tail, maxsplit=1)[0].strip()
+        candidate = _clean_candidate_phrase(candidate_raw, known_entities, allow_unknown=True)
+        remainder = tail[len(candidate_raw) :].lstrip(' ,.;:!?-')
+        remainder_clean = _clean_message(remainder)
+        if not candidate:
+            return '', clean
+        normalized_tail = f' {normalize_name(tail)} '
+        has_followup_query = any(marker in remainder_clean for marker in ('?',)) or any(
+            marker in normalized_tail for marker in _FOLLOWUP_QUERY_MARKERS if marker != '?'
+        )
+        if has_followup_query:
+            return candidate, remainder_clean or clean
     return '', clean
+
+
+def _seed_is_decisive(seed: InteractionFrame) -> bool:
+    if seed.explicit_persona_switch and seed.requested_persona:
+        return True
+    if seed.topic_mode in {'persona_self', 'persona_switch', 'session_followup'} and (seed.topic_entity or seed.keep_session_persona):
+        return True
+    if seed.topic_entity and seed.message_kind in {'question', 'command'}:
+        return True
+    return False
 
 
 def _match_known_entities(message: str, known_entities: list[dict[str, Any]], *, exclude: set[str] | None = None) -> list[str]:
@@ -337,7 +397,7 @@ def route_interaction(
         current_entity=current_entity,
         known_entities=known,
     )
-    if not _router_stage_enabled():
+    if _seed_is_decisive(seed) or not _router_stage_enabled():
         return seed
     payload = call_json_model_for_role(
         build_interaction_router_prompt(

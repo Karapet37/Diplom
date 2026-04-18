@@ -42,6 +42,12 @@ export function getCognitiveSession(sessionId) {
   return request(`/api/cognitive/sessions/${encodeURIComponent(sessionId)}`);
 }
 
+export function deleteCognitiveSession(sessionId) {
+  return request(`/api/cognitive/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+  });
+}
+
 export function respondCognitiveChat(payload = {}) {
   return request('/api/cognitive/chat/respond', {
     method: 'POST',
@@ -159,5 +165,66 @@ export function uploadCognitiveFiles(sessionId, files = []) {
   return request('/api/cognitive/files/upload', {
     method: 'POST',
     body: formData,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Personality construction — delete
+// ---------------------------------------------------------------------------
+
+export function deletePersonality(personalityId) {
+  return request(`/api/cognitive/personality-construction/personalities/${encodeURIComponent(personalityId)}`, {
+    method: 'DELETE',
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Training examples — fine-tuning dataset curation
+// ---------------------------------------------------------------------------
+
+export function listTrainingExamples({ sessionId = '', personaName = '' } = {}) {
+  const params = new URLSearchParams();
+  if (sessionId) params.set('session_id', String(sessionId));
+  if (personaName) params.set('persona_name', String(personaName));
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  return request(`/api/cognitive/training-examples${suffix}`);
+}
+
+export function createTrainingExample(payload = {}) {
+  return request('/api/cognitive/training-examples', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteTrainingExample(exampleId) {
+  return request(`/api/cognitive/training-examples/${encodeURIComponent(exampleId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function exportTrainingExamples({ sessionId = '', personaName = '', fmt = 'openai' } = {}) {
+  const params = new URLSearchParams();
+  if (sessionId) params.set('session_id', String(sessionId));
+  if (personaName) params.set('persona_name', String(personaName));
+  params.set('fmt', String(fmt));
+  return request(`/api/cognitive/training-examples/export/jsonl?${params.toString()}`);
+}
+
+// ---------------------------------------------------------------------------
+// Safety classifier
+// ---------------------------------------------------------------------------
+
+export function classifySafety(text, language = 'en') {
+  return request('/api/cognitive/safety/classify', {
+    method: 'POST',
+    body: JSON.stringify({ text: String(text || ''), language: String(language || 'en') }),
+  });
+}
+
+export function addSafetyExample(text, label, notes = '') {
+  return request('/api/cognitive/safety/examples', {
+    method: 'POST',
+    body: JSON.stringify({ text: String(text || ''), label: String(label || ''), notes: String(notes || '') }),
   });
 }

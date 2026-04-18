@@ -3,8 +3,13 @@ import {
   connectCognitiveGraphNodes,
   createCognitiveSession,
   createCognitiveGraphNode,
+  createTrainingExample,
+  deleteCognitiveSession,
   deleteCognitiveGraphEdge,
   deleteCognitiveGraphNode,
+  deletePersonality,
+  deleteTrainingExample,
+  exportTrainingExamples,
   getCognitiveDebugMetrics,
   getCognitiveDebugTraces,
   getCognitiveGraph,
@@ -16,12 +21,14 @@ import {
   getHealth,
   listCognitivePersonalities,
   listCognitiveSessions,
+  listTrainingExamples,
   mergeCognitiveGraphNodes,
   rebuildCognitiveGraph,
   reviewCognitiveGraphNode,
   rethinkCognitiveGraphNodes,
   respondCognitiveChat,
   uploadCognitiveFiles,
+  classifySafety,
 } from './api';
 import { Sidebar } from './components/Layout/Sidebar';
 import { TopBar } from './components/Layout/TopBar';
@@ -99,10 +106,12 @@ export default function App() {
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState('');
   const [activeSession, setActiveSession] = useState(null);
+  const [deletingSessionId, setDeletingSessionId] = useState('');
   const [chatInput, setChatInput] = useState('');
   const [chatRunning, setChatRunning] = useState(false);
   const [chatProgress, setChatProgress] = useState('');
   const [lastChatResult, setLastChatResult] = useState(null);
+  const [safetyResult, setSafetyResult] = useState(null);
   const [activeTrace, setActiveTrace] = useState(null);
   const [diagnostics, setDiagnostics] = useState({ metrics: null, traces: [], graphHealth: null });
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
@@ -111,6 +120,9 @@ export default function App() {
   const [selectedPersonality, setSelectedPersonality] = useState('');
   const [personaDetail, setPersonaDetail] = useState(null);
   const [personaDetailLoading, setPersonaDetailLoading] = useState(false);
+  const [deletingPersonalityId, setDeletingPersonalityId] = useState('');
+  const [trainingExamples, setTrainingExamples] = useState([]);
+  const [trainingExamplesLoading, setTrainingExamplesLoading] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [lastUploadResult, setLastUploadResult] = useState(null);
 
@@ -214,12 +226,44 @@ export default function App() {
   }
 
   async function handleCreateSession() {
-    const result = await createCognitiveSession({ title: 'New session' });
+    const result = await createCognitiveSession({ title: t('sidebar_new_session') });
     const session = result.session;
     setSessions((current) => [session, ...current.filter((item) => item.session_id !== session.session_id)]);
     setActiveSession(session);
     setActiveSessionId(session.session_id);
     return session;
+  }
+
+  async function handleDeleteSession(sessionId) {
+    const cleanSessionId = String(sessionId || '').trim();
+    if (!cleanSessionId || deletingSessionId) return;
+    const sessionTitle = sessions.find((item) => item.session_id === cleanSessionId)?.title || t('sidebar_untitled_session');
+    if (typeof window !== 'undefined' && !window.confirm(t('sidebar_delete_session_confirm').replace('{title}', sessionTitle))) {
+      return;
+    }
+    setDeletingSessionId(cleanSessionId);
+    setError('');
+    try {
+      await deleteCognitiveSession(cleanSessionId);
+      const nextSessions = sessions.filter((item) => item.session_id !== cleanSessionId);
+      setSessions(nextSessions);
+      if (activeSessionId === cleanSessionId) {
+        setActiveSession(null);
+        setActiveSessionId('');
+        setLastChatResult(null);
+        setLastUploadResult(null);
+        setActiveTrace(null);
+        if (nextSessions.length) {
+          await loadSession(nextSessions[0].session_id);
+        } else {
+          await handleCreateSession();
+        }
+      }
+    } catch (deleteError) {
+      setError(deleteError.message || String(deleteError));
+    } finally {
+      setDeletingSessionId('');
+    }
   }
 
   async function loadSession(sessionId) {
@@ -263,6 +307,67 @@ export default function App() {
       return result;
     } finally {
       setPersonaDetailLoading(false);
+    }
+  }
+
+  async function handleDeletePersonality(personalityId) {
+    const cleanId = String(personalityId || '').trim();
+    if (!cleanId || deletingPersonalityId) return;
+    setDeletingPersonalityId(cleanId);
+    try {
+      await deletePersonality(cleanId);
+      setPersonalities((prev) => prev.filter((p) => p.personality_id !== cleanId && p.name !== cleanId));
+      if (selectedPersonality === cleanId || (personaDetail?.personality_id === cleanId)) {
+        setSelectedPersonality('');
+        setPersonaDetail(null);
+      }
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setDeletingPersonalityId('');
+    }
+  }
+
+  async function loadTrainingExamples(personaName = '') {
+    setTrainingExamplesLoading(true);
+    try {
+      const result = await listTrainingExamples({ personaName });
+      setTrainingExamples(result.examples || []);
+      return result.examples || [];
+    } catch (err) {
+      setError(err.message || String(err));
+      return [];
+    } finally {
+      setTrainingExamplesLoading(false);
+    }
+  }
+
+  async function handleAddTrainingExample(payload) {
+    try {
+      const result = await createTrainingExample(payload);
+      setTrainingExamples((prev) => [result.example, ...prev]);
+      return result.example;
+    } catch (err) {
+      setError(err.message || String(err));
+      return null;
+    }
+  }
+
+  async function handleDeleteTrainingExample(exampleId) {
+    try {
+      await deleteTrainingExample(exampleId);
+      setTrainingExamples((prev) => prev.filter((e) => e.example_id !== exampleId));
+    } catch (err) {
+      setError(err.message || String(err));
+    }
+  }
+
+  async function handleExportTrainingExamples(opts = {}) {
+    try {
+      return await exportTrainingExamples(opts);
+    } catch (err) {
+      setError(err.message || String(err));
+      return null;
     }
   }
 
@@ -486,7 +591,9 @@ export default function App() {
     setChatRunning(true);
     setChatProgress(t('chat_running'));
     setError('');
+    setSafetyResult(null);
     try {
+      void classifySafety(message, uiLanguage).then((res) => setSafetyResult(res)).catch(() => {});
       const sessionId = activeSessionId || (await handleCreateSession()).session_id;
       const result = await respondCognitiveChat({
         message,
@@ -677,6 +784,7 @@ export default function App() {
   const pendingActionLabel = pendingGraphAction
     ? `${t(pendingGraphAction.type === 'connect' ? 'graph_pending_connect_from' : 'graph_pending_merge_from')} ${nodeTitleById(pendingGraphAction.anchorNodeId)}`
     : '';
+  const selectedPersonalitySummary = personalities.find((item) => String(item.name || '') === String(selectedPersonality || '')) || null;
   const previewResults = graphRethinkPreview?.results || [];
   const selectedPreview = selection?.kind === 'node'
     ? previewResults.find((item) => String(item.nodeId) === String(selection.id))
@@ -694,6 +802,7 @@ export default function App() {
           onRun={() => void handleRunChat()}
           lastChatResult={lastChatResult}
           activeTrace={activeTrace}
+          safetyResult={safetyResult}
           t={t}
         />
       );
@@ -706,9 +815,17 @@ export default function App() {
           onSelectPersonality={(name) => {
             setSelectedPersonality(name);
             void loadPersonaDetail(name).catch((detailError) => setError(detailError.message || String(detailError)));
+            void loadTrainingExamples(name).catch(() => {});
           }}
           personaDetail={personaDetail}
           loading={personaDetailLoading}
+          deletingPersonalityId={deletingPersonalityId}
+          onDeletePersonality={(pid) => void handleDeletePersonality(pid)}
+          trainingExamples={trainingExamples}
+          trainingExamplesLoading={trainingExamplesLoading}
+          onAddTrainingExample={(payload) => handleAddTrainingExample(payload)}
+          onDeleteTrainingExample={(id) => void handleDeleteTrainingExample(id)}
+          onExportTrainingExamples={(opts) => handleExportTrainingExamples(opts)}
           lastChatResult={lastChatResult}
           t={t}
         />
@@ -810,8 +927,11 @@ export default function App() {
           activeSessionId={activeSessionId}
           onSelectSession={(sessionId) => void loadSession(sessionId)}
           onCreateSession={() => void handleCreateSession()}
+          onDeleteSession={(sessionId) => void handleDeleteSession(sessionId)}
+          deletingSessionId={deletingSessionId}
           personalities={personalities}
           selectedPersonality={selectedPersonality}
+          selectedPersonalitySummary={selectedPersonalitySummary}
           onSelectPersonality={setSelectedPersonality}
           onUploadFiles={(files) => void handleUploadFiles(files)}
           uploadingFiles={uploadingFiles}

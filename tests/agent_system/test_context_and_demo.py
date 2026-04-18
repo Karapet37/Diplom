@@ -220,3 +220,70 @@ def test_build_chat_prompt_hardens_direct_persona_self_questions() -> None:
     assert 'Keep the reply brief by default: 2 to 4 sentences unless the user explicitly asks for detail.' in prompt
     assert 'Do not output analysis, hidden reasoning, `<think>` tags, system notes, prompt commentary, or JSON.' in prompt
     assert 'Do not mention being an AI, assistant, language model, system, or following instructions.' in prompt
+
+
+def test_build_chat_prompt_persona_mode_uses_role_activation_scaffold() -> None:
+    prompt = build_chat_prompt(
+        question='кто тебе нравится?',
+        persona_block='Имя/ярлык: Сломанный гордец.\nВнутри ты зависим и стыдишься своей привязанности.',
+        graph_context='- relation: Y KNOWS Persona',
+        recent_dialogue='user: ну и кто это?',
+        reviewed_context_block='persona is under emotional pressure',
+        route_guidance_block='Requested persona disposition: shy, proud, dependent.',
+        answer_perspective='persona',
+        language='ru',
+    )
+
+    assert '[ROLE ACTIVATION]' in prompt
+    assert 'Ты ЕСТЬ этот человек.' in prompt
+    assert 'перпендикулярно' in prompt
+    assert '[PERSONA]' in prompt
+    assert '[RESPONSE FORMAT]' in prompt
+    assert '[USER INPUT]' in prompt
+    assert 'короткая внутренняя мысль в скобках' in prompt
+    assert '[KNOWLEDGE GRAPH]' in prompt
+    assert '[RECENT DIALOGUE]' in prompt
+
+
+def test_build_chat_prompt_persona_review_mode_uses_dialogue_analysis_scaffold() -> None:
+    prompt = build_chat_prompt(
+        question='Проанализируй диалог персонажа и найди ошибки в отыгрыше.',
+        persona_block='Имя/ярлык: Сломанный гордец.\nВнешне сдержанный, внутри зависимый и стыдливый.',
+        graph_context='- relation: Y KNOWS Persona',
+        recent_dialogue='assistant: Да отстань.\nuser: Почему ты злишься?',
+        reviewed_context_block='persona drifts into confident speech under pressure',
+        route_guidance_block='Для каждой ошибки: ошибка, почему это ошибка, как лучше, исправленный вариант реплики.',
+        answer_perspective='persona_review',
+        language='ru',
+    )
+
+    assert '[ROLEPLAY REVIEW]' in prompt
+    assert 'Ты анализируешь диалог персонажа, а не продолжаешь сцену.' in prompt
+    assert '[CHECKLIST]' in prompt
+    assert '[OUTPUT FORMAT]' in prompt
+    assert 'исправленный вариант реплики' in prompt
+    assert '[DIALOGUE TO REVIEW]' in prompt
+    assert 'Recent dialogue:' in prompt
+    assert 'Persona head:' in prompt
+
+
+def test_build_chat_prompt_compacts_large_redundant_sections() -> None:
+    repeated_persona = '\n'.join(['Имя/ярлык: Катерина'] + ['Внешне ты: сдержанная, холодная, собранная.'] * 12)
+    repeated_graph = '\n'.join(['- relation: Y KNOWS Persona'] * 20)
+    repeated_dialogue = '\n'.join(['user: привет'] * 12 + ['assistant: ...'] * 12)
+
+    prompt = build_chat_prompt(
+        question='Расскажи коротко, как ты будешь отвечать дальше?',
+        persona_block=repeated_persona,
+        graph_context=repeated_graph,
+        recent_dialogue=repeated_dialogue,
+        reviewed_context_block='persona under pressure\npersona under pressure\npersona under pressure',
+        route_guidance_block='Requested persona disposition: restrained, proud.\nRequested persona disposition: restrained, proud.',
+        answer_perspective='persona',
+        language='ru',
+    )
+
+    assert prompt.count('Внешне ты: сдержанная, холодная, собранная.') == 1
+    assert prompt.count('- relation: Y KNOWS Persona') == 1
+    assert prompt.count('user: привет') <= 2
+    assert len(prompt) < 5000

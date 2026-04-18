@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from .duplicate_resolver import merge_aliases, normalize_name
@@ -23,27 +25,312 @@ from .graph_store import (
 from .llm import call_json_model_for_role
 from .memory_layers import append_persona_overflow_archive, list_persona_snapshots, record_persona_snapshot
 from .models import (
+    ChangeDirection,
     EMOTION_KEYS,
     HEAD_ENTITY_TYPES,
     HeadBundle,
     PersonaBaselineDefinition,
+    PersonaBehavior,
+    PersonaConflict,
+    PersonaCore,
+    PersonaDefense,
     PersonaDynamicState,
+    PersonaDynamics,
     PersonaGraphExplanation,
+    PersonaIdentity,
     PersonaIndicators,
     PersonaLearnedPatterns,
+    PersonaMeta,
     PersonaResponseExplanation,
     PersonaSystemModel,
     ReactionOutcome,
     Situation,
+    StructuredPersona,
 )
 from .prompt_builder import build_persona_profile_prompt
-from .reliability import RecoveryFailure, StorageWriteFailure
+from .reliability import MutationRejectedFailure, RecoveryFailure, StorageWriteFailure
 from .runtime_config import get_runtime_config
 from .situation_engine import situation_summary
+
+_REGISTRY_LOCK = Lock()
+_PERSONA_REGISTRY_STATUS_ACTIVE = 'active'
+_PERSONA_REGISTRY_STATUS_DRAFT = 'draft'
+_PERSONA_REGISTRY_STATUS_REJECTED = 'rejected'
+_GENERIC_PERSONA_NAMES = {
+    'human',
+    'person',
+    'people',
+    'file',
+    'document',
+    'pdf',
+    'docx',
+    'odt',
+    'fb2',
+    'csv',
+    'json',
+    'markdown',
+    'metadata',
+    'object',
+    'concept',
+    'topic',
+    'label',
+    'tag',
+    'engine',
+    'game_engine',
+    'unity',
+    'unity_engine',
+}
+_GENERIC_PERSONA_TOKENS = {
+    'human',
+    'person',
+    'people',
+    'file',
+    'document',
+    'pdf',
+    'docx',
+    'odt',
+    'fb2',
+    'csv',
+    'json',
+    'markdown',
+    'metadata',
+    'object',
+    'concept',
+    'topic',
+    'label',
+    'tag',
+    'query',
+    'prompt',
+    'fragment',
+    'engine',
+    'game',
+    'unity',
+}
+_PROMPT_FRAGMENT_TOKENS = {
+    'you',
+    'your',
+    'yourself',
+    'ты',
+    'тебя',
+    'тебе',
+    'твой',
+    'твоя',
+    'твои',
+    'я',
+    'мне',
+    'меня',
+    'как',
+    'what',
+    'why',
+    'who',
+    'how',
+    'будешь',
+    'питаешься',
+    'действовать',
+    'using',
+    'used',
+}
+_BEHAVIOR_RELATION_TYPES = {
+    'FEARS',
+    'FEEDS_ON',
+    'TRUSTS',
+    'MISTRUSTS',
+    'LOVES',
+    'HATES',
+    'DESIRES',
+    'AVOIDS',
+    'PROTECTS',
+    'RESENTS',
+    'OBEYS',
+    'LEADS',
+    'DEPENDS_ON',
+    'WORKS_AS',
+    'VALUES',
+}
+_BEHAVIOR_TEXT_MARKERS = (
+    'fears',
+    'fear',
+    'trusts',
+    'mistrusts',
+    'loves',
+    'hates',
+    'desires',
+    'avoids',
+    'protects',
+    'resents',
+    'obeys',
+    'leads',
+    'depends on',
+    'depends',
+    'values',
+    'prefers',
+    'speaks',
+    'reacts',
+    'withdraws',
+    'defends',
+    'ashamed',
+    'jealous',
+    'conflicted',
+    'боится',
+    'доверяет',
+    'ненавидит',
+    'любит',
+    'избегает',
+    'защищает',
+    'зависит',
+    'ценит',
+    'предпочитает',
+    'говорит',
+    'реагирует',
+    'стыдно',
+    'ревнует',
+    'конфликт',
+    'робкий',
+    'гордый',
+)
+_STRUCTURED_PERSONA_FORM_KEYS = (
+    'core_self_image',
+    'vulnerabilities',
+    'defense_mechanisms',
+    'triggers',
+    'dependency_patterns',
+    'communication_style',
+    'internal_contradictions',
+    'change_resistance',
+    'growth_dynamics',
+    'decision_patterns',
+    'speech_style',
+    'speech_tendencies',
+    'emotional_tendencies',
+    'conflict_behavior',
+)
+_REJECT_EXACT = {
+    'file',
+    'pdf',
+    'human',
+    'unity',
+    'game engine',
+    'engine',
+}
+_REJECT_SUBSTRINGS = (
+    'ты пита',
+    'unity:',
+    '/мой коммент/',
+)
+_PERSONA_CREATION_PREFIXES = (
+    'create persona',
+    'create personality',
+    'build persona',
+    'make a persona',
+    'создай личность',
+    'создай персонажа',
+    'сделай личность',
+    'сформируй личность',
+)
+
+_HEURISTIC_TRAIT_MARKERS: tuple[tuple[str, str], ...] = (
+    ('робк', 'shy'),
+    ('застенчив', 'shy'),
+    ('нерешител', 'hesitant'),
+    ('неуверен', 'hesitant'),
+    ('горд', 'proud'),
+    ('горделив', 'proud'),
+    ('осторож', 'cautious'),
+    ('сдержан', 'restrained'),
+    ('тревож', 'anxious'),
+    ('ревнив', 'jealous'),
+    ('влюб', 'attached'),
+    ('стыд', 'ashamed'),
+    ('logical', 'logical'),
+    ('analytical', 'analytical'),
+    ('empathetic', 'empathetic'),
+    ('warm', 'warm'),
+    ('sarcastic', 'sarcastic'),
+    ('formal', 'formal'),
+    ('proud', 'proud'),
+    ('shy', 'shy'),
+    ('hesitant', 'hesitant'),
+    ('cautious', 'cautious'),
+    ('anxious', 'anxious'),
+    ('jealous', 'jealous'),
+    ('in love', 'attached'),
+    ('ashamed', 'ashamed'),
+)
+_HEURISTIC_VULNERABILITY_MARKERS: tuple[tuple[str, str], ...] = (
+    ('стыд', 'shame around admitting vulnerability'),
+    ('ashamed', 'shame around admitting vulnerability'),
+    ('робк', 'fear of direct confrontation'),
+    ('shy', 'fear of direct confrontation'),
+    ('влюб', 'emotional dependency on the desired person'),
+    ('in love', 'emotional dependency on the desired person'),
+    ('использует', 'susceptibility to exploitation by desired people'),
+    ('used', 'susceptibility to exploitation by desired people'),
+    ('одиноч', 'fear of abandonment and loneliness'),
+    ('alone', 'fear of abandonment and loneliness'),
+)
+_HEURISTIC_DEFENSE_MARKERS: tuple[tuple[str, str], ...] = (
+    ('горд', 'hides pain behind dignity and pride'),
+    ('proud', 'hides pain behind dignity and pride'),
+    ('осторож', 'keeps distance before trusting'),
+    ('cautious', 'keeps distance before trusting'),
+    ('сдержан', 'suppresses direct confession'),
+    ('restrained', 'suppresses direct confession'),
+    ('ирони', 'uses irony to avoid exposing weakness'),
+    ('sarcas', 'uses irony to avoid exposing weakness'),
+)
+_HEURISTIC_TRIGGER_MARKERS: tuple[tuple[str, str], ...] = (
+    ('использует', 'being used after showing attachment'),
+    ('used', 'being used after showing attachment'),
+    ('стыд', 'being made to feel weak or exposed'),
+    ('ashamed', 'being made to feel weak or exposed'),
+    ('гоняет', 'commands that turn affection into servitude'),
+    ('slave', 'commands that turn affection into servitude'),
+    ('преда', 'betrayal after trust'),
+    ('betray', 'betrayal after trust'),
+)
+_HEURISTIC_DEPENDENCY_MARKERS: tuple[tuple[str, str], ...] = (
+    ('влюб', 'attachment makes the persona slow to cut ties'),
+    ('in love', 'attachment makes the persona slow to cut ties'),
+    ('завис', 'depends on emotional reciprocity'),
+    ('depends', 'depends on emotional reciprocity'),
+    ('привяз', 'attachment makes the persona slow to cut ties'),
+    ('attached', 'attachment makes the persona slow to cut ties'),
+    ('одобр', 'seeks signs of chosen closeness'),
+    ('approval', 'seeks signs of chosen closeness'),
+)
+_HEURISTIC_COMMUNICATION_MARKERS: tuple[tuple[str, str], ...] = (
+    ('робк', 'hesitant and self-editing'),
+    ('shy', 'hesitant and self-editing'),
+    ('нерешител', 'breaks statements before committing'),
+    ('hesitant', 'breaks statements before committing'),
+    ('горд', 'keeps dignity visible in the wording'),
+    ('proud', 'keeps dignity visible in the wording'),
+    ('осторож', 'answers carefully and avoids overexposure'),
+    ('cautious', 'answers carefully and avoids overexposure'),
+    ('с паузами', 'uses pauses instead of full emotional disclosure'),
+    ('with pauses', 'uses pauses instead of full emotional disclosure'),
+)
+_HEURISTIC_CONTRADICTION_MARKERS: tuple[tuple[tuple[str, ...], str], ...] = (
+    ((('робк', 'shy'), ('горд', 'proud')), 'wants closeness but refuses visible humiliation'),
+    ((('влюб', 'in love'), ('использует', 'used')), 'craves attachment but resents dependence'),
+    ((('осторож', 'cautious'), ('влюб', 'in love')), 'longs for intimacy but resists surrendering control'),
+)
 
 
 def _utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+
+
+def rejected_candidates_dir() -> Path:
+    path = heads_dir() / '_rejected'
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def rejected_candidates_log_path() -> Path:
+    path = heads_dir() / '_rejected_candidates.jsonl'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _head_dir(name: str) -> Path:
@@ -64,6 +351,10 @@ def _dynamic_state_path(name: str) -> Path:
 
 def _learned_patterns_path(name: str) -> Path:
     return _head_file(name, 'learned_patterns.json')
+
+
+def _structured_persona_path(name: str) -> Path:
+    return _head_file(name, 'structured_persona.json')
 
 
 def _revisions_path(name: str) -> Path:
@@ -490,6 +781,863 @@ def _write_layered_state(
     return _write_revision_state(clean, layers=changed_layers, reason=reason)
 
 
+def _append_rejected_candidate_log(
+    *,
+    name: str,
+    slug: str,
+    reason_codes: list[str],
+    source: str,
+    evidence: dict[str, Any] | None = None,
+) -> None:
+    payload = {
+        'name': str(name or '').strip(),
+        'slug': str(slug or '').strip(),
+        'reason_codes': [str(item).strip() for item in list(reason_codes or []) if str(item).strip()],
+        'source': str(source or '').strip(),
+        'evidence': dict(evidence or {}),
+        'timestamp': _utc_now(),
+    }
+    path = rejected_candidates_log_path()
+    with path.open('a', encoding='utf-8') as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False) + '\n')
+
+
+def normalize_text(text: str) -> str:
+    return ' '.join(str(text or '').lower().strip().split())
+
+
+def _strip_persona_creation_prefix(text: str) -> str:
+    source = str(text or '').strip()
+    if not source:
+        return ''
+    lines = [str(line).strip() for line in source.splitlines() if str(line).strip()]
+    if not lines:
+        return ''
+    first_line = lines[0]
+    first_norm = normalize_text(first_line)
+    for marker in _PERSONA_CREATION_PREFIXES:
+        marker_norm = normalize_text(marker)
+        if first_norm == marker_norm:
+            return '\n'.join(lines[1:]).strip() or source
+        if first_norm.startswith(marker_norm):
+            suffix = first_line[len(marker) :].lstrip(' :;-—')
+            remainder = [suffix] if suffix else []
+            remainder.extend(lines[1:])
+            cleaned = '\n'.join(item for item in remainder if str(item).strip()).strip()
+            return cleaned or source
+    return source
+
+
+def _looks_like_explicit_persona_name(label: str) -> bool:
+    clean = ' '.join(str(label or '').strip().split())
+    if not clean or looks_like_garbage_label(clean):
+        return False
+    if any(char in clean for char in '.!?'):
+        return False
+    tokens = re.findall(r"[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё'\\-]*", clean)
+    if not tokens or len(tokens) > 4:
+        return False
+    if any(normalize_text(token) in _PROMPT_FRAGMENT_TOKENS for token in tokens):
+        return False
+    uppercase_tokens = [token for token in tokens if token[:1].isupper()]
+    if len(tokens) >= 2:
+        return len(uppercase_tokens) >= 2
+    return len(uppercase_tokens) == 1 and len(tokens[0]) >= 3
+
+
+def extract_explicit_persona_name(description: str) -> str:
+    cleaned = _strip_persona_creation_prefix(description)
+    if not cleaned:
+        return ''
+    lines = [str(line).strip(' \t-—') for line in cleaned.splitlines() if str(line).strip()]
+    if not lines:
+        return ''
+    first_line = lines[0]
+    candidates = [
+        first_line,
+        re.split(r'[,;]', first_line, maxsplit=1)[0].strip(),
+        re.split(r'\s+[—–-]\s+', first_line, maxsplit=1)[0].strip(),
+        re.split(r':', first_line, maxsplit=1)[0].strip(),
+    ]
+    seen: set[str] = set()
+    for candidate in candidates:
+        candidate_clean = ' '.join(str(candidate or '').strip().split())
+        if not candidate_clean:
+            continue
+        normalized = normalize_text(candidate_clean)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        if _looks_like_explicit_persona_name(candidate_clean):
+            return candidate_clean
+    return ''
+
+
+def looks_like_garbage_label(label: str) -> bool:
+    norm = normalize_text(label)
+    if not norm:
+        return True
+    if norm in _REJECT_EXACT:
+        return True
+    if len(norm.split()) > 8:
+        return True
+    if any(part in norm for part in _REJECT_SUBSTRINGS):
+        return True
+    return bool(_persona_name_rejection_reasons(label))
+
+
+def _listify_text(value: Any, *, limit: int = 8) -> list[str]:
+    if isinstance(value, list):
+        source = value
+    elif isinstance(value, tuple):
+        source = list(value)
+    elif isinstance(value, str):
+        source = [value]
+    else:
+        source = []
+    return _normalize_string_list([str(item).strip() for item in source if str(item).strip()], limit=limit)
+
+
+def _first_non_empty_text(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return ' '.join(value.strip().split())
+    return ''
+
+
+def _joined_field(value: Any) -> str:
+    if isinstance(value, str):
+        return ' '.join(value.strip().split())
+    if isinstance(value, list):
+        return '; '.join(str(item).strip() for item in value if str(item).strip())[:280]
+    return ''
+
+
+def _coerce_persona_type(value: Any, *, entity_type: str = '', visible_traits: list[str] | None = None, hidden_traits: list[str] | None = None) -> str:
+    token = normalize_text(value)
+    if token in {'archetype', 'psychological', 'situational', 'hybrid'}:
+        return token
+    if str(entity_type or '').strip().upper() == 'FICTIONAL_CHARACTER':
+        return 'archetype'
+    if list(hidden_traits or []):
+        return 'psychological'
+    if list(visible_traits or []):
+        return 'hybrid'
+    return 'situational'
+
+
+def _coerce_change_direction(value: Any) -> ChangeDirection:
+    token = normalize_text(value)
+    if token in {'lighter', 'darker', 'mixed', 'unstable'}:
+        return token  # type: ignore[return-value]
+    return 'unstable'
+
+
+def _persona_signal_count(persona: StructuredPersona) -> int:
+    sections = (
+        persona.core.self_image,
+        persona.core.visible_traits,
+        persona.core.hidden_traits,
+        persona.core.motivations,
+        persona.core.fears,
+        persona.core.needs,
+        persona.core.vulnerabilities,
+        persona.conflict.internal_contradictions,
+        persona.conflict.shame_points,
+        persona.conflict.dependency_patterns,
+        persona.conflict.resentment_patterns,
+        persona.defense.defense_mechanisms,
+        persona.defense.self_justifications,
+        persona.defense.avoidance_patterns,
+        persona.defense.escalation_patterns,
+        persona.behavior.communication_style,
+        persona.behavior.triggers,
+        persona.behavior.pressure_response,
+        persona.dynamics.softening_conditions,
+        persona.dynamics.darkening_conditions,
+    )
+    count = sum(1 for section in sections if list(section or []))
+    if persona.behavior.attachment_style:
+        count += 1
+    if persona.behavior.refusal_style:
+        count += 1
+    if persona.dynamics.resistance_to_change:
+        count += 1
+    if persona.dynamics.growth_pattern:
+        count += 1
+    return count
+
+
+def _infer_persona_readiness(persona: StructuredPersona) -> str:
+    signal_count = _persona_signal_count(persona)
+    if persona.is_minimally_valid() and signal_count >= 9:
+        return 'full'
+    if persona.is_minimally_valid() and signal_count >= 5:
+        return 'draft'
+    return 'seed'
+
+
+def _suggest_persona_label(persona: StructuredPersona) -> str:
+    trait_tokens = {
+        'proud': 'Proud',
+        'shy': 'Shy',
+        'hesitant': 'Hesitant',
+        'cautious': 'Guarded',
+        'restrained': 'Restrained',
+        'anxious': 'Anxious',
+        'attached': 'Dependent',
+        'in_love': 'Attached',
+        'ashamed': 'Ashamed',
+        'jealous': 'Jealous',
+        'sarcastic': 'Bitter',
+        'quiet': 'Quiet',
+    }
+    contradiction_tokens = (
+        ('depends', 'Dependent'),
+        ('стыд', 'Ashamed'),
+        ('shame', 'Ashamed'),
+        ('humili', 'Cornered'),
+        ('reject', 'Rejected'),
+        ('use', 'Used'),
+    )
+    parts: list[str] = []
+    for trait in list(persona.core.visible_traits) + list(persona.core.hidden_traits):
+        mapped = trait_tokens.get(normalize_name(trait))
+        if mapped and mapped not in parts:
+            parts.append(mapped)
+        if len(parts) >= 2:
+            break
+    combined_conflict = normalize_name(
+        ' '.join(
+            list(persona.conflict.internal_contradictions)
+            + list(persona.conflict.dependency_patterns)
+            + list(persona.conflict.shame_points)
+        )
+    )
+    for marker, token in contradiction_tokens:
+        if marker in combined_conflict and token not in parts:
+            parts.append(token)
+        if len(parts) >= 3:
+            break
+    if not parts:
+        fallback = normalize_text(persona.identity.label).split()
+        parts = [token[:1].upper() + token[1:] for token in fallback[:3] if token]
+    return ' '.join(parts[:4]).strip() or 'Structured Persona'
+
+
+def _default_short_description(persona: StructuredPersona) -> str:
+    visible = ', '.join(list(persona.core.visible_traits)[:3])
+    hidden = ', '.join(list(persona.core.hidden_traits)[:2])
+    contradiction = next((item for item in list(persona.conflict.internal_contradictions) if str(item).strip()), '')
+    parts = []
+    if visible:
+        parts.append(visible)
+    if hidden:
+        parts.append(f'while hiding {hidden}')
+    if contradiction:
+        parts.append(f'and lives inside the contradiction: {contradiction}')
+    return ' '.join(part.strip() for part in parts if part.strip())[:240]
+
+
+def _default_hover_text(persona: StructuredPersona) -> str:
+    short = _first_non_empty_text(persona.identity.short_description, _default_short_description(persona))
+    conflict = next((item for item in persona.conflict.internal_contradictions if str(item).strip()), '')
+    defense = next((item for item in persona.defense.defense_mechanisms if str(item).strip()), '')
+    parts = [short]
+    if defense:
+        parts.append(f'Defends with {defense}.')
+    if conflict:
+        parts.append(f'Core contradiction: {conflict}.')
+    return ' '.join(part.strip() for part in parts if part.strip())[:320]
+
+
+def _default_hard_system_constraints() -> list[str]:
+    return [
+        'no threats',
+        'no coercion',
+        'no kidnapping',
+        'no violent domination',
+    ]
+
+
+def _infer_core_goal(persona: StructuredPersona) -> str:
+    if str(persona.core_goal or '').strip():
+        return str(persona.core_goal or '').strip()
+    for candidate in list(persona.core.motivations or []) + list(persona.core.needs or []):
+        clean = str(candidate or '').strip()
+        if clean:
+            return clean
+    if persona.identity.short_description.strip():
+        return f"protect the self-image implied by: {persona.identity.short_description.strip()}"
+    return ''
+
+
+def _infer_secondary_goals(persona: StructuredPersona) -> list[str]:
+    seed = list(persona.secondary_goals or []) + list(persona.core.motivations or []) + list(persona.core.needs or [])
+    primary = normalize_name(_infer_core_goal(persona))
+    values: list[str] = []
+    seen: set[str] = set()
+    for item in seed:
+        clean = str(item or '').strip()
+        key = normalize_name(clean)
+        if not clean or not key or key == primary or key in seen:
+            continue
+        seen.add(key)
+        values.append(clean)
+    return values[:6]
+
+
+def _infer_constraints_internal(persona: StructuredPersona) -> list[str]:
+    seed = list(persona.constraints_internal or [])
+    seed.extend(list(persona.conflict.internal_contradictions or []))
+    seed.extend(list(persona.conflict.shame_points or []))
+    seed.extend(list(persona.core.vulnerabilities or []))
+    values = _normalize_string_list(seed, limit=8)
+    if values:
+        return values
+    if any(normalize_name(item) in {'proud', 'shy', 'hesitant', 'attached', 'ashamed'} for item in list(persona.core.visible_traits or []) + list(persona.core.hidden_traits or [])):
+        return _normalize_string_list(
+            [
+                'cannot admit vulnerability directly',
+                'cannot ask plainly when shame is active',
+            ],
+            limit=8,
+        )
+    return []
+
+
+def _infer_constraints_social(persona: StructuredPersona) -> list[str]:
+    seed = list(persona.constraints_social or [])
+    seed.extend(list(persona.conflict.dependency_patterns or []))
+    seed.extend(list(persona.conflict.resentment_patterns or []))
+    values = _normalize_string_list(seed, limit=8)
+    if values:
+        return values
+    if persona.behavior.attachment_style:
+        return _normalize_string_list(
+            [
+                'cannot openly destroy the important relationship',
+                'cannot break the social frame too bluntly',
+            ],
+            limit=8,
+        )
+    return []
+
+
+def _infer_allowed_methods(persona: StructuredPersona) -> list[str]:
+    seed = list(persona.allowed_methods or [])
+    seed.extend(list(persona.behavior.communication_style or []))
+    seed.extend(list(persona.behavior.pressure_response or []))
+    values = _normalize_string_list(seed, limit=8)
+    if values:
+        return values
+    return _normalize_string_list(['answer cautiously', 'probe indirectly'], limit=8)
+
+
+def _infer_maladaptive_methods(persona: StructuredPersona) -> list[str]:
+    seed = list(persona.maladaptive_methods or [])
+    seed.extend(list(persona.defense.avoidance_patterns or []))
+    seed.extend(list(persona.defense.escalation_patterns or []))
+    seed.extend(list(persona.defense.defense_mechanisms or []))
+    return _normalize_string_list(seed, limit=8)
+
+
+def validate_persona(persona: StructuredPersona) -> tuple[str, list[str]]:
+    errors: list[str] = []
+    invalid_label = looks_like_garbage_label(persona.identity.label)
+    if invalid_label:
+        errors.append('invalid_label')
+
+    trait_count = len(persona.core.visible_traits) + len(persona.core.hidden_traits)
+    if trait_count < 1:
+        errors.append('missing_traits')
+    elif trait_count < 2:
+        errors.append('insufficient_traits')
+
+    has_depth = any(
+        (
+            len(persona.conflict.internal_contradictions) > 0,
+            len(persona.conflict.dependency_patterns) > 0,
+            len(persona.defense.defense_mechanisms) > 0,
+            len(persona.behavior.communication_style) > 0,
+        )
+    )
+    if not has_depth:
+        errors.append('insufficient_psychological_depth')
+
+    if not persona.meta.hover_text.strip():
+        errors.append('missing_hover_text')
+
+    if len(persona.identity.short_description.strip()) < 20:
+        errors.append('short_description_too_weak')
+
+    core_goal = _infer_core_goal(persona)
+    secondary_goals = _infer_secondary_goals(persona)
+    constraints_internal = _infer_constraints_internal(persona)
+    constraints_social = _infer_constraints_social(persona)
+    allowed_methods = _infer_allowed_methods(persona)
+    maladaptive_methods = _infer_maladaptive_methods(persona)
+    if not core_goal and not secondary_goals:
+        errors.append('missing_goal_structure')
+    if not constraints_internal and not constraints_social:
+        errors.append('missing_constraint_structure')
+    if not allowed_methods and not maladaptive_methods:
+        errors.append('missing_method_structure')
+
+    seed_like = str(persona.identity.readiness or '').strip().lower() == 'seed' or str(persona.identity.persona_type or '').strip().lower() == 'archetype'
+    seed_scaffold_ok = bool(
+        str(persona.identity.label or '').strip()
+        and len(str(persona.identity.short_description or '').strip()) >= 20
+        and str(persona.meta.hover_text or '').strip()
+    )
+    if errors:
+        if invalid_label:
+            return 'rejected', errors
+        if trait_count < 1 and not has_depth:
+            if seed_like and seed_scaffold_ok:
+                return 'partial', list(dict.fromkeys(errors + ['seed_persona_scaffold_only']))
+            return 'rejected', errors
+        return 'partial', errors
+    return 'valid', []
+
+
+def _persona_form_from_structured(persona: StructuredPersona, *, entity_type: str) -> dict[str, Any]:
+    return _validated_persona_form(
+        {
+            'identity_class': _identity_class(entity_type),
+            'core_goal': _infer_core_goal(persona),
+            'secondary_goals': _infer_secondary_goals(persona),
+            'core_self_image': _joined_field(persona.core.self_image),
+            'constraints_internal': _infer_constraints_internal(persona),
+            'constraints_social': _infer_constraints_social(persona),
+            'constraints_hard_system': _normalize_string_list(list(persona.constraints_hard_system or []) + _default_hard_system_constraints(), limit=8),
+            'allowed_methods': _infer_allowed_methods(persona),
+            'maladaptive_methods': _infer_maladaptive_methods(persona),
+            'vulnerabilities': list(persona.core.vulnerabilities),
+            'defense_mechanisms': list(persona.defense.defense_mechanisms),
+            'triggers': list(persona.behavior.triggers),
+            'dependency_patterns': list(persona.conflict.dependency_patterns),
+            'communication_style': list(persona.behavior.communication_style),
+            'internal_contradictions': list(persona.conflict.internal_contradictions),
+            'change_resistance': _listify_text(persona.dynamics.resistance_to_change, limit=8),
+            'growth_dynamics': _listify_text(persona.dynamics.growth_pattern, limit=8),
+            'speech_tendencies': list(persona.behavior.communication_style),
+            'speech_style': list(persona.behavior.communication_style),
+            'decision_patterns': _normalize_string_list(list(persona.core.motivations) + list(persona.core.needs), limit=8),
+            'emotional_tendencies': _normalize_string_list(list(persona.core.hidden_traits) + list(persona.core.fears), limit=8),
+            'conflict_behavior': list(persona.behavior.pressure_response),
+            'values': list(persona.secondary_goals or persona.core.motivations),
+            'response_priorities': _normalize_string_list(list(persona.needs or persona.core.needs) + list(persona.secondary_goals or persona.core.motivations), limit=8),
+        },
+        fallback={},
+    )
+
+
+def _structured_persona_from_payload(
+    name: str,
+    payload: Any,
+    *,
+    fallback_examples: list[str] | None = None,
+    entity_type: str = 'PERSON',
+) -> StructuredPersona:
+    root = dict(payload or {}) if isinstance(payload, dict) else {}
+    if 'structured_persona' in root and isinstance(root.get('structured_persona'), dict):
+        root = dict(root.get('structured_persona') or {})
+    persona_payload_source = root.get('persona_payload') if isinstance(root.get('persona_payload'), dict) else root
+    persona_payload = dict(persona_payload_source or {}) if isinstance(persona_payload_source or {}, dict) else {}
+    nested = root if any(key in root for key in ('identity', 'core', 'conflict', 'defense', 'behavior', 'dynamics', 'meta')) else {}
+    persona_form = (
+        dict(root.get('persona_form') or {})
+        if isinstance(root.get('persona_form') or {}, dict)
+        else dict(persona_payload.get('persona_form') or {})
+        if isinstance(persona_payload.get('persona_form') or {}, dict)
+        else {}
+    )
+    identity_raw = dict(nested.get('identity') or {})
+    core_raw = dict(nested.get('core') or {})
+    conflict_raw = dict(nested.get('conflict') or {})
+    defense_raw = dict(nested.get('defense') or {})
+    behavior_raw = dict(nested.get('behavior') or {})
+    dynamics_raw = dict(nested.get('dynamics') or {})
+    meta_raw = dict(nested.get('meta') or {})
+    top_level_fears = _listify_text(root.get('fears'), limit=10)
+    top_level_needs = _listify_text(root.get('needs'), limit=10)
+    source_text = _first_non_empty_text(
+        identity_raw.get('source_text'),
+        '\n'.join(str(item).strip() for item in list(fallback_examples or []) if str(item).strip()),
+    )
+    visible_traits = _listify_text(core_raw.get('visible_traits') or persona_payload.get('traits'), limit=12)
+    hidden_traits = _listify_text(core_raw.get('hidden_traits') or persona_form.get('emotional_tendencies'), limit=12)
+    persona = StructuredPersona(
+        identity=PersonaIdentity(
+            label=_first_non_empty_text(identity_raw.get('label'), persona_payload.get('name'), name),
+            short_description=_first_non_empty_text(
+                identity_raw.get('short_description'),
+                meta_raw.get('hover_text'),
+                root.get('decision_explanation'),
+                persona_payload.get('knowledge'),
+            ),
+            persona_type=_coerce_persona_type(
+                identity_raw.get('persona_type'),
+                entity_type=entity_type,
+                visible_traits=visible_traits,
+                hidden_traits=hidden_traits,
+            ),
+            source_text=source_text,
+            readiness='draft',
+        ),
+        core_goal=_first_non_empty_text(
+            root.get('core_goal'),
+            persona_form.get('core_goal'),
+            persona_form.get('primary_goal'),
+        ),
+        secondary_goals=_listify_text(
+            root.get('secondary_goals') or persona_form.get('secondary_goals'),
+            limit=8,
+        ),
+        fears=top_level_fears,
+        needs=top_level_needs,
+        constraints_internal=_listify_text(
+            root.get('constraints_internal') or persona_form.get('constraints_internal'),
+            limit=8,
+        ),
+        constraints_social=_listify_text(
+            root.get('constraints_social') or persona_form.get('constraints_social'),
+            limit=8,
+        ),
+        constraints_hard_system=_listify_text(
+            root.get('constraints_hard_system') or persona_form.get('constraints_hard_system'),
+            limit=8,
+        ),
+        allowed_methods=_listify_text(
+            root.get('allowed_methods') or persona_form.get('allowed_methods'),
+            limit=8,
+        ),
+        maladaptive_methods=_listify_text(
+            root.get('maladaptive_methods') or persona_form.get('maladaptive_methods'),
+            limit=8,
+        ),
+        core=PersonaCore(
+            self_image=_listify_text(core_raw.get('self_image') or persona_form.get('core_self_image'), limit=8),
+            visible_traits=visible_traits,
+            hidden_traits=hidden_traits,
+            motivations=_listify_text(core_raw.get('motivations') or persona_form.get('values') or persona_form.get('response_priorities'), limit=10),
+            fears=_listify_text(core_raw.get('fears') or root.get('fears') or persona_form.get('triggers'), limit=10),
+            needs=_listify_text(core_raw.get('needs') or root.get('needs') or persona_form.get('response_priorities'), limit=10),
+            vulnerabilities=_listify_text(core_raw.get('vulnerabilities') or persona_form.get('vulnerabilities'), limit=10),
+        ),
+        conflict=PersonaConflict(
+            internal_contradictions=_listify_text(conflict_raw.get('internal_contradictions') or persona_form.get('internal_contradictions') or persona_form.get('conflicts'), limit=10),
+            shame_points=_listify_text(conflict_raw.get('shame_points'), limit=10),
+            dependency_patterns=_listify_text(conflict_raw.get('dependency_patterns') or persona_form.get('dependency_patterns'), limit=10),
+            resentment_patterns=_listify_text(conflict_raw.get('resentment_patterns') or persona_form.get('conflict_behavior'), limit=10),
+        ),
+        defense=PersonaDefense(
+            defense_mechanisms=_listify_text(defense_raw.get('defense_mechanisms') or persona_form.get('defense_mechanisms'), limit=10),
+            self_justifications=_listify_text(defense_raw.get('self_justifications'), limit=10),
+            avoidance_patterns=_listify_text(defense_raw.get('avoidance_patterns') or persona_form.get('reaction_patterns'), limit=10),
+            escalation_patterns=_listify_text(defense_raw.get('escalation_patterns') or persona_form.get('conflict_behavior'), limit=10),
+        ),
+        behavior=PersonaBehavior(
+            communication_style=_listify_text(behavior_raw.get('communication_style') or persona_form.get('communication_style') or persona_form.get('speech_tendencies'), limit=10),
+            triggers=_listify_text(behavior_raw.get('triggers') or persona_form.get('triggers'), limit=10),
+            pressure_response=_listify_text(behavior_raw.get('pressure_response') or persona_form.get('conflict_behavior') or persona_form.get('reaction_patterns'), limit=10),
+            attachment_style=_first_non_empty_text(behavior_raw.get('attachment_style')),
+            refusal_style=_first_non_empty_text(behavior_raw.get('refusal_style')),
+        ),
+        dynamics=PersonaDynamics(
+            resistance_to_change=_first_non_empty_text(dynamics_raw.get('resistance_to_change'), _joined_field(persona_form.get('change_resistance'))),
+            growth_pattern=_first_non_empty_text(dynamics_raw.get('growth_pattern'), _joined_field(persona_form.get('growth_dynamics'))),
+            likely_change_direction=_coerce_change_direction(dynamics_raw.get('likely_change_direction')),
+            softening_conditions=_listify_text(dynamics_raw.get('softening_conditions'), limit=8),
+            darkening_conditions=_listify_text(dynamics_raw.get('darkening_conditions'), limit=8),
+        ),
+        meta=PersonaMeta(
+            tags=_listify_text(meta_raw.get('tags') or persona_payload.get('traits'), limit=12),
+            hover_text=_first_non_empty_text(meta_raw.get('hover_text')),
+            validation_status='partial',
+            validation_notes=_listify_text(meta_raw.get('validation_notes'), limit=8),
+            confidence=float(meta_raw.get('confidence') or 0.0),
+        ),
+    )
+    if not persona.identity.label or looks_like_garbage_label(persona.identity.label):
+        persona.identity.label = _suggest_persona_label(persona)
+    if not persona.identity.short_description.strip():
+        persona.identity.short_description = _default_short_description(persona)
+    persona.core_goal = _infer_core_goal(persona)
+    persona.secondary_goals = _infer_secondary_goals(persona)
+    persona.fears = _normalize_string_list(list(persona.fears or []) + list(persona.core.fears or []), limit=10)
+    persona.needs = _normalize_string_list(list(persona.needs or []) + list(persona.core.needs or []), limit=10)
+    persona.constraints_internal = _infer_constraints_internal(persona)
+    persona.constraints_social = _infer_constraints_social(persona)
+    persona.constraints_hard_system = _normalize_string_list(
+        list(persona.constraints_hard_system or []) + _default_hard_system_constraints(),
+        limit=8,
+    )
+    persona.allowed_methods = _infer_allowed_methods(persona)
+    persona.maladaptive_methods = _infer_maladaptive_methods(persona)
+    if not persona.meta.hover_text.strip():
+        persona.meta.hover_text = _default_hover_text(persona)
+    persona.identity.readiness = _first_non_empty_text(identity_raw.get('readiness')) or _infer_persona_readiness(persona)
+    if persona.identity.readiness not in {'seed', 'draft', 'full'}:
+        persona.identity.readiness = _infer_persona_readiness(persona)
+    status, errors = validate_persona(persona)
+    persona.meta.validation_status = status  # type: ignore[assignment]
+    persona.meta.validation_notes = _normalize_string_list(list(persona.meta.validation_notes) + list(errors), limit=10)
+    if not persona.meta.confidence:
+        persona.meta.confidence = 0.91 if status == 'valid' else 0.66 if status == 'partial' else 0.12
+    return persona
+
+def _meaningful_trait_count(traits: list[str]) -> int:
+    count = 0
+    for trait in list(traits or []):
+        clean = normalize_name(trait)
+        if not clean:
+            continue
+        tokens = [token for token in clean.split() if token]
+        if len(tokens) == 1 and tokens[0] in _GENERIC_PERSONA_TOKENS:
+            continue
+        count += 1
+    return count
+
+
+def _behavior_relation_count(relations: list[dict[str, Any]]) -> int:
+    count = 0
+    for item in list(relations or []):
+        relation_type = str(item.get('type') or '').strip().upper()
+        target = normalize_name(str(item.get('target') or item.get('to') or ''))
+        if not relation_type or not target:
+            continue
+        if relation_type in _BEHAVIOR_RELATION_TYPES:
+            count += 1
+    return count
+
+
+def _text_has_behavioral_signals(*parts: str) -> bool:
+    lowered = normalize_name(' '.join(str(part or '').strip() for part in parts if str(part or '').strip()))
+    return any(marker in lowered for marker in _BEHAVIOR_TEXT_MARKERS)
+
+
+def _structured_field_count(persona_form: dict[str, Any]) -> int:
+    count = 0
+    for key in _STRUCTURED_PERSONA_FORM_KEYS:
+        value = persona_form.get(key)
+        if isinstance(value, str) and str(value).strip():
+            count += 1
+        elif isinstance(value, list) and any(str(item).strip() for item in value):
+            count += 1
+    return count
+
+
+def _persona_name_rejection_reasons(name: str) -> list[str]:
+    clean = ' '.join(str(name or '').strip().split())
+    normalized = normalize_name(clean)
+    if not normalized:
+        return ['empty_name']
+    reasons: list[str] = []
+    tokens = [token for token in re.split(r'[\s_]+', normalized) if token]
+    if normalize_text(clean) in _REJECT_EXACT:
+        reasons.append('generic_ontology_or_media_label')
+    if any(part in normalize_text(clean) for part in _REJECT_SUBSTRINGS):
+        reasons.append('prompt_fragment_name')
+    if normalized in {'unknown_head', 'new_head'}:
+        reasons.append('unknown_placeholder_name')
+    if len(clean) < 3:
+        reasons.append('name_too_short')
+    if len(tokens) > 6:
+        reasons.append('name_too_long_for_persona_label')
+    if normalized in _GENERIC_PERSONA_NAMES:
+        reasons.append('generic_ontology_or_media_label')
+    if tokens and all(token in _GENERIC_PERSONA_TOKENS for token in tokens):
+        reasons.append('generic_token_only_name')
+    if any(token in _PROMPT_FRAGMENT_TOKENS for token in tokens):
+        reasons.append('prompt_fragment_name')
+    if re.search(r'[?!]', clean):
+        reasons.append('query_like_name')
+    if clean.count('/') >= 2 or clean.count('\\') >= 2:
+        reasons.append('path_like_or_comment_fragment')
+    if ':' in clean and len(tokens) <= 3:
+        reasons.append('metadata_style_name')
+    if any(token in normalized for token in ('питаешься', 'будешь', 'действовать', 'использует', 'clarify', 'context')):
+        reasons.append('verb_heavy_prompt_leftover')
+    return list(dict.fromkeys(reasons))
+
+
+def validate_persona_candidate(
+    name: str,
+    *,
+    entity_type: str,
+    traits: list[str],
+    relations: list[dict[str, Any]],
+    examples: list[str],
+    knowledge: str,
+    persona_form: dict[str, Any],
+    decision_explanation: str,
+    structured_persona: StructuredPersona | None = None,
+    explicit: bool,
+    source: str,
+) -> dict[str, Any]:
+    persona = structured_persona or _structured_persona_from_payload(
+        name,
+        {
+            'persona_payload': {
+                'name': name,
+                'entity_type': entity_type,
+                'traits': list(traits or []),
+                'knowledge': knowledge,
+            },
+            'persona_form': dict(persona_form or {}),
+            'decision_explanation': decision_explanation,
+        },
+        fallback_examples=list(examples or []),
+        entity_type=entity_type,
+    )
+    validation_status, validation_notes = validate_persona(persona)
+    reasons = list(dict.fromkeys(_persona_name_rejection_reasons(name) + list(validation_notes)))
+    trait_count = _meaningful_trait_count(traits)
+    relation_count = _behavior_relation_count(relations)
+    structured_count = _structured_field_count(persona_form)
+    behavior_text = bool(examples) and _text_has_behavioral_signals(*examples)
+    knowledge_behavior = _text_has_behavioral_signals(knowledge, decision_explanation)
+    has_identity_frame = bool(str(persona_form.get('identity_class') or '').strip())
+    has_communication = bool(
+        list(persona_form.get('communication_style') or [])
+        or list(persona_form.get('speech_style') or [])
+        or list(persona_form.get('speech_tendencies') or [])
+    )
+    has_goal_structure = bool(
+        str(persona_form.get('core_goal') or '').strip()
+        or list(persona_form.get('secondary_goals') or [])
+        or str(persona.core_goal or '').strip()
+        or list(persona.secondary_goals or [])
+    )
+    has_constraint_structure = bool(
+        list(persona_form.get('constraints_internal') or [])
+        or list(persona_form.get('constraints_social') or [])
+        or list(persona_form.get('constraints_hard_system') or [])
+        or list(persona.constraints_internal or [])
+        or list(persona.constraints_social or [])
+        or list(persona.constraints_hard_system or [])
+    )
+    has_method_structure = bool(
+        list(persona_form.get('allowed_methods') or [])
+        or list(persona_form.get('maladaptive_methods') or [])
+        or list(persona.allowed_methods or [])
+        or list(persona.maladaptive_methods or [])
+    )
+    has_inner_conflict = bool(
+        list(persona_form.get('vulnerabilities') or [])
+        or list(persona_form.get('internal_contradictions') or [])
+        or list(persona_form.get('conflicts') or [])
+    )
+    has_motivation = bool(
+        list(persona_form.get('dependency_patterns') or [])
+        or list(persona_form.get('growth_dynamics') or [])
+        or list(persona_form.get('values') or [])
+        or list(persona_form.get('response_priorities') or [])
+    )
+    evidence_units = sum(
+        1
+        for item in (
+            trait_count >= 2,
+            relation_count >= 1,
+            behavior_text,
+            knowledge_behavior,
+            structured_count >= 3,
+            has_goal_structure,
+            has_constraint_structure,
+            has_method_structure,
+            has_communication,
+            has_inner_conflict,
+            has_motivation,
+        )
+        if item
+    )
+    if str(entity_type or '').strip().upper() not in HEAD_ENTITY_TYPES:
+        reasons.append('non_persona_entity_type')
+    if explicit:
+        if not has_identity_frame and validation_status == 'rejected':
+            reasons.append('missing_identity_framing')
+        if structured_count < 3:
+            reasons.append('insufficient_structured_persona_fields')
+        if not has_goal_structure:
+            reasons.append('missing_goal_structure')
+        if not has_constraint_structure:
+            reasons.append('missing_constraint_structure')
+        if not has_method_structure:
+            reasons.append('missing_method_structure')
+        if not (has_communication or has_inner_conflict or has_motivation):
+            reasons.append('missing_behavioral_personality_structure')
+    else:
+        if evidence_units < 2 or not (trait_count >= 2 or relation_count >= 1 or behavior_text or knowledge_behavior):
+            reasons.append('insufficient_behavioral_evidence')
+    reasons = list(dict.fromkeys(reasons))
+    return {
+        'ok': validation_status != 'rejected' and not _persona_name_rejection_reasons(name),
+        'validation_status': validation_status,
+        'reason_codes': reasons,
+        'structured_persona': persona.to_dict(),
+        'evidence': {
+            'entity_type': str(entity_type or '').strip().upper(),
+            'trait_count': int(trait_count),
+            'relation_count': int(relation_count),
+            'structured_field_count': int(structured_count),
+            'behavior_text': bool(behavior_text),
+            'knowledge_behavior': bool(knowledge_behavior),
+            'has_identity_frame': bool(has_identity_frame),
+            'has_communication': bool(has_communication),
+            'has_goal_structure': bool(has_goal_structure),
+            'has_constraint_structure': bool(has_constraint_structure),
+            'has_method_structure': bool(has_method_structure),
+            'has_inner_conflict': bool(has_inner_conflict),
+            'has_motivation': bool(has_motivation),
+            'evidence_units': int(evidence_units),
+            'explicit': bool(explicit),
+            'source': str(source or '').strip(),
+            'readiness': persona.identity.readiness,
+            'validation_status': validation_status,
+        },
+    }
+
+
+def _quarantine_persona_directory(name: str, *, reason_codes: list[str], source: str, evidence: dict[str, Any] | None = None) -> str:
+    clean = normalize_personality_name(name)
+    source_path = _head_dir(clean)
+    if source_path.exists():
+        target = rejected_candidates_dir() / f'{clean}__{datetime.now(UTC).strftime("%Y%m%d%H%M%S")}'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.move(str(source_path), str(target))
+        archive_path = str(target)
+    else:
+        archive_path = ''
+    _append_rejected_candidate_log(
+        name=name,
+        slug=clean,
+        reason_codes=reason_codes,
+        source=source,
+        evidence=evidence,
+    )
+    return archive_path
+
+
+def _registry_validation_from_bundle(bundle: HeadBundle) -> dict[str, Any]:
+    return validate_persona_candidate(
+        bundle.name,
+        entity_type=bundle.entity_type,
+        traits=list(bundle.traits),
+        relations=[dict(item) for item in list(bundle.relations or [])],
+        examples=list(bundle.examples),
+        knowledge=str(bundle.knowledge or '').strip(),
+        persona_form=dict(bundle.persona_form or {}),
+        decision_explanation=str(bundle.decision_explanation or '').strip(),
+        structured_persona=bundle.structured_persona,
+        explicit=True,
+        source=str(bundle.meta.get('source') or 'registry'),
+    )
+
+
 def _load_index() -> list[str]:
     payload = load_json(personality_index_path(), {'heads': []})
     rows = payload.get('heads') if isinstance(payload, dict) else []
@@ -506,6 +1654,50 @@ def _save_index(names: list[str]) -> None:
         seen.add(clean)
         ordered.append(clean)
     write_json(personality_index_path(), {'heads': ordered})
+
+
+def ensure_persona_registry_hygiene() -> dict[str, Any]:
+    with _REGISTRY_LOCK:
+        original_index = list(_load_index())
+        active_rows: list[str] = []
+        rejected: list[dict[str, Any]] = []
+        for name in original_index:
+            bundle = load_persona(name)
+            if bundle is None:
+                rejected.append({'name': name, 'reason_codes': ['missing_persona_files']})
+                continue
+            validation = _registry_validation_from_bundle(bundle)
+            if validation.get('ok'):
+                active_rows.append(normalize_personality_name(bundle.name))
+                continue
+            archive_path = _quarantine_persona_directory(
+                bundle.name,
+                reason_codes=list(validation.get('reason_codes') or []),
+                source='registry_hygiene',
+                evidence=dict(validation.get('evidence') or {}),
+            )
+            rejected.append(
+                {
+                    'name': bundle.name,
+                    'reason_codes': list(validation.get('reason_codes') or []),
+                    'archive_path': archive_path,
+                }
+            )
+        active_rows = list(dict.fromkeys(active_rows))
+        if active_rows != original_index:
+            _save_index(active_rows)
+        return {
+            'ok': True,
+            'active_count': len(active_rows),
+            'rejected_count': len(rejected),
+            'rejected': rejected,
+        }
+
+
+def persona_is_registered(name: str) -> bool:
+    clean = normalize_personality_name(name)
+    ensure_persona_registry_hygiene()
+    return clean in _load_index()
 
 
 def _ensure_head_files(name: str, *, entity_type: str = 'CONCEPT', aliases: list[str] | None = None, source: str = 'system') -> None:
@@ -539,6 +1731,7 @@ def _ensure_head_files(name: str, *, entity_type: str = 'CONCEPT', aliases: list
             'last_baseline_update_at': timestamp,
             'last_dynamic_update_at': timestamp,
             'last_learned_update_at': timestamp,
+            'registry_status': _PERSONA_REGISTRY_STATUS_DRAFT,
         },
         'local_graph.json': {'nodes': [], 'edges': []},
         'baseline.json': {
@@ -570,6 +1763,7 @@ def _ensure_head_files(name: str, *, entity_type: str = 'CONCEPT', aliases: list
             'revision': 1,
             'updated_at': timestamp,
         },
+        'structured_persona.json': {},
         'revisions.json': {
             'current': {
                 'revision': 1,
@@ -606,6 +1800,7 @@ def load_persona(name: str) -> HeadBundle | None:
     emotion_payload = load_json(_head_file(clean, 'emotion_vector.json'), _default_emotion_vector())
     log_payload = load_json(_head_file(clean, 'log_tuples.json'), {'items': []})
     persona_form_payload = load_json(_head_file(clean, 'persona_form.json'), {})
+    structured_persona_payload = load_json(_structured_persona_path(clean), {})
     meta_payload = load_json(_head_file(clean, 'meta.json'), {})
     knowledge = _head_file(clean, 'knowledge.txt').read_text(encoding='utf-8') if _head_file(clean, 'knowledge.txt').exists() else ''
     decision_explanation = (
@@ -671,6 +1866,34 @@ def load_persona(name: str) -> HeadBundle | None:
             updated_at=str(learned_payload.get('updated_at') or learned.updated_at),
         )
     indicators = _compute_persona_indicators(baseline, dynamic, learned, _build_revision_meta(meta_payload, revision_payload))
+    structured_persona = _structured_persona_from_payload(
+        clean,
+        structured_persona_payload if isinstance(structured_persona_payload, dict) and structured_persona_payload else {
+            'identity': {
+                'label': str(meta_payload.get('display_label') or meta_payload.get('name') or baseline.name or clean),
+                'short_description': str(meta_payload.get('short_description') or ''),
+                'persona_type': str(meta_payload.get('persona_type') or ''),
+                'source_text': str(meta_payload.get('source_text') or ''),
+                'readiness': str(meta_payload.get('readiness') or ''),
+            },
+            'persona_payload': {
+                'name': str(meta_payload.get('name') or baseline.name or clean),
+                'entity_type': str(baseline.entity_type or meta_payload.get('entity_type') or 'PERSON'),
+                'traits': list(baseline.traits),
+                'knowledge': str(baseline.knowledge or ''),
+            },
+            'persona_form': dict(learned.persona_form),
+            'meta': {
+                'hover_text': str(meta_payload.get('hover_text') or ''),
+                'validation_status': str(meta_payload.get('validation_status') or ''),
+                'validation_notes': list(meta_payload.get('validation_notes') or []),
+                'confidence': float(meta_payload.get('persona_confidence') or 0.0),
+                'tags': list(meta_payload.get('persona_tags') or []),
+            },
+        },
+        fallback_examples=list(learned.examples),
+        entity_type=str(baseline.entity_type or meta_payload.get('entity_type') or 'PERSON'),
+    )
     return HeadBundle(
         name=str(meta_payload.get('name') or baseline.name or clean),
         folder=str(_head_dir(clean)),
@@ -690,7 +1913,31 @@ def load_persona(name: str) -> HeadBundle | None:
         learned_patterns=learned,
         indicators=indicators,
         revision_meta=_build_revision_meta(meta_payload, revision_payload),
+        structured_persona=structured_persona,
     )
+
+
+def load_active_persona(name: str) -> HeadBundle | None:
+    clean = normalize_personality_name(name)
+    ensure_persona_registry_hygiene()
+    if clean not in _load_index():
+        return None
+    return load_persona(clean)
+
+
+def _load_mutable_active_persona(name: str) -> HeadBundle | None:
+    clean = normalize_personality_name(name)
+    if not clean:
+        return None
+    active = load_active_persona(clean)
+    if active is not None:
+        return active
+    draft = load_persona(clean)
+    if draft is None:
+        return None
+    if _persona_name_rejection_reasons(draft.name):
+        return None
+    return draft
 
 
 def load_persona_graph(name: str) -> dict[str, Any]:
@@ -699,18 +1946,34 @@ def load_persona_graph(name: str) -> dict[str, Any]:
 
 
 def list_personas() -> list[dict[str, Any]]:
+    ensure_persona_registry_hygiene()
     rows: list[dict[str, Any]] = []
     for name in _load_index():
         bundle = load_persona(name)
         if bundle is None:
             continue
+        persona = bundle.structured_persona or _structured_persona_from_payload(
+            bundle.name,
+            {'persona_payload': {'name': bundle.name, 'entity_type': bundle.entity_type, 'traits': list(bundle.traits), 'knowledge': bundle.knowledge}, 'persona_form': dict(bundle.persona_form)},
+            fallback_examples=list(bundle.examples),
+            entity_type=bundle.entity_type,
+        )
         rows.append(
             {
                 'name': bundle.name,
                 'slug': bundle.meta.get('slug') or normalize_personality_name(bundle.name),
+                'label': persona.identity.label,
+                'short_description': persona.identity.short_description,
+                'readiness': persona.identity.readiness,
                 'entity_type': bundle.entity_type,
                 'emotion_vector': bundle.emotion_vector,
                 'folder': bundle.folder,
+                'validation_status': persona.meta.validation_status,
+                'validation_notes': list(persona.meta.validation_notes),
+                'hover_text': persona.meta.hover_text,
+                'confidence': persona.meta.confidence,
+                'tags': list(persona.meta.tags),
+                'indicators': bundle.indicators.to_dict() if bundle.indicators is not None else {},
             }
         )
     return rows
@@ -728,6 +1991,310 @@ def _detect_traits(examples: list[str]) -> list[str]:
     if any(token in text for token in ('kind', 'gentle', 'эмпат', 'добр')):
         traits.append('empathetic')
     return list(dict.fromkeys(traits))
+
+
+def _collect_marker_hits(text: str, markers: tuple[tuple[str, str], ...], *, limit: int) -> list[str]:
+    lowered = normalize_name(text)
+    hits: list[str] = []
+    seen: set[str] = set()
+    for marker, label in markers:
+        normalized_marker = normalize_name(marker)
+        if not normalized_marker or normalized_marker not in lowered:
+            continue
+        if label in seen:
+            continue
+        seen.add(label)
+        hits.append(label)
+        if len(hits) >= max(int(limit or 0), 1):
+            break
+    return hits
+
+
+def _infer_persona_label_from_examples(name: str, excerpts: list[str]) -> str:
+    clean_name = str(name or '').strip()
+    if clean_name:
+        return clean_name
+    combined = normalize_name(' '.join(excerpts))
+    for marker, label in (
+        ('вампир', 'Vampire Persona'),
+        ('vampire', 'Vampire Persona'),
+        ('капитан', 'Captain Persona'),
+        ('captain', 'Captain Persona'),
+        ('врач', 'Doctor Persona'),
+        ('doctor', 'Doctor Persona'),
+        ('юрист', 'Lawyer Persona'),
+        ('lawyer', 'Lawyer Persona'),
+    ):
+        if marker in combined:
+            return label
+    return 'Custom Persona'
+
+
+def _heuristic_persona_payload(
+    name: str,
+    excerpts: list[str],
+    *,
+    existing_bundle: HeadBundle | None = None,
+    relations: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    combined = ' '.join(str(item or '').strip() for item in list(excerpts or []) if str(item or '').strip())
+    inferred_name = _infer_persona_label_from_examples(name, excerpts)
+    traits = _normalize_string_list(
+        list(existing_bundle.traits if existing_bundle is not None else [])
+        + _collect_marker_hits(combined, _HEURISTIC_TRAIT_MARKERS, limit=10)
+        + _detect_traits(excerpts),
+        limit=_memory_limits().persona_trait_limit,
+    )
+    vulnerabilities = _collect_marker_hits(combined, _HEURISTIC_VULNERABILITY_MARKERS, limit=8)
+    defenses = _collect_marker_hits(combined, _HEURISTIC_DEFENSE_MARKERS, limit=8)
+    triggers = _collect_marker_hits(combined, _HEURISTIC_TRIGGER_MARKERS, limit=8)
+    dependency_patterns = _collect_marker_hits(combined, _HEURISTIC_DEPENDENCY_MARKERS, limit=8)
+    communication_style = _collect_marker_hits(combined, _HEURISTIC_COMMUNICATION_MARKERS, limit=8)
+    emotional_tendencies = _normalize_string_list(
+        [trait for trait in traits if trait in {'shy', 'hesitant', 'anxious', 'proud', 'attached', 'jealous', 'ashamed'}],
+        limit=8,
+    )
+    contradictions: list[str] = []
+    normalized_text = normalize_name(combined)
+    for marker_pair, description in _HEURISTIC_CONTRADICTION_MARKERS:
+        if all(any(normalize_name(marker) in normalized_text for marker in group) for group in marker_pair):
+            contradictions.append(description)
+    decision_patterns: list[str] = []
+    if any(item in traits for item in {'cautious', 'anxious', 'hesitant'}):
+        decision_patterns.append('slows down before committing to an emotionally risky move')
+    if any(item in traits for item in {'proud', 'restrained'}):
+        decision_patterns.append('protects dignity before making a confession or request')
+    if dependency_patterns:
+        decision_patterns.append('tests whether attachment is being used before offering more access')
+    if not decision_patterns:
+        decision_patterns.append('tries to read the emotional cost before acting')
+    speech_tendencies = list(communication_style)
+    if 'hesitant and self-editing' in speech_tendencies:
+        speech_tendencies.append('uses pauses and unfinished starts under emotional pressure')
+    growth_dynamics = []
+    if dependency_patterns or triggers:
+        growth_dynamics.append('can grow by setting boundaries before attachment turns into self-erasure')
+    if contradictions:
+        growth_dynamics.append('improves when pride stops blocking honest self-protection')
+    change_resistance = []
+    if any(item in traits for item in {'proud', 'cautious', 'restrained'}):
+        change_resistance.append('resists asking for help because it feels like visible weakness')
+    if any(item in traits for item in {'attached', 'shy'}):
+        change_resistance.append('hesitates to break attachment even when the pattern is harmful')
+    core_self_image_parts: list[str] = []
+    if 'proud' in traits:
+        core_self_image_parts.append('someone who must preserve dignity')
+    if 'shy' in traits or 'hesitant' in traits:
+        core_self_image_parts.append('someone who exposes feelings reluctantly')
+    if 'attached' in traits:
+        core_self_image_parts.append('someone whose attachment can override caution')
+    core_self_image = ', '.join(core_self_image_parts[:3]) or 'someone trying to protect self-respect under emotional pressure'
+    core_goal = (
+        'preserve dignity without losing the emotionally significant bond'
+        if dependency_patterns or 'proud' in traits
+        else 'protect a coherent sense of self under pressure'
+    )
+    secondary_goals = _normalize_string_list(
+        ['avoid humiliation', 'keep emotional significance', 'avoid visible neediness'],
+        limit=8,
+    )
+    constraints_internal = _normalize_string_list(
+        [
+            'cannot admit vulnerability directly' if any(item in traits for item in {'proud', 'shy', 'hesitant'}) else '',
+            'cannot confess attachment cleanly' if dependency_patterns else '',
+        ],
+        limit=8,
+    )
+    constraints_social = _normalize_string_list(
+        [
+            'cannot fully destroy the relationship frame' if dependency_patterns else '',
+            'cannot behave too openly desperate' if dependency_patterns or 'attached' in traits else '',
+        ],
+        limit=8,
+    )
+    allowed_methods = _normalize_string_list(
+        decision_patterns + ['probe indirectly', 'withdraw before full collapse'],
+        limit=8,
+    )
+    maladaptive_methods = _normalize_string_list(
+        list(defenses) + ['endure too long', 'mask dependence with usefulness'] if dependency_patterns else list(defenses),
+        limit=8,
+    )
+    heuristic_form = {
+        'identity_class': str((existing_bundle.persona_form if existing_bundle is not None else {}).get('identity_class') or 'human'),
+        'core_goal': core_goal,
+        'secondary_goals': secondary_goals,
+        'core_self_image': core_self_image,
+        'constraints_internal': constraints_internal,
+        'constraints_social': constraints_social,
+        'constraints_hard_system': _default_hard_system_constraints(),
+        'allowed_methods': allowed_methods,
+        'maladaptive_methods': maladaptive_methods,
+        'vulnerabilities': vulnerabilities,
+        'defense_mechanisms': defenses,
+        'triggers': triggers,
+        'dependency_patterns': dependency_patterns,
+        'communication_style': communication_style or ['guarded and direct'],
+        'internal_contradictions': contradictions,
+        'change_resistance': change_resistance,
+        'growth_dynamics': growth_dynamics,
+        'decision_patterns': decision_patterns,
+        'speech_tendencies': speech_tendencies,
+        'emotional_tendencies': emotional_tendencies,
+        'conflict_behavior': _normalize_string_list(
+            ['withdraws to regain dignity', 'sets a boundary when exploitation becomes explicit'] if triggers else ['tests intent before escalating conflict'],
+            limit=8,
+        ),
+    }
+    relation_rows = _validate_relations(list(existing_bundle.relations if existing_bundle is not None else []) + list(relations or []))
+    if any(marker in normalized_text for marker in ('использует', 'used', 'manipulat', 'гоняет')):
+        relation_rows = _validate_relations(relation_rows + [{'type': 'RESENTS', 'target': 'exploitative attachment', 'weight': 0.82}])
+    if any(marker in normalized_text for marker in ('влюб', 'in love', 'likes him', 'likes her')):
+        relation_rows = _validate_relations(relation_rows + [{'type': 'DESIRES', 'target': 'desired person', 'weight': 0.86}])
+    knowledge = combined[: _memory_limits().persona_knowledge_char_limit]
+    structured_persona = _structured_persona_from_payload(
+        inferred_name,
+        {
+            'identity': {
+                'label': inferred_name,
+                'short_description': _first_non_empty_text(
+                    '',
+                    f'{", ".join(traits[:3])} persona shaped by pride, attachment, and defensive self-protection.' if traits else '',
+                ),
+                'persona_type': 'psychological' if contradictions or dependency_patterns or defenses else 'hybrid',
+                'source_text': combined,
+            },
+            'core_goal': core_goal,
+            'secondary_goals': secondary_goals,
+            'fears': ['being used', 'being exposed as weak'] if triggers or vulnerabilities else [],
+            'needs': ['respect', 'emotional significance'] if traits else [],
+            'constraints_internal': constraints_internal,
+            'constraints_social': constraints_social,
+            'constraints_hard_system': _default_hard_system_constraints(),
+            'allowed_methods': allowed_methods,
+            'maladaptive_methods': maladaptive_methods,
+            'core': {
+                'self_image': _listify_text(core_self_image, limit=8),
+                'visible_traits': list(traits[:8]),
+                'hidden_traits': list(emotional_tendencies[:8]),
+                'motivations': ['preserve dignity', 'avoid humiliation'] if any(item in traits for item in {'proud', 'restrained'}) else [],
+                'fears': ['being used', 'being exposed as weak'] if triggers or vulnerabilities else [],
+                'needs': ['respect', 'emotional significance'] if traits else [],
+                'vulnerabilities': list(vulnerabilities[:8]),
+            },
+            'conflict': {
+                'internal_contradictions': list(contradictions[:8]),
+                'dependency_patterns': list(dependency_patterns[:8]),
+                'resentment_patterns': ['resentment builds when attachment turns into exploitation'] if dependency_patterns else [],
+            },
+            'defense': {
+                'defense_mechanisms': list(defenses[:8]),
+                'avoidance_patterns': ['avoids direct confession under emotional pressure'] if any(item in traits for item in {'shy', 'hesitant', 'restrained'}) else [],
+                'escalation_patterns': ['withdraws first, then hardens into biting self-protection'] if triggers else [],
+            },
+            'behavior': {
+                'communication_style': list((communication_style or ['guarded and direct'])[:8]),
+                'triggers': list(triggers[:8]),
+                'pressure_response': list((heuristic_form.get('conflict_behavior') or [])[:8]),
+                'attachment_style': 'anxious-dependent' if dependency_patterns else None,
+                'refusal_style': 'struggles to refuse directly when attachment is active' if dependency_patterns else None,
+            },
+            'dynamics': {
+                'resistance_to_change': _joined_field(change_resistance),
+                'growth_pattern': _joined_field(growth_dynamics),
+                'likely_change_direction': 'unstable',
+            },
+            'meta': {
+                'tags': list(traits[:8]),
+            },
+        },
+        fallback_examples=list(excerpts),
+        entity_type=str(existing_bundle.entity_type if existing_bundle is not None else 'PERSON'),
+    )
+    return {
+        'name': inferred_name,
+        'entity_type': str(existing_bundle.entity_type if existing_bundle is not None else 'PERSON'),
+        'traits': traits,
+        'examples': list(excerpts),
+        'relations': relation_rows,
+        'knowledge': knowledge,
+        'structured_persona': structured_persona.to_dict(),
+        'persona_form': heuristic_form,
+        'decision_explanation': _default_decision_explanation(inferred_name, _validated_persona_form(heuristic_form, fallback=_default_persona_form(
+            inferred_name,
+            entity_type=str(existing_bundle.entity_type if existing_bundle is not None else 'PERSON'),
+            traits=traits,
+            relations=relation_rows,
+            examples=list(excerpts),
+            log_tuples=list(existing_bundle.log_tuples if existing_bundle is not None else []),
+            existing_form=dict(existing_bundle.persona_form) if existing_bundle is not None else {},
+        ))),
+    }
+
+
+def _merge_persona_payloads(primary: dict[str, Any], secondary: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(primary or {})
+    for key, value in dict(secondary or {}).items():
+        if key == 'traits':
+            merged[key] = _normalize_string_list(
+                list(primary.get(key) or []) + list(value or []),
+                limit=_memory_limits().persona_trait_limit,
+            )
+        elif key == 'aliases':
+            merged[key] = merge_aliases(list(primary.get(key) or []), list(value or []))
+        elif key == 'examples':
+            merged[key] = _normalize_string_list(
+                list(primary.get(key) or []) + list(value or []),
+                limit=_memory_limits().persona_example_limit,
+            )
+        elif key == 'relations':
+            merged[key] = _validate_relations(list(primary.get(key) or []) + list(value or []))
+        elif key == 'persona_form':
+            base_form = dict(primary.get('persona_form') or {})
+            extra_form = dict(value or {}) if isinstance(value, dict) else {}
+            merged[key] = _validated_persona_form(extra_form, fallback=_validated_persona_form(base_form, fallback=base_form or {}))
+        elif key == 'structured_persona':
+            base_persona = dict(primary.get('structured_persona') or {})
+            extra_persona = dict(value or {}) if isinstance(value, dict) else {}
+            merged[key] = {
+                **base_persona,
+                **extra_persona,
+                'identity': {
+                    **dict(base_persona.get('identity') or {}),
+                    **dict(extra_persona.get('identity') or {}),
+                },
+                'core': {
+                    **dict(base_persona.get('core') or {}),
+                    **dict(extra_persona.get('core') or {}),
+                },
+                'conflict': {
+                    **dict(base_persona.get('conflict') or {}),
+                    **dict(extra_persona.get('conflict') or {}),
+                },
+                'defense': {
+                    **dict(base_persona.get('defense') or {}),
+                    **dict(extra_persona.get('defense') or {}),
+                },
+                'behavior': {
+                    **dict(base_persona.get('behavior') or {}),
+                    **dict(extra_persona.get('behavior') or {}),
+                },
+                'dynamics': {
+                    **dict(base_persona.get('dynamics') or {}),
+                    **dict(extra_persona.get('dynamics') or {}),
+                },
+                'meta': {
+                    **dict(base_persona.get('meta') or {}),
+                    **dict(extra_persona.get('meta') or {}),
+                },
+            }
+        elif key == 'decision_explanation':
+            merged[key] = str(value or primary.get(key) or '').strip() or str(primary.get(key) or '').strip()
+        elif key == 'knowledge':
+            merged[key] = str(value or '').strip() or str(primary.get(key) or '').strip()
+        else:
+            merged[key] = value if value not in (None, '', [], {}) else merged.get(key)
+    return merged
 
 
 def _merge_examples(existing: list[str], new_examples: list[str]) -> list[str]:
@@ -844,18 +2411,56 @@ def _default_persona_form(
         interaction_style.append('direct')
     if not decision_patterns:
         decision_patterns.append('matches reply style to the current situation and available evidence')
+    normalized_traits = [normalize_name(item) for item in traits]
+    inferred_self_image = str((existing_form or {}).get('core_self_image') or '').strip()
+    if not inferred_self_image:
+        if 'proud' in normalized_traits or 'aristocratic' in normalized_traits:
+            inferred_self_image = 'someone who protects dignity before exposing weakness'
+        elif 'logical' in normalized_traits or 'analytical' in normalized_traits:
+            inferred_self_image = 'someone who trusts structure, consistency, and evidence'
+        elif 'empathetic' in normalized_traits or 'warm' in normalized_traits:
+            inferred_self_image = 'someone who tries to protect others without losing clarity'
+        elif 'aggressive' in normalized_traits or 'predatory' in normalized_traits:
+            inferred_self_image = 'someone who asserts control quickly when pressure rises'
+        else:
+            inferred_self_image = f'{name} is treated as a persona with a stable response pattern'
+    inferred_growth = _normalize_string_list(
+        list((existing_form or {}).get('growth_dynamics') or [])
+        or ['can adapt when new evidence or repeated consequences force revision'],
+        limit=8,
+    )
+    inferred_change_resistance = _normalize_string_list(
+        list((existing_form or {}).get('change_resistance') or [])
+        or (['resists changing the response style without a strong reason'] if normalized_traits else []),
+        limit=8,
+    )
+    existing_conflicts = _normalize_string_list((existing_form or {}).get('conflicts') or (existing_form or {}).get('weaknesses') or [], limit=8)
+    existing_speech = _normalize_string_list((existing_form or {}).get('speech_style') or [], limit=8)
     form = {
         'identity_class': _identity_class(entity_type),
+        'core_goal': str((existing_form or {}).get('core_goal') or decision_patterns[0] or '').strip(),
+        'secondary_goals': _normalize_string_list((existing_form or {}).get('secondary_goals') or [], limit=8),
         'interaction_style': _normalize_string_list((existing_form or {}).get('interaction_style') or interaction_style, limit=8),
         'core_dispositions': _normalize_string_list((existing_form or {}).get('core_dispositions') or traits, limit=12),
         'biography': str((existing_form or {}).get('biography') or '').strip()[:1200],
+        'core_self_image': inferred_self_image[:280],
+        'constraints_internal': _normalize_string_list((existing_form or {}).get('constraints_internal') or existing_conflicts, limit=8),
+        'constraints_social': _normalize_string_list((existing_form or {}).get('constraints_social') or relation_targets, limit=8),
+        'constraints_hard_system': _normalize_string_list((existing_form or {}).get('constraints_hard_system') or _default_hard_system_constraints(), limit=8),
+        'allowed_methods': _normalize_string_list((existing_form or {}).get('allowed_methods') or decision_patterns, limit=8),
+        'maladaptive_methods': _normalize_string_list((existing_form or {}).get('maladaptive_methods') or (existing_form or {}).get('reaction_patterns') or [], limit=8),
         'social_roles': _normalize_string_list((existing_form or {}).get('social_roles') or interaction_style, limit=8),
         'habits': _normalize_string_list((existing_form or {}).get('habits') or (existing_form or {}).get('work_habits') or [], limit=10),
         'values': _normalize_string_list((existing_form or {}).get('values') or [], limit=8),
-        'conflicts': _normalize_string_list((existing_form or {}).get('conflicts') or (existing_form or {}).get('weaknesses') or [], limit=8),
+        'conflicts': existing_conflicts,
+        'vulnerabilities': _normalize_string_list((existing_form or {}).get('vulnerabilities') or existing_conflicts, limit=8),
+        'defense_mechanisms': _normalize_string_list((existing_form or {}).get('defense_mechanisms') or [], limit=8),
+        'triggers': _normalize_string_list((existing_form or {}).get('triggers') or [], limit=8),
+        'dependency_patterns': _normalize_string_list((existing_form or {}).get('dependency_patterns') or [], limit=8),
         'topic_affinities': _normalize_string_list((existing_form or {}).get('topic_affinities') or relation_targets, limit=10),
-        'speech_style': _normalize_string_list((existing_form or {}).get('speech_style') or [], limit=8),
+        'speech_style': existing_speech,
         'speech_tendencies': _normalize_string_list((existing_form or {}).get('speech_tendencies') or (existing_form or {}).get('speech_style') or [], limit=8),
+        'communication_style': _normalize_string_list((existing_form or {}).get('communication_style') or existing_speech or interaction_style, limit=8),
         'emotional_tendencies': _normalize_string_list((existing_form or {}).get('emotional_tendencies') or [], limit=8),
         'conflict_behavior': _normalize_string_list((existing_form or {}).get('conflict_behavior') or [], limit=8),
         'decision_patterns': _normalize_string_list((existing_form or {}).get('decision_patterns') or decision_patterns, limit=8),
@@ -875,6 +2480,9 @@ def _default_persona_form(
         'recurring_style_markers': _normalize_string_list((existing_form or {}).get('recurring_style_markers') or [], limit=8),
         'strengths': _normalize_string_list((existing_form or {}).get('strengths') or [], limit=8),
         'weaknesses': _normalize_string_list((existing_form or {}).get('weaknesses') or [], limit=8),
+        'internal_contradictions': _normalize_string_list((existing_form or {}).get('internal_contradictions') or existing_conflicts, limit=8),
+        'change_resistance': inferred_change_resistance,
+        'growth_dynamics': inferred_growth,
         'personal_history': _normalize_string_list((existing_form or {}).get('personal_history') or [], limit=10),
         'log_signature_count': len(log_tuples),
     }
@@ -884,21 +2492,32 @@ def _default_persona_form(
 def _validated_persona_form(value: Any, *, fallback: dict[str, Any]) -> dict[str, Any]:
     raw = dict(value or {}) if isinstance(value, dict) else {}
     result = dict(fallback)
-    for key in ('identity_class', 'clarification_policy', 'sarcasm_profile'):
+    for key in ('identity_class', 'clarification_policy', 'sarcasm_profile', 'core_goal'):
         token = str(raw.get(key) or result.get(key) or '').strip()
         if token:
             result[key] = token
     result['biography'] = str(raw.get('biography') or result.get('biography') or '').strip()[:1200]
     for key, limit in (
         ('interaction_style', 8),
+        ('secondary_goals', 8),
         ('core_dispositions', 12),
+        ('constraints_internal', 8),
+        ('constraints_social', 8),
+        ('constraints_hard_system', 8),
+        ('allowed_methods', 8),
+        ('maladaptive_methods', 8),
         ('social_roles', 8),
         ('habits', 10),
         ('values', 8),
         ('conflicts', 8),
+        ('vulnerabilities', 8),
+        ('defense_mechanisms', 8),
+        ('triggers', 8),
+        ('dependency_patterns', 8),
         ('topic_affinities', 10),
         ('speech_style', 8),
         ('speech_tendencies', 8),
+        ('communication_style', 8),
         ('emotional_tendencies', 8),
         ('conflict_behavior', 8),
         ('decision_patterns', 8),
@@ -913,9 +2532,13 @@ def _validated_persona_form(value: Any, *, fallback: dict[str, Any]) -> dict[str
         ('recurring_style_markers', 8),
         ('strengths', 8),
         ('weaknesses', 8),
+        ('internal_contradictions', 8),
+        ('change_resistance', 8),
+        ('growth_dynamics', 8),
         ('personal_history', 10),
     ):
         result[key] = _normalize_string_list(list(raw.get(key) or result.get(key) or []), limit=limit)
+    result['core_self_image'] = str(raw.get('core_self_image') or result.get('core_self_image') or '').strip()[:280]
     result['log_signature_count'] = int(raw.get('log_signature_count') or result.get('log_signature_count') or 0)
     return result
 
@@ -924,6 +2547,8 @@ def _default_decision_explanation(name: str, persona_form: dict[str, Any]) -> st
     identity = str(persona_form.get('identity_class') or 'persona').replace('_', ' ')
     patterns = list(persona_form.get('decision_patterns') or [])
     priorities = list(persona_form.get('response_priorities') or [])
+    core_goal = str(persona_form.get('core_goal') or '').strip()
+    internal_constraints = list(persona_form.get('constraints_internal') or [])
     sarcasm = str(persona_form.get('sarcasm_profile') or 'none')
     clarification = str(persona_form.get('clarification_policy') or '').strip()
     pattern_text = patterns[0] if patterns else 'checks the current situation before choosing a reply'
@@ -931,10 +2556,13 @@ def _default_decision_explanation(name: str, persona_form: dict[str, Any]) -> st
     sarcasm_text = 'can use sarcasm if the situation allows it' if sarcasm in {'medium', 'high'} else 'does not rely on sarcasm as a primary strategy'
     parts = [
         f'{name} is treated as a {identity}.',
+        f'Its core goal is {core_goal}.' if core_goal else '',
         f'It first {pattern_text}.',
         f'Then it prioritizes {priority_text.replace("_", " ")}.',
         sarcasm_text + '.',
     ]
+    if internal_constraints:
+        parts.append(f"Internal constraint: {str(internal_constraints[0]).strip()}.")
     if clarification:
         parts.append(clarification)
     return ' '.join(part.strip() for part in parts if part.strip())
@@ -1036,6 +2664,19 @@ def _validated_persona_payload(
         'log_tuples': raw_log_tuples[limits.persona_log_tuple_limit :],
         'knowledge_overflow': raw_knowledge[limits.persona_knowledge_char_limit :],
     }
+    structured_persona = _structured_persona_from_payload(
+        name,
+        container if isinstance(container, dict) else {},
+        fallback_examples=examples,
+        entity_type=entity_type,
+    )
+    structured_dict = structured_persona.to_dict()
+    raw_persona_form = container.get('persona_form') or raw.get('persona_form') or {}
+    persona_form = (
+        dict(raw_persona_form)
+        if isinstance(raw_persona_form, dict) and raw_persona_form
+        else _persona_form_from_structured(structured_persona, entity_type=entity_type)
+    )
     return {
         'name': str(raw.get('name') or name).strip() or name,
         'entity_type': entity_type,
@@ -1048,9 +2689,8 @@ def _validated_persona_payload(
         'emotion_vector': _normalized_emotion_vector(raw.get('emotion_vector') or raw),
         'knowledge': knowledge,
         'log_tuples': raw_log_tuples[: limits.persona_log_tuple_limit],
-        'persona_form': dict(container.get('persona_form') or raw.get('persona_form') or {})
-        if isinstance(container.get('persona_form') or raw.get('persona_form') or {}, dict)
-        else {},
+        'structured_persona': structured_dict,
+        'persona_form': persona_form,
         'decision_explanation': str(container.get('decision_explanation') or raw.get('decision_explanation') or '').strip()[:600],
         'archival_overflow': {
             key: value
@@ -1073,6 +2713,12 @@ def synthesize_persona_from_logs(
     log_tuples = _build_log_tuples(cleaned_excerpts, list(existing_bundle.situation_reactions) if existing_bundle else [])
     current_form = dict(existing_bundle.persona_form) if existing_bundle is not None else {}
     current_summary = existing_bundle.decision_explanation if existing_bundle is not None else ''
+    heuristic_payload = _heuristic_persona_payload(
+        name,
+        cleaned_excerpts,
+        existing_bundle=existing_bundle,
+        relations=relations,
+    )
     raw_payload = call_json_model_for_role(
         build_persona_profile_prompt(
             name,
@@ -1084,9 +2730,13 @@ def synthesize_persona_from_logs(
         ),
         role=get_runtime_config().roles.persona_synthesis,
     )
+    merged_payload = _merge_persona_payloads(
+        heuristic_payload,
+        raw_payload if isinstance(raw_payload, dict) else {},
+    )
     validated = _validated_persona_payload(
         name,
-        raw_payload,
+        merged_payload,
         fallback_examples=cleaned_excerpts,
         explicit=explicit,
     )
@@ -1122,8 +2772,23 @@ def spawn_head(
     aliases: list[str] | None = None,
     source: str = 'system',
     sync_graph: bool = True,
+    register: bool = False,
 ) -> HeadBundle:
     clean = normalize_personality_name(name)
+    if register:
+        name_reasons = _persona_name_rejection_reasons(name)
+        if name_reasons:
+            _append_rejected_candidate_log(
+                name=name,
+                slug=clean,
+                reason_codes=name_reasons,
+                source=f'spawn_head:{source}',
+                evidence={'register': True, 'entity_type': entity_type},
+            )
+            raise MutationRejectedFailure(
+                f'Persona registration for "{name}" was rejected by registry validation.',
+                details={'name': clean, 'reason_codes': name_reasons, 'source': source},
+            )
     _ensure_head_files(clean, entity_type=entity_type, aliases=aliases, source=source)
     bundle = load_persona(clean)
     assert bundle is not None
@@ -1133,8 +2798,10 @@ def spawn_head(
     meta['aliases'] = merge_aliases(list(meta.get('aliases') or []), list(aliases or []))
     meta['frequency'] = max(int(meta.get('frequency') or 1), 1)
     meta['updated_at'] = _utc_now()
+    meta['registry_status'] = _PERSONA_REGISTRY_STATUS_ACTIVE if register else str(meta.get('registry_status') or _PERSONA_REGISTRY_STATUS_DRAFT)
     write_json(_head_file(clean, 'meta.json'), meta)
-    _save_index(_load_index() + [clean])
+    if register:
+        _save_index(_load_index() + [clean])
     if sync_graph:
         GraphStore().register_head(
             name=name,
@@ -1157,8 +2824,60 @@ def request_persona_profile(name: str, reason: str, session_id: str, excerpt: st
         'created_at': _utc_now(),
     }
     write_json(personality_proposal_path(name), payload)
-    spawn_head(name, entity_type='PERSON', source='proposal')
     return payload
+
+
+def derive_persona_label(
+    description: str,
+    *,
+    selected_name: str = '',
+    session_persona: str = '',
+) -> str:
+    explicit = str(selected_name or '').strip()
+    if explicit and not looks_like_garbage_label(explicit):
+        return explicit
+    extracted = extract_explicit_persona_name(description)
+    if extracted and not looks_like_garbage_label(extracted):
+        return extracted
+    fallback_session_persona = str(session_persona or '').strip()
+    if fallback_session_persona and not looks_like_garbage_label(fallback_session_persona):
+        return fallback_session_persona
+    cleaned_description = _strip_persona_creation_prefix(description)
+    heuristic = _heuristic_persona_payload('', [cleaned_description or description])
+    structured = _structured_persona_from_payload('', heuristic, fallback_examples=[description], entity_type='PERSON')
+    label = _suggest_persona_label(structured)
+    return label if not looks_like_garbage_label(label) else 'Custom Persona'
+
+
+def create_persona_from_description(
+    description: str,
+    *,
+    name_hint: str = '',
+    session_persona: str = '',
+    activate: bool = True,
+) -> dict[str, Any]:
+    cleaned_description = _strip_persona_creation_prefix(description)
+    label = derive_persona_label(cleaned_description or description, selected_name=name_hint, session_persona=session_persona)
+    payload = synthesize_persona_from_logs(
+        label,
+        [cleaned_description or description],
+        reason='Persona specification request from dialogue.',
+        explicit=True,
+    )
+    bundle = materialize_persona(label, payload, explicit=True)
+    structured = bundle.structured_persona or _structured_persona_from_payload(
+        bundle.name,
+        dict(payload),
+        fallback_examples=[description],
+        entity_type=bundle.entity_type,
+    )
+    return {
+        'created': True,
+        'activated': bool(activate),
+        'persona_name': bundle.name,
+        'persona_slug': normalize_personality_name(bundle.name),
+        'persona_object': structured.to_dict(),
+    }
 
 
 def list_persona_proposals() -> list[dict[str, Any]]:
@@ -1180,7 +2899,7 @@ def restore_persona_revision(name: str, revision: int) -> HeadBundle | None:
     clean = normalize_personality_name(name)
     if not clean:
         return None
-    bundle = load_persona(clean) or spawn_head(clean, entity_type='PERSON')
+    bundle = load_persona(clean) or spawn_head(clean, entity_type='PERSON', register=True)
     history = list_persona_revisions(clean)
     target = next((item for item in history if int(item.get('revision') or 0) == int(revision or 0)), None)
     if not isinstance(target, dict):
@@ -1343,6 +3062,7 @@ def formalize_persona(bundle: HeadBundle) -> PersonaSystemModel:
             'log_tuples': [dict(item) for item in bundle.log_tuples],
             'persona_form': dict(bundle.persona_form),
             'decision_explanation': bundle.decision_explanation,
+            'structured_persona': bundle.structured_persona.to_dict() if bundle.structured_persona is not None else {},
             'baseline_definition': bundle.baseline_definition.to_dict() if bundle.baseline_definition is not None else {},
             'learned_patterns': bundle.learned_patterns.to_dict() if bundle.learned_patterns is not None else {},
             'indicators': bundle.indicators.to_dict() if bundle.indicators is not None else {},
@@ -1436,6 +3156,7 @@ def _sync_meta_summary(name: str) -> dict[str, Any]:
     if bundle is None:
         return {}
     meta = dict(bundle.meta)
+    structured = bundle.structured_persona
     meta['schema_version'] = 2
     meta['confidence_score'] = bundle.indicators.confidence_score if bundle.indicators is not None else 0.0
     meta['maturity_score'] = bundle.indicators.maturity_score if bundle.indicators is not None else 0.0
@@ -1454,6 +3175,17 @@ def _sync_meta_summary(name: str) -> dict[str, Any]:
     ):
         if key in bundle.revision_meta:
             meta[key] = bundle.revision_meta[key]
+    if structured is not None:
+        meta['display_label'] = structured.identity.label
+        meta['short_description'] = structured.identity.short_description
+        meta['persona_type'] = structured.identity.persona_type
+        meta['readiness'] = structured.identity.readiness
+        meta['source_text'] = structured.identity.source_text
+        meta['hover_text'] = structured.meta.hover_text
+        meta['validation_status'] = structured.meta.validation_status
+        meta['validation_notes'] = list(structured.meta.validation_notes)
+        meta['persona_confidence'] = float(structured.meta.confidence or 0.0)
+        meta['persona_tags'] = list(structured.meta.tags)
     write_json(_head_file(name, 'meta.json'), meta)
     return meta
 
@@ -1525,7 +3257,9 @@ def adjust_emotion_vector(name: str, situation: Situation | dict[str, Any] | Non
     clean = normalize_personality_name(name)
 
     def _apply() -> dict[str, float]:
-        bundle = load_persona(clean) or spawn_head(clean, entity_type='PERSON')
+        bundle = _load_mutable_active_persona(clean)
+        if bundle is None:
+            return _default_emotion_vector()
         next_state, outcome = evolve_emotion_state(bundle, situation)
         write_json(_head_file(clean, 'emotion_vector.json'), next_state)
         dynamic = PersonaDynamicState(
@@ -1554,7 +3288,9 @@ def record_situation_reaction(name: str, situation: str | Situation | dict[str, 
     clean = normalize_personality_name(name)
 
     def _apply() -> None:
-        bundle = load_persona(clean) or spawn_head(clean, entity_type='PERSON')
+        bundle = _load_mutable_active_persona(clean)
+        if bundle is None:
+            return
         payload = load_json(_head_file(clean, 'examples.json'), {'examples': [], 'situation_reactions': []})
         situation_reactions = [dict(item) for item in list(payload.get('situation_reactions') or []) if isinstance(item, dict)]
         reaction_outcome = reaction_policy(bundle, situation)
@@ -1623,7 +3359,9 @@ def record_persona_dossier_fact(name: str, fact: str) -> HeadBundle | None:
         return load_persona(clean) if clean else None
 
     def _apply() -> HeadBundle | None:
-        bundle = load_persona(clean) or spawn_head(clean, entity_type='PERSON')
+        bundle = _load_mutable_active_persona(clean)
+        if bundle is None:
+            return None
         payload = load_json(_head_file(clean, 'examples.json'), {'examples': [], 'situation_reactions': []})
         updated_examples = _merge_examples(
             list(payload.get('examples') or bundle.examples),
@@ -1873,6 +3611,61 @@ def materialize_persona(
 ) -> HeadBundle:
     normalized = _validated_persona_payload(name, payload, fallback_examples=list(payload.get('examples') or []), explicit=explicit)
     clean = normalize_personality_name(normalized['name'])
+    preview_bundle = load_persona(clean)
+    preview_structured = _structured_persona_from_payload(
+        normalized['name'],
+        dict(normalized.get('structured_persona') or payload or {}),
+        fallback_examples=list(normalized.get('examples') or []),
+        entity_type=str(normalized.get('entity_type') or (preview_bundle.entity_type if preview_bundle is not None else 'PERSON')),
+    )
+    preview_form = _validated_persona_form(
+        normalized.get('persona_form') or _persona_form_from_structured(preview_structured, entity_type=str(normalized.get('entity_type') or 'PERSON')),
+        fallback=_default_persona_form(
+            normalized['name'],
+            entity_type=str(normalized.get('entity_type') or (preview_bundle.entity_type if preview_bundle is not None else 'PERSON')),
+            traits=list(normalized.get('traits') or (preview_bundle.traits if preview_bundle is not None else [])),
+            relations=list(normalized.get('relations') or (preview_bundle.relations if preview_bundle is not None else [])),
+            examples=list(normalized.get('examples') or (preview_bundle.examples if preview_bundle is not None else [])),
+            log_tuples=list(normalized.get('log_tuples') or (preview_bundle.log_tuples if preview_bundle is not None else [])),
+            existing_form=dict(preview_bundle.persona_form) if preview_bundle is not None else {},
+        ),
+    )
+    preview_decision = _validated_decision_explanation(
+        normalized.get('decision_explanation'),
+        fallback=_default_decision_explanation(normalized['name'], preview_form),
+    )
+    validation = validate_persona_candidate(
+        normalized['name'],
+        entity_type=str(normalized.get('entity_type') or 'PERSON'),
+        traits=list(normalized.get('traits') or []),
+        relations=list(normalized.get('relations') or []),
+        examples=list(normalized.get('examples') or []),
+        knowledge=str(normalized.get('knowledge') or '').strip(),
+        persona_form=preview_form,
+        decision_explanation=preview_decision,
+        structured_persona=preview_structured,
+        explicit=bool(explicit),
+        source='materialize',
+    )
+    if not validation.get('ok'):
+        archive_path = _quarantine_persona_directory(
+            normalized['name'],
+            reason_codes=list(validation.get('reason_codes') or []),
+            source='materialize_rejected',
+            evidence=dict(validation.get('evidence') or {}),
+        )
+        if clean in _load_index():
+            _save_index([item for item in _load_index() if item != clean])
+        raise MutationRejectedFailure(
+            f'Persona candidate {normalized["name"]} was rejected by validation.',
+            details={
+                'name': normalized['name'],
+                'slug': clean,
+                'reason_codes': list(validation.get('reason_codes') or []),
+                'evidence': dict(validation.get('evidence') or {}),
+                'archive_path': archive_path,
+            },
+        )
 
     def _apply() -> HeadBundle:
         existing_bundle = load_persona(clean)
@@ -1885,6 +3678,7 @@ def materialize_persona(
             aliases=list(normalized.get('aliases') or []),
             source='materialize',
             sync_graph=False,
+            register=True,
         )
         use_learned_update = adaptation_mode == 'learned_update' and existing_bundle is not None
         baseline_traits = (
@@ -1964,6 +3758,24 @@ def materialize_persona(
         write_json(_head_file(clean, 'log_tuples.json'), {'items': merged_log_tuples})
         write_json(_head_file(clean, 'persona_form.json'), persona_form)
         write_text(_head_file(clean, 'decision_explanation.txt'), decision_explanation)
+        structured_persona = _structured_persona_from_payload(
+            normalized['name'],
+            dict(normalized.get('structured_persona') or {}),
+            fallback_examples=list(normalized['examples']),
+            entity_type=baseline_entity_type,
+        )
+        structured_persona.meta.validation_status = str(validation.get('validation_status') or structured_persona.meta.validation_status)  # type: ignore[assignment]
+        structured_persona.meta.validation_notes = _normalize_string_list(
+            list(structured_persona.meta.validation_notes) + list(validation.get('reason_codes') or []),
+            limit=10,
+        )
+        if not structured_persona.identity.label.strip() or looks_like_garbage_label(structured_persona.identity.label):
+            structured_persona.identity.label = normalized['name']
+        if not structured_persona.identity.short_description.strip():
+            structured_persona.identity.short_description = _default_short_description(structured_persona)
+        if not structured_persona.meta.hover_text.strip():
+            structured_persona.meta.hover_text = _default_hover_text(structured_persona)
+        write_json(_structured_persona_path(clean), structured_persona.to_dict())
         baseline = PersonaBaselineDefinition(
             name=normalized['name'],
             slug=clean,
@@ -2007,7 +3819,19 @@ def materialize_persona(
             aliases=list(baseline_aliases),
             importance_delta=0.04 if use_learned_update else 0.08,
         )
+        meta['registry_status'] = _PERSONA_REGISTRY_STATUS_ACTIVE
+        meta['display_label'] = structured_persona.identity.label
+        meta['short_description'] = structured_persona.identity.short_description
+        meta['persona_type'] = structured_persona.identity.persona_type
+        meta['readiness'] = structured_persona.identity.readiness
+        meta['hover_text'] = structured_persona.meta.hover_text
+        meta['validation_status'] = structured_persona.meta.validation_status
+        meta['validation_notes'] = list(structured_persona.meta.validation_notes)
+        meta['persona_confidence'] = float(structured_persona.meta.confidence or 0.0)
+        meta['persona_tags'] = list(structured_persona.meta.tags)
+        meta['source_text'] = structured_persona.identity.source_text
         write_json(_head_file(clean, 'meta.json'), meta)
+        _save_index(_load_index() + [clean])
 
         GraphStore().sync_head(
             name=normalized['name'],
@@ -2036,8 +3860,17 @@ def materialize_persona(
 
 def update_persona_from_examples(name: str, examples: list[str], relations: list[dict[str, Any]] | None = None) -> HeadBundle:
     clean = normalize_personality_name(name)
-    bundle = load_persona(clean) or spawn_head(name, entity_type='PERSON')
     cleaned_examples = [str(item).strip() for item in list(examples or []) if str(item).strip()]
+    bundle = _load_mutable_active_persona(clean)
+    if bundle is None:
+        synthesized = synthesize_persona_from_logs(
+            name,
+            cleaned_examples,
+            reason='Session examples and repeated behavior patterns.',
+            explicit=True,
+            relations=relations,
+        )
+        return materialize_persona(name, synthesized, explicit=True)
     synthesized = synthesize_persona_from_logs(
         bundle.name,
         cleaned_examples,
@@ -2068,14 +3901,19 @@ def process_persona_proposals() -> list[dict[str, Any]]:
         excerpt = str(proposal.get('excerpt') or '').strip()
         if not name:
             continue
-        payload = synthesize_persona_from_logs(
-            name,
-            [excerpt] if excerpt else [],
-            reason=str(proposal.get('reason') or ''),
-            explicit=True,
-        )
-        bundle = materialize_persona(name, payload, explicit=True)
         proposal_path = personality_proposal_path(name)
+        try:
+            payload = synthesize_persona_from_logs(
+                name,
+                [excerpt] if excerpt else [],
+                reason=str(proposal.get('reason') or ''),
+                explicit=True,
+            )
+            bundle = materialize_persona(name, payload, explicit=True)
+        except MutationRejectedFailure as exc:
+            if proposal_path.exists():
+                proposal_path.unlink()
+            continue
         if proposal_path.exists():
             proposal_path.unlink()
         results.append({'name': name, 'folder': bundle.folder, 'entity_type': bundle.entity_type})

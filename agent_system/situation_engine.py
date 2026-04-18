@@ -73,6 +73,12 @@ def _rule_driven_type(*, classifier_decision: SituationDecision, user_state: Use
         return 'user_anger'
     if signals.get('contains_question'):
         return 'neutral_query'
+    classifier_type = str(classifier_decision.situation_type or '').strip().lower()
+    if classifier_type == 'user_distress':
+        # A calm world-building or persona-setting statement should not be escalated
+        # into distress handling just because the statistical classifier is unsure.
+        if not signals.get('contains_help_request') and user_state.intent == 'statement' and user_state.tone == 'neutral':
+            return 'neutral_statement'
     return classifier_decision.situation_type or 'neutral_statement'
 
 

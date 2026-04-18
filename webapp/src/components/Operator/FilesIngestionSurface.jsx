@@ -21,7 +21,7 @@ export function FilesIngestionSurface({
             <strong>{t('files_upload')}</strong>
             <p>{t('files_upload_hint')}</p>
             <label className="button-secondary upload-button-inline">
-              <input type="file" accept=".txt,.md,.json,.csv" multiple onChange={(event) => onUploadFiles(event.target.files)} />
+              <input type="file" accept=".txt,.md,.json,.csv,.pdf,.docx,.odt,.fb2" multiple onChange={(event) => onUploadFiles(event.target.files)} />
               <span>{uploadingFiles ? t('files_uploading') : t('files_surface_choose')}</span>
             </label>
           </div>

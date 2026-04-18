@@ -1,0 +1,286 @@
+{
+    "Empathetic--train--1": {
+        "original dialog id": "hit:0_conv:1",
+        "dialog index": 1,
+        "original dialog info": {
+            "context": "sentimental",
+            "selfeval": "5|5|5_2|2|5"
+        },
+        "log": [
+            {
+                "turn id": 1,
+                "user utterance": "I remember going to the fireworks with my best friend. There was a lot of people_comma_ but it only felt like us in the world.",
+                "system response": "I remember going to see the fireworks with my best friend. It was the first time we ever spent time alone together. Although there was a lot of people, we felt like the only people in the world.",
+                "dialog history": "",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 0
+                },
+                "original system side information": {
+                    "tags": "",
+                    "speaker_idx": 1
+                }
+            },
+            {
+                "turn id": 2,
+                "user utterance": "Was this a friend you were in love with, or just a best friend?",
+                "system response": "This was a best friend. I miss her.",
+                "dialog history": "<USER> I remember going to the fireworks with my best friend. There was a lot of people_comma_ but it only felt like us in the world. <SYSTEM> I remember going to see the fireworks with my best friend. It was the first time we ever spent time alone together. Although there was a lot of people, we felt like the only people in the world.",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 0
+                },
+                "original system side information": {
+                    "tags": "",
+                    "speaker_idx": 1
+                }
+            },
+            {
+                "turn id": 3,
+                "user utterance": "Where has she gone?",
+                "system response": "We no longer talk.",
+                "dialog history": "<USER> I remember going to the fireworks with my best friend. There was a lot of people_comma_ but it only felt like us in the world. <SYSTEM> I remember going to see the fireworks with my best friend. It was the first time we ever spent time alone together. Although there was a lot of people, we felt like the only people in the world. <USER> Was this a friend you were in love with, or just a best friend? <SYSTEM> This was a best friend. I miss her.",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 0
+                },
+                "original system side information": {
+                    "tags": "",
+                    "speaker_idx": 1
+                }
+            },
+            {
+                "turn id": 4,
+                "user utterance": "Oh was this something that happened because of an argument?",
+                "system response": "",
+                "dialog history": "<USER> I remember going to the fireworks with my best friend. There was a lot of people_comma_ but it only felt like us in the world. <SYSTEM> I remember going to see the fireworks with my best friend. It was the first time we ever spent time alone together. Although there was a lot of people, we felt like the only people in the world. <USER> Was this a friend you were in love with, or just a best friend? <SYSTEM> This was a best friend. I miss her. <USER> Where has she gone? <SYSTEM> We no longer talk.",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 0
+                },
+                "original system side information": {}
+            }
+        ],
+        "prompt": []
+    },
+    "Empathetic--train--2": {
+        "original dialog id": "hit:1_conv:2",
+        "dialog index": 2,
+        "original dialog info": {
+            "context": "afraid",
+            "selfeval": "4|3|4_3|5|5"
+        },
+        "log": [
+            {
+                "turn id": 1,
+                "user utterance": "i used to scare for darkness",
+                "system response": "it feels like hitting to blank wall when i see the darkness",
+                "dialog history": "",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 3
+                },
+                "original system side information": {
+                    "tags": "",
+                    "speaker_idx": 2
+                }
+            },
+            {
+                "turn id": 2,
+                "user utterance": "Oh ya? I don't really see how",
+                "system response": "dont you feel so.. its a wonder",
+                "dialog history": "<USER> i used to scare for darkness <SYSTEM> it feels like hitting to blank wall when i see the darkness",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 3
+                },
+                "original system side information": {
+                    "tags": "",
+                    "speaker_idx": 2
+                }
+            },
+            {
+                "turn id": 3,
+                "user utterance": "I do actually hit blank walls a lot of times but i get by",
+                "system response": "i virtually thought so.. and i used to get sweatings",
+                "dialog history": "<USER> i used to scare for darkness <SYSTEM> it feels like hitting to blank wall when i see the darkness <USER> Oh ya? I don't really see how <SYSTEM> dont you feel so.. its a wonder",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 3
+                },
+                "original system side information": {
+                    "tags": "",
+                    "speaker_idx": 2
+                }
+            },
+            {
+                "turn id": 4,
+                "user utterance": "Wait what are sweatings",
+                "system response": "",
+                "dialog history": "<USER> i used to scare for darkness <SYSTEM> it feels like hitting to blank wall when i see the darkness <USER> Oh ya? I don't really see how <SYSTEM> dont you feel so.. its a wonder <USER> I do actually hit blank walls a lot of times but i get by <SYSTEM> i virtually thought so.. and i used to get sweatings",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 3
+                },
+                "original system side information": {}
+            }
+        ],
+        "prompt": []
+    },
+    "Empathetic--train--3": {
+        "original dialog id": "hit:1_conv:3",
+        "dialog index": 3,
+        "original dialog info": {
+            "context": "proud",
+            "selfeval": "3|5|5_4|3|4"
+        },
+        "log": [
+            {
+                "turn id": 1,
+                "user utterance": "I showed a guy how to run a good bead in welding class and he caught on quick.",
+                "system response": "Hi how are you doing today",
+                "dialog history": "",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 2
+                },
+                "original system side information": {
+                    "tags": "<HI>",
+                    "speaker_idx": 3
+                }
+            },
+            {
+                "turn id": 2,
+                "user utterance": "doing good.. how about you",
+                "system response": "Im good, trying to understand how someone can feel like hitting a blank wall when they see the darkness",
+                "dialog history": "<USER> I showed a guy how to run a good bead in welding class and he caught on quick. <SYSTEM> Hi how are you doing today",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 2
+                },
+                "original system side information": {
+                    "tags": "",
+                    "speaker_idx": 3
+                }
+            },
+            {
+                "turn id": 3,
+                "user utterance": "it's quite strange that you didnt imagine it",
+                "system response": "i dont imagine feeling a lot, maybe your on to something",
+                "dialog history": "<USER> I showed a guy how to run a good bead in welding class and he caught on quick. <SYSTEM> Hi how are you doing today <USER> doing good.. how about you <SYSTEM> Im good, trying to understand how someone can feel like hitting a blank wall when they see the darkness",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 2
+                },
+                "original system side information": {
+                    "tags": "",
+                    "speaker_idx": 3
+                }
+            }
+        ],
+        "prompt": []
+    },
+    "Empathetic--train--4": {
+        "original dialog id": "hit:2_conv:4",
+        "dialog index": 4,
+        "original dialog info": {
+            "context": "faithful",
+            "selfeval": "3|3|5_2|4|4"
+        },
+        "log": [
+            {
+                "turn id": 1,
+                "user utterance": "I have always been loyal to my wife.",
+                "system response": "I have never cheated on my wife.",
+                "dialog history": "",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 5
+                },
+                "original system side information": {
+                    "tags": "",
+                    "speaker_idx": 4
+                }
+            },
+            {
+                "turn id": 2,
+                "user utterance": "And thats something you should never do, good on you.",
+                "system response": "Yea it hasn't been easy but I am proud I haven't",
+                "dialog history": "<USER> I have always been loyal to my wife. <SYSTEM> I have never cheated on my wife.",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 5
+                },
+                "original system side information": {
+                    "tags": "",
+                    "speaker_idx": 4
+                }
+            },
+            {
+                "turn id": 3,
+                "user utterance": "What do you mean it hasn't been easy? How close have you come to cheating?",
+                "system response": "",
+                "dialog history": "<USER> I have always been loyal to my wife. <SYSTEM> I have never cheated on my wife. <USER> And thats something you should never do, good on you. <SYSTEM> Yea it hasn't been easy but I am proud I haven't",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 5
+                },
+                "original system side information": {}
+            }
+        ],
+        "prompt": []
+    },
+    "Empathetic--train--5": {
+        "original dialog id": "hit:2_conv:5",
+        "dialog index": 5,
+        "original dialog info": {
+            "context": "terrified",
+            "selfeval": "2|4|4_3|3|5"
+        },
+        "log": [
+            {
+                "turn id": 1,
+                "user utterance": "A recent job interview that I had made me feel very anxious because I felt like I didn't come prepared.",
+                "system response": "Job interviews always make me sweat bullets, makes me uncomfortable in general to be looked at under a microscope like that.",
+                "dialog history": "",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 4
+                },
+                "original system side information": {
+                    "tags": "",
+                    "speaker_idx": 5
+                }
+            },
+            {
+                "turn id": 2,
+                "user utterance": "Don't be nervous. Just be prepared.",
+                "system response": "I feel like getting prepared and then having a curve ball thrown at you throws you off.",
+                "dialog history": "<USER> A recent job interview that I had made me feel very anxious because I felt like I didn't come prepared. <SYSTEM> Job interviews always make me sweat bullets, makes me uncomfortable in general to be looked at under a microscope like that.",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 4
+                },
+                "original system side information": {
+                    "tags": "",
+                    "speaker_idx": 5
+                }
+            },
+            {
+                "turn id": 3,
+                "user utterance": "Yes but if you stay calm it will be ok.",
+                "system response": "It's hard to stay clam. How do you do it?",
+                "dialog history": "<USER> A recent job interview that I had made me feel very anxious because I felt like I didn't come prepared. <SYSTEM> Job interviews always make me sweat bullets, makes me uncomfortable in general to be looked at under a microscope like that. <USER> Don't be nervous. Just be prepared. <SYSTEM> I feel like getting prepared and then having a curve ball thrown at you throws you off.",
+                "original user side information": {
+                    "tags": "",
+                    "speaker_idx": 4
+                },
+                "original system side information": {
+                    "tags": "",
+                    "speaker_idx": 5
+                }
+            }
+        ],
+        "prompt": []
+    }
+}

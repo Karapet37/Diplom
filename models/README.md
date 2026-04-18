@@ -1,106 +1,127 @@
 # Local GGUF Models
 
-Repository: `https://github.com/Karapet37/Diplom`
+This directory documents the local model runtime used by the project.
 
-Primary discovery path:
+Preferred discovery root:
 
-- `models/gguf`
+- `models/gguf/`
 
-Role resolver can also scan `models/`, but `models/gguf` is preferred.
+The resolver can also scan `models/`, but `models/gguf/` is the canonical location.
 
-## Selection rules
+## Runtime Principles
 
-1. Explicit env override has priority.
-2. Otherwise resolver auto-discovers `*.gguf` files and assigns advisor roles.
-3. Translator role is strict: translation uses only `translator` role model (no fallback to `general`).
-4. If translator model is missing, translation prompt returns configuration error instead of using non-translator LLM.
-5. Split GGUF is supported by entrypoint only: use `...-00001-of-0000N.gguf`.
-6. Non-entry shards like `...-00002-of-0000N.gguf` are auto-remapped to shard `00001` when possible.
+The model layer is role-based and local-first.
 
-## Advisor roles and filename hints
+The runtime resolves models for roles such as:
 
-Current auto-mapping by filename/path tokens:
+- `general`
+- `uncensored`
+- `analyst`
+- `creative`
+- `planner`
+- `translator`
+- `coder_architect`
+- `coder_reviewer`
+- `coder_refactor`
+- `coder_debug`
 
-- `translator`: `translator`, `translate`, `nllb`, `m2m`, `madlad`
-- `coder_*`: `coder`, `code`, `codestral`, `codellama`, `starcoder`, `deepseek-coder`, `qwen-coder`, `programming`, `dev`
-- `analyst`: `deepseek`, `analyst`, `reason`, `logic`
-- `creative`: `danube`, `h2o`, `creative`, `story`
-- `planner`: `planner`, `plan`, `instruct`
-- `general`: best non-translator model (prefers instruct/general-purpose families)
+These roles are consumed by the controller runtime, chat orchestration, extraction flow, and reviewer loop.
 
-These advisor roles are now used directly by the UI debate/personalization flow:
+## Selection Rules
 
-- `proposer` -> usually `creative`
-- `critic` -> usually `analyst`
-- `judge` -> usually `planner`
+1. Explicit environment variable overrides have highest priority.
+2. Otherwise the resolver auto-discovers `*.gguf` files under the configured model root.
+3. The resolver performs compatibility preflight before loading.
+4. If a configured model is incompatible with the current local runtime, the provider logs the reason and falls back to a compatible discovered model when possible.
+5. Translator role remains strict and should use a dedicated translation-capable model.
+6. Uncensored autodiscovery is opt-in through `LOCAL_ALLOW_UNCENSORED_AUTODISCOVERY`.
+7. Split GGUF files are supported through the entry shard (`...-00001-of-0000N.gguf`), and non-entry shards are remapped or rejected explicitly.
 
-Personalization profile can override these defaults per request via `personalization.llm_roles`.
+## Important Runtime Behavior
 
-## Direct model-path usage (archive chat)
+The local provider now distinguishes between:
 
-Project now supports explicit GGUF selection per request:
+- configured model path,
+- active compatible model path,
+- runtime context budget,
+- output budget,
+- compatibility failures.
 
-- `POST /api/project/archive/chat` can receive `model_path` (for example:
-  - `models/gguf/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf`
-  - `models/gguf/textGen/h2o-danube3-4b-chat-Q5_K_M.gguf`)
-- user-facing answer is conversational (`assistant_reply`), not raw JSON.
-- structured archive updates are reviewed separately via `POST /api/project/archive/review`.
+This matters because a model file may exist but still be unusable with the current `llama-cpp-python` build or model architecture support.
 
-Recommended explicit role assignment in current workspace:
+## Useful Environment Variables
 
-- `LOCAL_GGUF_MODEL` -> `models/gguf/textGen/mistral-7b-instruct-v0.3-q4_k_m.gguf`
-- `LOCAL_ANALYST_GGUF_MODEL` -> `models/gguf/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf`
-- `LOCAL_CREATIVE_GGUF_MODEL` -> `models/gguf/textGen/h2o-danube3-4b-chat-Q5_K_M.gguf`
-- `LOCAL_PLANNER_GGUF_MODEL` -> `models/gguf/textGen/mistral-7b-instruct-v0.3-q4_k_m.gguf`
-- `LOCAL_CODER_*_GGUF_MODEL` -> `models/gguf/coder/qwen2.5-coder-7b-instruct-q4_k_m-00001-of-00002.gguf`
-- `LOCAL_TRANSLATOR_GGUF_MODEL` -> `models/translator/model-q4k.gguf`
+Model-path overrides:
 
-## Explicit env overrides
+- `LOCAL_MODELS_DIR`
+- `LOCAL_GGUF_MODEL`
+- `LOCAL_UNCENSORED_GGUF_MODEL`
+- `LOCAL_ANALYST_GGUF_MODEL`
+- `LOCAL_TRANSLATOR_GGUF_MODEL`
+- `LOCAL_CREATIVE_GGUF_MODEL`
+- `LOCAL_PLANNER_GGUF_MODEL`
+- `LOCAL_CODER_ARCHITECT_GGUF_MODEL`
+- `LOCAL_CODER_REVIEWER_GGUF_MODEL`
+- `LOCAL_CODER_REFACTOR_GGUF_MODEL`
+- `LOCAL_CODER_DEBUG_GGUF_MODEL`
 
-- `LOCAL_GGUF_MODEL=/absolute/path/to/general.gguf`
-- `LOCAL_TRANSLATOR_GGUF_MODEL=/absolute/path/to/translator.gguf`
-- `LOCAL_ANALYST_GGUF_MODEL=...`
-- `LOCAL_CREATIVE_GGUF_MODEL=...`
-- `LOCAL_PLANNER_GGUF_MODEL=...`
-- `LOCAL_CODER_ARCHITECT_GGUF_MODEL=...`
-- `LOCAL_CODER_REVIEWER_GGUF_MODEL=...`
-- `LOCAL_CODER_REFACTOR_GGUF_MODEL=...`
-- `LOCAL_CODER_DEBUG_GGUF_MODEL=...`
+Role-specific context windows:
 
-## Translator GGUF
+- `LOCAL_GGUF_N_CTX`
+- `LOCAL_UNCENSORED_N_CTX`
+- `LOCAL_ANALYST_N_CTX`
+- `LOCAL_TRANSLATOR_N_CTX`
+- `LOCAL_CREATIVE_N_CTX`
+- `LOCAL_PLANNER_N_CTX`
+- `LOCAL_CODER_ARCHITECT_N_CTX`
+- `LOCAL_CODER_REVIEWER_N_CTX`
+- `LOCAL_CODER_REFACTOR_N_CTX`
+- `LOCAL_CODER_DEBUG_N_CTX`
 
-Recommended translator model reference:
+Budget and runtime tuning:
 
-- https://huggingface.co/google/madlad400-3b-mt/blob/main/model-q4k.gguf
+- `LOCAL_GGUF_MAX_TOKENS`
+- `LOCAL_GGUF_THREADS`
+- `LOCAL_GGUF_THREADS_BATCH`
+- `LOCAL_GGUF_TEMPERATURE`
+- `LOCAL_GGUF_TOP_P`
+- `LOCAL_ALLOW_UNCENSORED_AUTODISCOVERY`
 
-Recommended local placement:
+Chat orchestration controls:
 
-- `models/gguf/madlad400-3b-mt/model-q4k.gguf`
+- `COGNITIVE_CHAT_ORCHESTRATION`
+- `COGNITIVE_CHAT_PRIMARY_ROLE`
+- `COGNITIVE_CHAT_REVIEW_ROLE`
+- `COGNITIVE_CHAT_REVIEW_MODE`
 
-Resolver treats `madlad400` as translator-priority inside translator role.
+## Context and Budgeting
 
-## Optional `.env` tuning
+The runtime explicitly tracks:
 
-- `LOCAL_MODELS_DIR=models/gguf`
-- `LOCAL_GGUF_N_CTX=2048`
-- `LOCAL_GGUF_TEMPERATURE=0.25`
-- `LOCAL_GGUF_MAX_TOKENS=220`
-- `LOCAL_GGUF_MAX_LOADED=2`
+- estimated input tokens,
+- configured `n_ctx`,
+- reserved output budget,
+- actual `max_tokens`,
+- prompt-near-limit conditions,
+- truncation.
 
-## Split GGUF notes
+This makes it possible to distinguish:
 
-- If your model files are split:
-  - `qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf`
-  - `qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf`
-- Set env path to shard `00001` (or let resolver auto-remap from shard `00002`).
-- Keep all shards in the same folder with unchanged names.
+1. logical context overload,
+2. model context window exhaustion,
+3. output budget that is too small.
 
-## Ollama
+The same budget metadata is surfaced through request traces, so operators can inspect `n_ctx`, reserved output budget, and near-window warnings after live turns.
 
-- Current local provider uses `llama_cpp` directly (`.gguf`) and does not require Ollama.
-- Ollama can be added as a separate backend, but it is not required for this path.
+## Translator Role
+
+Translation uses a dedicated translator role.
+
+If translator configuration is missing, the system reports that state instead of silently routing translation through an unrelated general model.
 
 ## Notes
 
-- System keeps running in deterministic fallback mode for non-translation flows even if GGUF models are missing.
-- Translation flow requires translator role model when `translate_text` prompt is used.
+- Ollama is not required for the current path; the project uses direct local `GGUF` loading through `llama_cpp`.
+- A missing or incompatible model should degrade the runtime in a visible way, not silently change the controller logic.
+- `models/PersonaAgentwGraphRAG-DE6F/README.md` is kept as an archival research reference, not the canonical description of the current runtime.
+- Model configuration details are runtime concerns and are documented here rather than in the formal report/conclusion documents.

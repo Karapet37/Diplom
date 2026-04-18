@@ -15,8 +15,11 @@ export function Sidebar({
   activeSessionId,
   onSelectSession,
   onCreateSession,
+  onDeleteSession,
+  deletingSessionId,
   personalities,
   selectedPersonality,
+  selectedPersonalitySummary,
   onSelectPersonality,
   onUploadFiles,
   uploadingFiles,
@@ -43,20 +46,31 @@ export function Sidebar({
       <section className="sidebar-block">
         <div className="sidebar-headline">
           <p className="sidebar-title">{t('sidebar_sessions')}</p>
-          <button type="button" className="link-button" onClick={onCreateSession}>{t('sidebar_new_session')}</button>
         </div>
+        <button type="button" className="session-create-button" onClick={onCreateSession}>{t('sidebar_new_session')}</button>
         <div className="queue-list compact session-list">
           {sessions.length ? sessions.map((item) => (
-            <button
-              key={item.session_id}
-              type="button"
-              className={`session-card ${activeSessionId === item.session_id ? 'active' : ''}`}
-              onClick={() => onSelectSession(item.session_id)}
-            >
-              <strong>{item.title || t('sidebar_untitled_session')}</strong>
-              <span>{item.updated_at || ''}</span>
-              <p>{(item.messages || []).slice(-1)[0]?.message || t('sidebar_session_empty')}</p>
-            </button>
+            <div key={item.session_id} className="session-list__row">
+              <button
+                type="button"
+                className={`session-card ${activeSessionId === item.session_id ? 'active' : ''}`}
+                onClick={() => onSelectSession(item.session_id)}
+              >
+                <strong>{item.title || t('sidebar_untitled_session')}</strong>
+                <span>{item.updated_at || ''}</span>
+                <p>{(item.messages || []).slice(-1)[0]?.message || t('sidebar_session_empty')}</p>
+              </button>
+              <button
+                type="button"
+                className="session-delete-button button-secondary"
+                onClick={() => onDeleteSession(item.session_id)}
+                disabled={deletingSessionId === item.session_id}
+                title={t('sidebar_delete_session')}
+                aria-label={t('sidebar_delete_session')}
+              >
+                ×
+              </button>
+            </div>
           )) : <div className="empty-inline">{t('sidebar_no_sessions')}</div>}
         </div>
       </section>
@@ -69,13 +83,19 @@ export function Sidebar({
             <select value={selectedPersonality || ''} onChange={(event) => onSelectPersonality(event.target.value)}>
               <option value="">{t('chat_personality_none')}</option>
               {personalities.map((item) => (
-                <option key={item.name} value={item.name}>{item.profile?.name || item.name}</option>
+                <option key={item.name} value={item.name}>{item.label || item.profile?.name || item.name}</option>
               ))}
             </select>
+            {selectedPersonalitySummary ? (
+              <div className="sidebar-persona-summary" title={selectedPersonalitySummary.hover_text || ''}>
+                <strong>{selectedPersonalitySummary.label || selectedPersonalitySummary.name}</strong>
+                <span>{selectedPersonalitySummary.short_description || selectedPersonalitySummary.hover_text || ''}</span>
+              </div>
+            ) : null}
           </label>
           <label className="field-stack compact span-2">
             <span>{t('files_upload')}</span>
-            <input type="file" accept=".txt,.md,.json,.csv" multiple onChange={(event) => onUploadFiles(event.target.files)} />
+            <input type="file" accept=".txt,.md,.json,.csv,.pdf,.docx,.odt,.fb2" multiple onChange={(event) => onUploadFiles(event.target.files)} />
           </label>
         </div>
         <div className="header-actions">

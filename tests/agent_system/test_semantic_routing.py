@@ -59,3 +59,25 @@ def test_semantic_focus_generalizes_beyond_fixed_prompt_wording(tmp_path, monkey
 
     assert 'decision' in payload['focus']
     assert payload['evidence']['decision']
+
+
+def test_neutral_persona_worldbuilding_statement_is_not_misread_as_user_distress() -> None:
+    prepared = analyze_message_state(
+        message='вампиры питаются кровью, в стае они полагаются на вожака, а сила вожака растет через линию укуса',
+        session_id='persona_worldbuilding',
+        selected_head='Вампир',
+        current_entity='Вампир',
+        session_persona='Вампир',
+        known_entities=[],
+    )
+    situation = model_situation(
+        message=prepared['message'],
+        primary_entity=prepared['primary_entity'],
+        selected_head=prepared['selected_head'],
+        user_state=prepared['user_state'],
+    )
+
+    assert prepared['user_state'].intent == 'statement'
+    assert prepared['user_state'].tone == 'neutral'
+    assert situation.target == 'persona'
+    assert situation.type == 'neutral_statement'

@@ -1,520 +1,524 @@
-# ԳԼՈՒԽ 3. PERSONA-GRAPH-AGENT ՀԱՄԱԿԱՐԳԻ ՃԱՐՏԱՐԱՊԵՏԱԿԱՆ ԵՎ ԾՐԱԳՐԱՅԻՆ ՆԿԱՐԱԳՐՈՒԹՅՈՒՆԸ
+# ԳԼՈՒԽ 3. `PERSONA-GRAPH-AGENT` ՀԱՄԱԿԱՐԳԻ ՃԱՐՏԱՐԱՊԵՏԱԿԱՆ ԵՎ ԾՐԱԳՐԱՅԻՆ ՆԿԱՐԱԳՐՈՒԹՅՈՒՆԸ
 
-## 3.1. Առաջարկվող համակարգի ընդհանուր գաղափարը
+## 3.1. Համակարգի նպատակը և հիմնական գաղափարը
 
-Այս աշխատանքում ներկայացվում է `Persona-Graph-Agent` համակարգը, որը կառուցված է ոչ թե անմիջական `հաղորդագրություն -> պատասխան` սկզբունքով, այլ վիճակային անցումների վերահսկվող ճարտարապետությամբ։
+Մշակված համակարգի նպատակը սովորական `LLM`-հենված chat պատասխանից անցնելն է դեպի վերահսկվող agent runtime, որտեղ յուրաքանչյուր հարցում անցնում է հստակ սահմանված ծրագրային փուլերով։ Համակարգը միավորում է՝
 
-Համակարգի հիմնական գաղափարն այն է, որ օգտատիրոջ հաղորդագրությունը դիտարկվում է որպես ազդեցություն համակարգի ընթացիկ վիճակի վրա։ Հաղորդագրությունը պետք է պարզի.
+- երկխոսության հիշողություն,
+- կառուցվածքային persona հիշողություն,
+- knowledge graph,
+- կոգնիտիվ վարքային pipeline,
+- փաստաթղթերի ընդունում և մշակում,
+- route-based response generation,
+- validation և repair։
 
-- ինչ է փոխվում ընթացիկ վիճակում,
-- որ persona-ն է խոսողը,
-- որն է քննարկվող թեման,
-- ինչ ռիսկեր և առաջնահերթություններ են ակտիվանում,
-- ինչ նյութեր պետք է մտնեն ընթացիկ աշխատանքային համատեքստ։
+Հիմնական գաղափարն այն է, որ model-ը ինքնին համակարգը չէ։ Այն օգտագործվում է միայն այն տեղերում, որտեղ պետք է՝
 
-Միայն այս փուլերից հետո է թույլատրվում ձևավորել վերջնական պատասխանը։
+- կառուցվածքային knowledge extraction,
+- սահմանափակված response generation,
+- reviewer/rewrite գործառույթ։
 
-Համակարգի ընդհանուր սկզբունքը հետևյալն է.
+Մնացած որոշումները կատարվում են deterministic controller-ի կողմից։
+
+Կանոնական գործառնական հոսքը հետևյալն է․
 
 ```text
-օգտատիրոջ հաղորդագրություն
--> ընթացիկ վիճակի ընթերցում
--> ազդեցության մեկնաբանում
--> սահմանափակ state transition
--> working context-ի կառուցում
--> working context-ի review
--> response shaping
--> final generation
--> transition logging
--> current context persistence
+request
+-> controller interpretation
+-> route selection
+-> capability planning
+-> cognitive pipeline (P1–P6)
+-> bounded context assembly
+-> state transition / response shaping
+-> generation
+-> validation
+-> repair
+-> persistence
 ```
 
-Այստեղ լեզվային մոդելը դիտարկվում է որպես ստորադաս հաշվարկային բաղադրիչ, ոչ թե որպես ամբողջ համակարգը ղեկավարող օբյեկտ։
+Այս մոտեցումը կանխում է մի շարք կարևոր խնդիրներ՝
 
-Համակարգի կառուցման նպատակը երեք հիմնական խնդիր լուծելն է.
+- persona description-ի essay-ի վերածումը,
+- lightweight հարցումների անցումը ծանր graph pipeline-ով,
+- prompt-ի գերբեռնվածությունը,
+- persona registry-ի աղտոտումը file label-երով կամ prompt debris-ով,
+- model-ի կողմից route-ի ինքնուրույն ընտրությունը,
+- model-ի կողմից վարքային action-ի ինքնուրույն հորինումը։
 
-- persona-ն ներկայացնել որպես կառուցվածքային և երկարատև օբյեկտ,
-- հիշողությունը բաժանել հստակ շերտերի,
-- պատասխանն ստանալ ոչ թե անմիջապես մուտքային հարցից, այլ վերանայված աշխատանքային համատեքստից։
+## 3.2. `controller-first` runtime-ի կառուցվածքը
 
-Գործնական տեսանկյունից սա նշանակում է, որ runtime-ը պետք է կարողանա.
+### 3.2.1. Request intake
 
-- պահպանել նույնականությունը երկար session-ների ընթացքում,
-- տարբերակել խոսող persona-ն և քննարկվող թեման,
-- չխառնել long-term memory-ն և current context-ը,
-- թույլ չտալ, որ model-ը ինքնուրույն վերագրի իրեն նոր բնութագրեր կամ վերագրի չստուգված փաստեր graph-ին,
-- պահել պատճառական կապը state, memory և final answer-ի միջև։
+Յուրաքանչյուր turn-ի համար ստեղծվում է `RequestEnvelope`, որը պարունակում է՝
 
-Այս մոտեցումը հատկապես կարևոր է persona-driven համակարգերի դեպքում, քանի որ այստեղ պատասխանի աղբյուրը միայն knowledge base-ը չէ։ Պատասխանի ձևավորման աղբյուր են նաև.
+- `request_id`
+- `session_id`
+- `raw_text`
+- `normalized_text`
+- `timestamp`
 
-- persona traits-ը,
-- decision patterns-ը,
-- learned interaction patterns-ը,
-- session continuity-ը,
-- current role-ը,
-- mood dynamics-ը։
+Այս շերտը ապահովում է request traceability և հետագա observability-ի հիմքը։
 
-## 3.2. Persona-Graph-Agent համակարգի կառուցվածքային նկարագրությունը
+### 3.2.2. Controller interpretation
 
-### 3.2.1. Համակարգի հիմնական շերտերը
+Նոր ճարտարապետության առանցքային շերտը `controller_runtime.py` մոդուլն է, որը մեկ հոսքի մեջ համադրում է՝
 
-Գործող համակարգը կազմված է հետևյալ հիմնական շերտերից.
+- `interaction frame`
+- `message analysis`
+- `request preprocessing`
+- `route decision`
+- `capability plan`
 
-1. `persona structure`
-2. `graph logic`
-3. `file-based memory`
-4. `state transition runtime`
-5. `current working context layer`
-6. `staged prompt system`
-7. `mood research layer`
-8. `operator UI և diagnostics`
+Արդյունքում route logic-ը այլևս ցրված չէ տարբեր մոդուլներով և հակասական կրկնություն չի ստեղծում։
 
-Այս շերտերը համատեղ ապահովում են, որ համակարգը չդառնա սովորական polite assistant, այլ գործի որպես վերահսկվող persona-runtime։
+### 3.2.3. Request preprocessing
 
-### 3.2.2. Persona կառուցվածքը
+`request_pipeline.py` մոդուլում request-ը ստանում է հետևյալ բնութագրերը՝
 
-Persona-ն համակարգում ներկայացված է որպես բազմաշերտ stateful կառուցվածք։ Այն բաժանված է երեք հիմնական շերտերի.
+- `detected_language`
+- `intent_type`
+- `interaction_mode`
+- `request_type`
+- `persona_style_traits`
+- `speech_style_hints`
+- `clarification_needed`
 
-- `baseline definition`
-- `dynamic emotional state`
-- `learned interaction patterns`
+Համակարգը տարբերակում է առնվազն հետևյալ request type-երը՝
 
-Այս բաժանումը թույլ է տալիս տարբերակել.
+- `factual_query`
+- `roleplay_prompt`
+- `persona_specification`
+- `persona_assignment`
+- `persona_analysis`
+- `persona_chat`
+- `document_request`
+- `meta_previous_answer`
+- `general_chat`
+- `project_architecture_request`
+- `clarification_request`
 
-- what the persona is,
-- how the persona currently feels,
-- what the persona has learned from interaction.
+Սա կարևոր է, քանի որ, օրինակ, հարուստ persona dossier-ը պետք է ճանաչվի որպես `persona_specification`, ոչ թե սովորական chat turn։
 
-Persona-ի կառուցվածքում առկա են.
+### 3.2.4. Route selection
 
-- traits,
-- roles,
-- habits,
-- reaction patterns,
-- values,
-- conflicts,
-- topic affinities,
-- speech tendencies,
-- memories,
-- relations,
-- decision patterns,
-- local graph links։
+Յուրաքանչյուր request-ի համար ձևավորվում է `RouteDecision`, որը ներառում է՝
 
-Persona subsystem-ի կարևոր առանձնահատկությունն այն է, որ այն չի պահվում մեկ միասնական “description” դաշտում։ Յուրաքանչյուր շերտ ունի իր դերը.
+- `selected_route`
+- `request_type`
+- `requires_history`
+- `requires_graph`
+- `requires_persona`
+- `requires_llm`
+- `strict_grounding`
+- `response_style`
+- `validation_mode`
+- `fast_path`
 
-- baseline-ը պահպանում է համեմատաբար կայուն նույնականությունը,
-- dynamic state-ը պահպանում է ընթացիկ հուզական և իրավիճակային փոփոխությունները,
-- learned patterns-ը պահպանում է փոխազդեցությունից ստացված սահմանափակ սովորած վարքագիծը։
+Ակտիվ հիմնական route-երն են՝
 
-Այս բաժանումը թույլ է տալիս միաժամանակ պահպանել persona-ի կայունությունը և թույլատրել սահմանափակ ադապտացիա։
+- `factual_answer`
+- `lightweight_conversation`
+- `hypothetical_roleplay`
+- `persona_chat_fast_path`
+- `persona_specification`
+- `persona_assignment`
+- `persona_dialogue_analysis`
+- `persona_graph_reasoning`
+- `project_document_analysis`
+- `meta_previous_answer`
+- `clarification_request`
 
-### 3.2.3. Graph memory
+Route-ը որոշում է ոչ միայն generation-ի ձևը, այլ նաև այն, թե որ context layer-երն են պետք և ինչ validation պետք է կիրառվի։
 
-Graph memory-ն հանդիսանում է երկարաժամկետ կառուցվածքային հիշողության հիմնական շերտը։ Այն պահվում է `memory/graphs/` կատալոգում և բաղկացած է.
+### 3.2.5. Capability planning
 
-- `nodes.json`
-- `edges.json`
+`CapabilityPlan` շերտը որոշում է, թե տվյալ request-ի համար ինչ է անհրաժեշտ՝
 
-Graph layer-ը պատասխանատու է.
+- history-ի բեռնում,
+- graph retrieval,
+- persona-ի բեռնում,
+- heavy persona pipeline,
+- context builder,
+- deterministic reply,
+- `LLM` generation,
+- reviewer pass։
 
-- գիտելիքի կառուցվածքային պահպանման,
-- entity և relation grounding-ի,
-- duplicate resolution-ի,
-- node lifecycle-ի,
-- hygiene-ի,
-- rethink preview/apply հոսքերի համար։
+Այս մեխանիզմը թույլ է տալիս lightweight turn-երը չուղարկել անիմաստ ծանր հաշվարկի։
 
-Գրաֆի հանգույցների համար կիրառվում են lifecycle states.
+## 3.3. Համակարգի հիմնական ծրագրային մոդուլները
 
-- `active`
-- `weak`
-- `suspect`
-- `archived`
-- `merged`
+### 3.3.1. `chat_engine.py`
 
-Graph-ը համակարգում կատարում է միանգամից մի քանի դեր.
+`chat_engine.py`-ը runtime orchestration layer-ն է։ Այն՝
 
-- entity grounding,
-- knowledge organization,
-- persona-local relation storage,
-- context support,
-- operator inspection surface։
+- ստանում է request-ը,
+- աշխատում է controller state-ի հետ,
+- early fast path-ով սպասարկում է note command-երը,
+- ընտրում է fast path կամ heavy path,
+- **pre-flight-ով ստուգում է runtime-ի վիճակը** — եթե degraded, `LLM` call-ը շրջանցվում է andb behavioral fallback-ին ուղղակի անցնում,
+- planning/regulator/safety/localization շերտերը միացնում է `route_guidance`-ի հետ,
+- կառուցում է context-ը,
+- կանչում է generation և reviewer փուլերը,
+- կիրառում է validation և repair,
+- գրում է session history,
+- թարմացնում է route memory-ը,
+- գրանցում է trace և response metadata observability store-ում։
 
-Համակարգում կարևոր է, որ graph-ը դիտվում է որպես semantic memory layer, ոչ թե միայն visualization resource։
+### 3.3.2. `controller_runtime.py`
 
-### 3.2.4. Հիշողության շերտերը
+Այս մոդուլը կենտրոնացնում է request interpretation-ը մեկ հոսքի մեջ։ Այն ապահովում է, որ analysis, preprocessing, route selection և capability planning փուլերը օգտագործեն նույն input view-ը և միմյանց հետ չմտնեն հակասության մեջ։
 
-Համակարգի հիշողությունը բաժանված է մի քանի մակարդակի.
+### 3.3.3. `request_pipeline.py`
 
-- `working memory`
-- `session memory`
-- `persona memory`
-- `graph knowledge memory`
-- `archive / cold memory`
+Այս մոդուլը պատասխանատու է՝
 
-Այս շերտավորումը թույլ է տալիս մեկտեղել.
+- request classification-ի,
+- route selection-ի,
+- route guidance-ի,
+- deterministic fast-path reply-ների,
+- validation rule-երի համար։
 
-- ընթացիկ երկխոսության ակտիվ բովանդակությունը,
-- երկարաժամկետ persona knowledge-ը,
-- graph-grounded facts-ը,
-- արխիվային և ցուրտ storage-ը։
+### 3.3.4. `cognitive_pipeline.py` և `genome.py`
 
-Layered memory model-ը կանխում է երկու հիմնական խառնաշփոթ.
+Կոգնիտիվ pipeline-ը 6-փուլ deterministic ճարտարապետություն է, որն աշխատում է ամեն heavy persona turn-ի վրա։
 
-- երբ ամբողջ անցյալը միանգամից լցվում է prompt-ի մեջ,
-- երբ համակարգը չի տարբերակում, թե որն է ընթացիկ ակտիվ context-ը, իսկ որը՝ արխիվային նյութ։
+**P1 — EventEncoder**․ Ինկոդում է incoming text-ը event probability vector-ի և intensity signal-ի մեջ։ 14 event type՝ `neutral`, `threat`, `reward`, `overload`, `shame_trigger`, `loss_of_control`, `failure`, `criticism`, `rejection`, `intimacy`, `opportunity`, `boredom`, `novelty`, `uncertainty`։
 
-### 3.2.5. Mood research layer
+**P2 — TriggerNetwork**․ Ակտիվացնում է genome-derived trigger weights-ը event vector-ի և intensity-ի դեմ։
 
-Համակարգում առկա է նաև ֆոնային mood research շերտ, որի նպատակն է ուսումնասիրել.
+**P3 — RegulatorCell**․ GRU-like cell, որը թարմացնում է 10-չափ regulator state-ը (anxiety, motivation, fatigue, shame, frustration, guilt, closeness, hope, emptiness) trigger activations-ից և genome-ից։
 
-- օգտատիրոջ վարքային և հուզական ազդակները,
-- persona-ի ներքին դինամիկան,
-- mood cluster-ները,
-- role choice-ի և response style-ի կապերը։
+**P4 — ThoughtMLP**․ Արտադրում է 16-չափ thought vector trigger-ներից և regulator state-ից։ Ներառում է perceived risk, confidence, need dimensions (connection / achievement / safety) և frame dimensions (approach / hold / retreat)։
 
-Այս շերտը պահվում է `memory/mood_research/` կատալոգում և ապահովում է.
+**P5 — ConflictScorer**․ Scoring 8 resolution strategies-ի (avoidance, overcompensation, attack, freeze, planning, support-seeking, self-deception)։
 
-- snapshots,
-- clustering,
-- transition analysis,
-- interpretable summaries,
-- role-effect reports։
+**P6 — ActionPolicy**․ MLP, ընտրում է 14 action family-ներից մեկը (approach, avoid, freeze, attack, placate, analyze, ask_for_help, seek_control, reduce_exposure, reframe, self_protect, connect, withdraw, plan_small_step)։
 
-Mood research layer-ը runtime-ում օգտագործվում է ոչ թե որպես ազատ մեկնաբանող agent, այլ որպես աջակցող analytical layer, որը կարող է ազդել.
+`PersonalityGenome`-ը պահում է persona-ի կայուն trait-ները float field-երով՝ fears, defense mechanisms, vulnerabilities, drive profile։
 
-- social role ընտրության,
-- uncertainty posture-ի,
-- response style-ի,
-- diagnostics-ի վրա։
+`CognitiveRuntime.__init__`-ը օգտագործում է fixed seed weight initialization-ի համար, isolated from global numpy state, ապահովելով deterministic արդյունքներ test order-ից անկախ։
 
-### 3.2.6. Operator interface
+### 3.3.5. `cognitive_authority.py` և `speech_planner.py`
 
-Frontend-ը կառուցված է որպես operator workspace, ոչ թե որպես պարզ chat window։ Այն ներառում է առանձին մակերեսներ հետևյալ խնդիրների համար.
+`CognitiveAuthority`-ը scoring-ի հիման վրա ընտրում է generation mode-ը՝
 
-- chat,
-- graph workspace,
-- persona inspection,
+- `pure_llm` (score < 0.20): pipeline-ը բավական ակտիվ չէ, legacy prompt-ն է օգտագործվում
+- `hint` (score < 0.55): cognitive hint-ը inject է արվում `route_guidance`-ի մեջ
+- `planner` (score ≥ 0.55): `SpeechPlanner` path — ամբողջ կառուցվածքը pipeline-ից է գալիս
+
+`SpeechPlanner.build()`-ը `CognitiveTurnOutput`-ը վերածում է structured `SpeechPlan`-ի, ներառելով action name, speech goal, tone, key points, blocked topics, style hints, max tokens։
+
+`verbalizer_prompt(plan)`-ը կառուցում է verbalization prompt-ը, ուր PERSONA + RECENT EXCHANGE → system role, SPEECH DIRECTIVE → user role (разделено `"User question:"` separator-ով)։
+
+Planner mode-ը ակտիվ է միայն score ≥ 0.55 դեպքում — session history-ի և graph data-ի կուտակումից հետո։ Ранние turn-երի համար legacy prompt + cognitive hint-ն ավելի հուսալի է 2B model-ների համար։
+
+### 3.3.6. `state_transition_runtime.py`
+
+Այս մոդուլը orchestrate է անում LLM-guided enrichment stages-ի շարք, որոնք աշխատում են context building-ի և generation-ի միջև։
+
+Փուլերն են՝
+
+- `state_reader` — կարդում է persona state snapshot-ը
+- `persona_update` — թարմացնում է emotion vector-ը և situation reactions-ը
+- `bounded_state_transition` — ընտրում է next active role, risk posture, mood signals
+- `context_curator` — curate է working context layer-ը
+- `context_reviewer` — review-ում է context-ը հակասությունների և priorities-ի համար
+- `response_shaping` — ձևավորում է response style, behavior mode, constraints
+
+Ամեն փուլ կանչում է `call_json_model_for_role` և gracefully fallback է deterministic output-ի, երբ `LLM`-ը useful բան չի վերադարձնում։ Ամեն փուլ independently gate է `COGNITIVE_STAGE_MODEL_STEPS` env variable-ով։
+
+### 3.3.7. `reliability.py`
+
+`reliability.py`-ը ապահովում է atomic rollback guarantees և runtime health reporting։
+
+`StorageWriteFailure` — raise-ի է, երբ graph կամ persona write-ը ձախողվում է ճանապարհի կեսին։ Caller-ը restore է անում նախորդ snapshot-ը։ `graph_store.save_graph()` և `persona_engine.materialize_persona()` snapshot-ի են state-ը write-ից առաջ և rollback-ի են ձախողման դեպքում։
+
+`MutationRejectedFailure` — raise-ի է, երբ node rethink-ը apply-ի է description update, բայց հաջորդ graph mutation-ը (link connection) ձախողվում է։ Node description-ը rollback-ի է, snapshot path-ը include-ի է `details`-ում։
+
+`runtime_status_snapshot()` — inspect-ի է local `LLM` provider-ը, վերադարձնում է `mode` (`full` կամ `degraded`) dict — pre-flight check generation-ից առաջ։
+
+### 3.3.8. `head_caller.py`
+
+`head_caller.py`-ը պատասխանատու է persona head-ի ընտրության համար։
+
+Այն՝
+
+- prepare-ի է candidate heads-ը analysis-ից, classifications-ից, graph store-ից,
+- ընտրում է primary head-ը,
+- normalize-ի է personality name-ը։
+
+### 3.3.9. `node_rethinker.py`
+
+`node_rethinker.py`-ը graph node-ի intelligent rethink-ի engine-ն է։
+
+Այն՝
+
+- կանչում է `LLM`-ը node description-ը բարելավելու համար,
+- suggest-ի է նոր link-եր,
+- apply-ի է changes graph-ում,
+- rollback-ի է ամբողջ mutation-ը, եթե link connection-ը ձախողվում է (reliability layer-ի կողմից)։
+
+### 3.3.10. `history_store.py`
+
+`history_store.py`-ը պահպանում է՝
+
+- session log-երը,
+- route state sidecar file-երը,
+- session continuity-ի համար անհրաժեշտ տվյալները,
+- session delete lifecycle-ը։
+
+### 3.3.11. `persona_engine.py`
+
+`persona_engine.py`-ը համակարգի առանցքային շերտերից է։ Այն իրականացնում է՝
+
+- persona creation,
+- persona validation,
+- registry hygiene,
+- rejected candidate-ների quarantine,
+- persona storage և activation,
+- snapshot-based rollback `materialize_persona`-ում։
+
+Persona-ն պահվում է որպես կառուցվածքային object, որի հիմնական դաշտերն են՝
+
+- `identity`
+- `core_goal`
+- `secondary_goals`
+- `fears`
+- `needs`
+- `constraints_internal`
+- `constraints_social`
+- `constraints_hard_system`
+- `allowed_methods`
+- `maladaptive_methods`
+- `core`
+- `conflict`
+- `defense`
+- `behavior`
+- `dynamics`
+- `meta`
+
+Believable behavior-ը ստացվում է հետևյալ կոմբինացիայից․
+
+```text
+goal + fears + constraints + methods + trigger
+```
+
+### 3.3.12. `graph_store.py`
+
+`graph_store.py`-ը knowledge graph memory-ի file-first շերտն է։ Այն ապահովում է՝
+
+- nodes/edges merge,
+- duplicate resolution,
+- lifecycle hygiene,
+- session-aware provenance,
+- graph retrieval,
+- node explanation view,
+- snapshot-before-write + rollback-on-failure (reliability layer-ի կողմից)։
+
+### 3.3.13. `context_builder.py`
+
+`context_builder.py`-ը իրականացնում է bounded context packing։
+
+Հիմնական տրամաբանությունը հետևյալն է․
+
+```text
+collect -> score -> rank -> pack
+```
+
+Context priority-ն հետևյալն է՝
+
+1. ընթացիկ turn-ի պահանջը,
+2. current session evidence,
+3. active persona block,
+4. local graph evidence,
+5. միայն դրանից հետո global graph evidence։
+
+### 3.3.14. `file_ingestion.py`
+
+Աջակցվող ձևաչափերն են՝ `txt`, `md`, `json`, `csv`, `pdf`, `docx`, `odt`, `fb2`։
+
+`pdf` ֆայլերի դեպքում կիրառվում է section-aware extraction։
+
+### 3.3.15. `llm.py` և `prompt_builder.py`
+
+`llm.py`-ը unified inference wrapper-ն է, իսկ `prompt_builder.py`-ը կատարում է compact prompt construction։
+
+Այս շերտը ներառում է՝
+
+- token budgeting,
+- section budget-եր,
+- reserved output budget,
+- compatibility-aware role selection,
+- reviewer orchestration,
+- thinking model support (`_strip_think_blocks`)։
+
+Thinking model-ները (Qwen3.5-2B, Nanbeige4.1-3B) emit-ի են internal reasoning block-ներ։ `_strip_think_blocks()` handle-ի է 3 output format — full `<think>...</think>`, template-hidden (`reasoning\n</think>\n\nAnswer`), truncated unclosed block — և վերադարձնում է միայն answer portion-ը։
+
+### 3.3.16. `notes_store.py` և `planning_engine.py`
+
+`notes_store.py`-ը ապահովում է lightweight manual note system, totally separated from graph memory-ից և session history-ից։
+
+Command-երը՝ `/save <text>`, `/notes`, `/del_note <index|id>`, `/clear_notes` — мошакатывается безо LLM call-ի։
+
+`planning_engine.py`-ը ստեղծում է bounded planning structure, ուր `LLM`-ը verbalize-ի է արդեն ընտրված frame-ը, ոչ թե ինքն ընտրում է կառուցվածքը։
+
+### 3.3.17. `situation_regulator.py` և `behavioral_action_engine.py`
+
+`situation_regulator.py`-ը event → regulator → action architecture-ն է legacy path-ի համար (non-persona routes)։
+
+`behavioral_action_engine.py`-ը ապահովում է behavioral fallback decisions, ընտրելով strategy, confidence, risk level, uncertainty level — degraded կամ model-failure վիճակներում։
+
+### 3.3.18. `importance_learner.py`
+
+`importance_learner.py`-ը collect-ի է positive signals-ը `/save` command-ից, weak negative signals-ը non-saved turn-երից, ու stage 2-ի համար suggestion candidates-ը prepare-ի է per-session importance profile-ի հիման վրա։
+
+### 3.3.19. `personality_schema.py` և `personality_store.py`
+
+Ավելի խոր `PersonalityObject` construction model, ուր psychological profile field-երը, biography fact-երը, temporary state-ը, provenance-ը, conflict record-երը ամբողջությամբ տարանջատված են։
+
+### 3.3.20. `observability.py` և `training_examples_store.py`
+
+`observability.py`-ը գրանցում է request trace-եր, stage timing-եր, fallback reason-եր, context token estimate-ներ, response metadata, rebuild/rethink counter-ներ։
+
+`training_examples_store.py`-ը թույլ է տալիս պահել `(input, correct_output)` օրինակներ և JSONL ձևաչափով export-ի անել fine-tuning dataset-երի համար։
+
+## 3.4. Persona architecture և behavior control
+
+### 3.4.1. Persona registry hygiene
+
+Համակարգում persona registry-ը չի ընդունում file/media label-եր, ontology junk (`Human`, `File`, `PDF`), raw prompt fragment-եր, behaviorless noun-եր, extraction debris-ը կամ random entity leftover-ներ։ Rejected candidate-ները պահվում են quarantine log-երում։
+
+### 3.4.2. Persona readiness
+
+Persona object-ները տարբերակվում են ըստ readiness-ի՝ `seed`, `draft`, `full`։
+
+### 3.4.3. Fragile persona validator
+
+Fragile կամ shame-based persona-ների համար համակարգը ստուգում է, որ պատասխանը չափազանց խելացի, lecture-like, երկար կամ ինքնավստահ չլինի։
+
+## 3.5. Prompt packing և generation orchestration
+
+### 3.5.1. Compact prompt packing
+
+Համակարգը compact-ի է persona block-ը, session history-ն, graph evidence-ը, instruction block-ը — maksimum useful density-ի, ոչ թե maximum mass-ի։
+
+### 3.5.2. Primary + reviewer generation
+
+Runtime-ը supports-ի է `single`, `primary_with_reviewer`, `alternate`, `randomized` orchestration mode-եր։
+
+Reviewer-ն օգտագործվում է route mismatch detection-ի, style mismatch repair-ի, truncation repair-ի, invalid draft rewrite-ի համար։
+
+### 3.5.3. Degradation detection
+
+`runtime_status_snapshot()`-ի pre-flight check-ը generation-ից **ԱՌԱՋ** detect-ի է degraded LLM runtime-ը։ Degraded դեպքում `LLM` call-ը skip-ի է entirely, behavioral fallback-ն է ընտրվում — `fallback_reason = 'dependency_unavailable'`։ String comparison-ը (`reply == generic_fallback`) ամբողջությամբ eliminated-ն է։
+
+### 3.5.4. Validation and repair
+
+Generation-ից հետո՝ route consistency, persona consistency, truncation, repetition loop, grounding mismatch, style mismatch, fallback reason correctness ստուգումները։ Ձախողման դեպքում pipeline-ը apply-ի է regeneration, style-guard regeneration, reviewer rewrite, կամ deterministic fallback։
+
+## 3.6. Storage layout
+
+```text
+memory/
+  sessions/
+    {session_id}.txt
+    _route_state/
+  notes/
+    {session_id}.jsonl
+  personalities/
+    personalities_index.json
+    {personality_id}.json
+  training_examples/
+    global.jsonl
+    {session_id}.jsonl
+  importance_learner/
+    global_examples.jsonl
+    {session_id}_examples.jsonl
+  files/
+    uploaded_documents/
+      {session_id}/
+  graphs/
+    nodes.json
+    edges.json
+  heads/
+    index.json
+    {persona_slug}/
+  archive/
+
+runtime/
+  current_context/
+  logs/
+  system_realism_reports/
+```
+
+## 3.7. Operator interface
+
+Frontend-ը կառուցված է operator workspace-ի տեսքով, ներառելով session list, persona selection/inspection, personality delete, training-example curation, file upload, chat surface, graph workspace, graph rethink preview/apply workflow, debug traces, diagnostics։
+
+Ներկայում frontend-ն առանձին UI surface չունի `/notes` և planning-mode output-ի համար, բայց backend API-ն արդեն հասանելի է։
+
+## 3.8. Թեստավորում և ընթացիկ արդյունքները
+
+Backend test suite-ը գտնվում է `tests/agent_system/` շերտում և охватывает՝
+
+- routing correctness,
+- cognitive pipeline — attractor tests-ը real datasets-ի վրա,
+- persona creation, validation, registry hygiene,
+- graph merge, retrieval, lifecycle, hygiene, localizer,
+- node rethinker — rollback correctness,
+- reliability — StorageWriteFailure, MutationRejectedFailure rollback-ներ,
+- state transition runtime,
+- behavioral fallback decisions,
+- social persona system,
+- task procedures,
+- trace learning,
 - file ingestion,
-- diagnostics։
-
-Operator interface-ի առկայությունը ճարտարապետական տեսանկյունից կարևոր է, քանի որ համակարգը նախատեսված է ոչ միայն runtime execution-ի, այլ նաև դիտարկելիության, ստուգման և վերահսկման համար։
-
-## 3.3. Persona-Graph-Agent համակարգի ծրագրային նկարագրությունը
-
-### 3.3.1. Գլխավոր runtime path-ը
-
-Համակարգի հիմնական գործարկման կետը `start.py` ֆայլն է։ Գործող runtime path-ը հետևյալն է.
-
-```text
-start.py
-  -> bootstrap_runtime_environment()
-  -> get_runtime_config()
-  -> src.web.combined_app.create_combined_app()
-    -> agent_system.api.create_app()
-    -> src.web.api.attach_frontend_routes()
-```
-
-Այսպիսով, տեղային գործարկման դեպքում համակարգը իրենից ներկայացնում է combined app, որտեղ միևնույն runtime միջավայրում միավորված են.
-
-- backend API,
-- frontend routes,
-- operator UI։
-
-Այս runtime path-ը կարևոր է, որովհետև այն ցույց է տալիս, որ համակարգի իրական աշխատանքային միջավայրը միասնական է. backend-ը, diagnostics-ը և operator surface-ը միմյանցից անջատ չեն։
-
-### 3.3.2. Backend-ի հիմնական մոդուլները
-
-Գլխավոր backend տրամաբանությունը կենտրոնացած է `agent_system/` կատալոգում։
-
-Հիմնական ակտիվ մոդուլներն են.
-
-- `chat_engine.py`
-- `interaction_routing.py`
-- `message_analyzer.py`
-- `situation_engine.py`
-- `state_transition_runtime.py`
-- `context_builder.py`
-- `persona_engine.py`
-- `graph_store.py`
-- `llm.py`
-- `prompt_builder.py`
-- `history_store.py`
-- `mood_research.py`
-- `observability.py`
-- `reliability.py`
-
-Այս մոդուլների պատասխանատվությունները պայմանականորեն կարելի է բաժանել հինգ խմբի.
-
-1. orchestration and runtime,
-2. state interpretation,
-3. persona and behavior,
-4. graph and memory,
-5. observability and failure handling։
-
-### 3.3.3. Chat runtime-ի հիմնական քայլերը
-
-Մեկ chat turn-ի ընթացքում համակարգը կատարում է հետևյալ քայլերը.
-
-1. ստեղծում կամ բեռնում է session,
-2. բեռնում է ընթացիկ state snapshot-ը,
-3. route-ավորում է interaction-ը,
-4. վերլուծում է հաղորդագրությունը,
-5. կառուցում է structured situation,
-6. ընտրում կամ materialize է persona-head-ը,
-7. թարմացնում է persona dynamic state-ը,
-8. կառուցում է bounded context,
-9. review-ում է context-ը,
-10. ձևավորում է response plan-ը,
-11. կանչում է final generator-ը,
-12. գրում է session history, current context և transition log։
-
-Այս հերթականությունը կարևոր է, որովհետև final answer-ը ստացվում է արդեն վերափոխված և review եղած context-ից, ոչ թե անմիջապես raw user input-ից։
-
-### 3.3.4. Interaction routing
-
-`interaction_routing.py` մոդուլը առանձնացնում է.
-
-- խոսող persona-ն,
-- քննարկվող entity-ն,
-- follow-up mode-ը,
-- explicit persona switch-ը։
-
-Այս մոտեցումը կարևոր է, քանի որ համակարգը պետք է տարբերակի օրինակ հետևյալ երկու դեպքերը.
-
-- երբ օգտատերը խոսում է տվյալ persona-ի հետ,
-- երբ օգտատերը խոսում է մեկ persona-ի հետ, բայց հարցնում է մեկ այլ թեմայի կամ կերպարի մասին։
-
-Այս բաժանումը թույլ է տալիս լուծել context continuity-ի այն խնդիրները, որոնք սովորաբար առաջանում են pronoun follow-up հարցերում, persona switch-ի դեպքերում և topic continuity-ի ընթացքում։
-
-### 3.3.5. Context builder
-
-`context_builder.py` մոդուլը աշխատում է հետևյալ deterministic pipeline-ով.
+- compact context packing,
+- reviewer orchestration,
+- planning mode և notes fast path,
+- behavior regulation,
+- personality construction integrity,
+- observability и trace learning,
+- training example lifecycle,
+- API behavior,
+- memory lifecycle,
+- LLM runtime — fallback_chat_reply contract, thinking model stripping,
+- local LLM provider policy,
+- semantic routing, interaction routing, request pipeline, controller runtime,
+- fallback, degradation, repair logic։
 
 ```text
-collect -> score -> rank -> compress -> pack
+.venv/bin/python -m pytest --collect-only -q tests/agent_system
+382 tests collected
+
+.venv/bin/python -m pytest -q tests/agent_system
+382 passed
 ```
 
-Context sources-ը ներառում են.
+Ամբողջ suite-ն անցնում է 0 failure-ով։
 
-- session short-term history,
-- persona memory,
-- persona triad,
-- global graph facts,
-- local graph neighborhood,
-- file-ingested knowledge,
-- social role,
-- mood research։
-
-Context builder-ի նպատակը ոչ թե “շատ բան հավաքելն” է, այլ ճիշտ բաները սահմանափակ քանակով ընտրելն ու pack անելն այնպես, որ final generator-ը ստանա պատճառականորեն օգտակար context։
-
-### 3.3.6. Staged prompt system
-
-Համակարգում չի օգտագործվում մեկ մեծ prompt։ Փոխարենը կիրառվում է staged prompt architecture, որի հիմնական փուլերն են.
-
-- `INTERACTION_ROUTER`
-- `STATE_READER`
-- `INFLUENCE_INTERPRETER`
-- `STATE_TRANSITION_GUIDE`
-- `CONTEXT_CURATOR`
-- `CONTEXT_REVIEWER`
-- `RESPONSE_SHAPER`
-- `FINAL_GENERATOR`
-
-Այս փուլերի prompt-երը պահվում են `agent_system/prompts/` կատալոգում։
-
-Staged prompt system-ը առանձնացնում է.
-
-- state reading,
-- influence interpretation,
-- bounded transition guidance,
-- context curation,
-- context review,
-- response shaping,
-- final generation։
-
-Այսպիսով, model-ը չի ստանում մեկ խառնված prompt, այլ մասնակցում է սահմանափակ և ստուգելի փուլերի։
-
-### 3.3.7. Current working context-ի առանձին պահպանում
-
-Համակարգում current working context-ը պահվում է առանձին operational շերտում.
-
-- `runtime/current_context/current_context.json`
-- `runtime/current_context/current_context.txt`
-
-Իսկ state transition history-ն պահվում է.
-
-- `runtime/logs/state_transitions.jsonl`
-
-Այս լուծումը թույլ է տալիս չխառնել.
-
-- long-term memory-ն,
-- session history-ն,
-- և ընթացիկ ակտիվ context-ը։
-
-Current context layer-ի առանձին պահպանումը նաև թույլ է տալիս operator-ին տեսնել, թե կոնկրետ որ context-ն է օգտագործվել տվյալ turn-ի ժամանակ։
-
-### 3.3.8. Reliability և observability
-
-Համակարգում ներդրված են նաև reliability և observability շերտեր։
-
-`reliability.py` ապահովում է.
-
-- degraded mode support,
-- snapshot-before-mutation logic,
-- rollback / recovery paths,
-- operator-visible failure signaling։
-
-`observability.py` ապահովում է.
-
-- request tracing,
-- stage timing,
-- fallback tracking,
-- graph health diagnostics,
-- debug endpoints։
-
-## 3.4. Պահոցների և ֆայլային կառուցվածքի նկարագրությունը
-
-### 3.4.1. Գլխավոր ակտիվ կատալոգները
-
-Գործող runtime-ի համար հիմնական ակտիվ շերտերն են.
-
-- `start.py`
-- `agent_system/`
-- `src/web/`
-- `src/utils/`
-- `webapp/`
-- `memory/`
-- `runtime/`
-- `tests/agent_system/`
-- `tests/system_realism/`
-
-Այս կատալոգներն են կազմում current canonical runtime-ի հիմնական տարածքը, և հենց դրանց վրա պետք է հենվել համակարգի ծրագրային նկարագրությունը գրելու ժամանակ։
-
-### 3.4.2. Persona storage
-
-Persona head-երը պահվում են `memory/heads/{head_slug}/` կառուցվածքով։
-
-Տիպային persona bundle-ը ներառում է.
-
-- `baseline.json`
-- `dynamic_state.json`
-- `learned_patterns.json`
-- `traits.json`
-- `relations.json`
-- `examples.json`
-- `emotion_vector.json`
-- `knowledge.txt`
-- `log_tuples.json`
-- `persona_form.json`
-- `decision_explanation.txt`
-- `revisions.json`
-- `meta.json`
-- `local_graph.json`
-
-Այս կառուցվածքը ցույց է տալիս, որ persona-ն համակարգում ոչ թե մեկ տեքստային նկարագրություն է, այլ բազմաֆայլ state bundle։
-
-### 3.4.3. Session storage
-
-Session history-ն պահվում է `memory/sessions/` կատալոգում։
-
-### 3.4.4. Graph storage
-
-Graph storage-ի հիմնական ֆայլերն են.
-
-- `memory/graphs/nodes.json`
-- `memory/graphs/edges.json`
-
-### 3.4.5. File ingestion storage
-
-Բեռնված փաստաթղթերը պահվում են.
-
-- `memory/files/uploaded_documents/`
-
-### 3.4.6. Archive storage
-
-Սառը և վերականգնելի storage շերտերը պահվում են.
-
-- `memory/archive/`
-
-### 3.4.7. Runtime operational artifacts
-
-Runtime-ի ընթացքում ստեղծվող գործող ֆայլերը պահվում են առանձին շերտում.
-
-- `runtime/current_context/current_context.json`
-- `runtime/current_context/current_context.txt`
-- `runtime/logs/state_transitions.jsonl`
-- `runtime/system_realism_reports/`
-
-Այս շերտը կարևոր է, քանի որ այստեղ պահպանվում են ոչ թե long-term memory օբյեկտները, այլ ընթացիկ աշխատանքի և ստուգման արտեֆակտները։
-
-## 3.5. Թեստավորում և ընթացիկ փորձնական արդյունքները
-
-### 3.5.1. Backend regression tests
-
-Համակարգի հիմնական backend test layer-ը գտնվում է.
-
-- `tests/agent_system/`
-
-Այստեղ ստուգվում են.
-
-- chat runtime-ը,
-- state transition-ը,
-- interaction routing-ը,
-- memory lifecycle-ը,
-- graph lifecycle-ը,
-- context pipeline-ը,
-- reliability-ը,
-- API failures-ը։
-
-Վերջին փաստացի արդյունքը.
+Frontend build-ի ստուգման արդյունքը՝
 
 ```text
-python3 -m pytest tests/agent_system -q
-91 passed, 6 skipped
+npm --prefix webapp run build
+passed
 ```
 
-### 3.5.2. End-to-end realism tests
+## 3.9. Գլխի եզրակացություն
 
-Կենդանի runtime-level ստուգումները կատարվում են.
+Կատարված նախագծային և ծրագրային աշխատանքի արդյունքում ձևավորվել է controller-first `Persona-Graph-Agent` runtime, որտեղ՝
 
-- `tests/system_realism/`
+- request-ը նախ դասակարգվում է,
+- route-ն որոշում է ամբողջ հետագա հոսքը,
+- **cognitive pipeline P1–P6**-ը deterministic ձևով հաշվում է behavioral state-ն իր turn-ում,
+- `CognitiveAuthority`-ը ընտրում է `pure_llm`, `hint`, կամ `planner` generation mode,
+- `SpeechPlanner`-ը `planner` mode-ում կառուցում է structured speech plan, LLM-ը verbalize-ի է անում,
+- persona-ն պահվում է կառուցվածքային object-ի տեսքով,
+- graph memory-ն ծառայում է long-term semantic layer-ի տեսքով,
+- **reliability layer**-ը atomic rollback-ներ ապահովում է graph/persona write ձախողումների դեպքում,
+- **degradation detection**-ն pre-flight check-ի է runtime-ի վիճակը LLM call-ից ԱՌԱՋ,
+- **thinking model support**-ն handle-ի է `<think>...</think>` blocks-ը local 2B–3B model-ների output-ում,
+- compact prompt packing-ը կանխում է context overload-ը,
+- validator և reviewer շերտերը բարձրացնում են final answer-ի վերահսկելիությունը։
 
-Այստեղ ստուգվում են.
-
-- իրական startup path-ը,
-- endpoint reachability-ը,
-- persona materialization-ը,
-- live dialogue behavior-ը,
-- persona fidelity-ը,
-- memory continuity-ը,
-- contradiction handling-ը,
-- mutation/evolution scenarios-ը։
-
-Վերջին փաստացի արդյունքը.
-
-```text
-python3 -m pytest tests/system_realism -q
-18 passed
-```
-
-Այս երկու test layer-երը միասին տալիս են հետևյալ պատկերը.
-
-- backend logic-ը ստուգվում է deterministic regression-ներով,
-- live runtime behavior-ը ստուգվում է realism harness-ով,
-- persona behavior, memory continuity և mutation flows-ը ստանում են առանձին verification surface։
-
-## 3.6. Գլխի եզրակացություն
-
-Կատարված ուսումնասիրությունը ցույց է տալիս, որ մեծ համատեքստով և ընդհանրացված օգնականային համակարգերը բավարար չեն, եթե դրանցում բացակայում է persona-ի, հիշողության, graph grounding-ի և state transition-ի խիստ կազմակերպված շերտավորումը։
-
-`Persona-Graph-Agent` համակարգում առաջարկված է այլ ճարտարապետական մոտեցում, որտեղ.
-
-- persona-ն ներկայացվում է որպես կառուցվածքային stateful օբյեկտ,
-- graph-ը գործում է որպես երկարաժամկետ կառուցվածքային հիշողություն,
-- current working context-ը առանձնացված է long-term storage-ից,
-- պատասխանն առաջանում է staged runtime pipeline-ից,
-- transition history-ն պահվում է առանձին,
-- LLM-ը ենթարկվում է սահմանափակված prompt stages-ի։
-
-Այսպիսով, համակարգը նպատակ ունի բարձրացնել ոչ թե միայն պատասխանների արտաքին բնականությունը, այլ դրանց պատճառական կապը ներքին վիճակի, persona structure-ի, graph memory-ի և session continuity-ի հետ։ Հենց այս հատկությունն է այն դարձնում ոչ թե սովորական prompt-based chat interface, այլ վերահսկվող persona-graph runtime։
+Ստացվել է ոչ թե chat interface, այլ բազմաշերտ bounded runtime, հարմարեցված փոքր context window ունեցող local thinking model-ների գործնական օգտագործման համար։

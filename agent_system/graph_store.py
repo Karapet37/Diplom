@@ -135,6 +135,31 @@ def _edge_key(edge: dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
+def _normalize_session_ids(context: dict[str, Any] | None) -> list[str]:
+    payload = dict(context or {})
+    values: list[str] = []
+    direct = str(payload.get('session_id') or '').strip()
+    if direct:
+        values.append(direct)
+    for item in list(payload.get('session_ids') or []):
+        clean = str(item or '').strip()
+        if clean:
+            values.append(clean)
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in values:
+        if item in seen:
+            continue
+        seen.add(item)
+        normalized.append(item)
+    return normalized
+
+
+def _is_structural_document_node(node: dict[str, Any]) -> bool:
+    context = dict(node.get('context') or {})
+    return str(context.get('document_role') or '').strip().lower() in {'document_root', 'document_section'}
+
+
 class GraphStore:
     def load_nodes(self) -> list[dict[str, Any]]:
         payload = load_json(graph_nodes_path(), [])
@@ -674,7 +699,7 @@ class GraphStore:
             relations=[],
         )
 
-    def merge_extraction(self, extraction: dict[str, Any], *, source: str = 'session') -> dict[str, Any]:
+    def merge_extraction(self, extraction: dict[str, Any], *, source: str = 'session', session_id: str = '') -> dict[str, Any]:
         nodes = self.load_nodes()
         edges = self.load_edges()
         touched_nodes = 0
@@ -689,6 +714,8 @@ class GraphStore:
                 continue
             confidence = float(entity.get('confidence') or 0.0)
             context = {**dict(entity.get('context') or {}), 'source': source}
+            if str(session_id or '').strip():
+                context['session_ids'] = _normalize_session_ids({**context, 'session_id': session_id})
             if confidence < graph_policy.extraction_quarantine_confidence:
                 context = {
                     **context,
@@ -719,8 +746,8 @@ class GraphStore:
             dst = str(relation.get('to') or '').strip()
             if not src or not dst:
                 continue
-            src_id = name_to_id.get(normalize_name(src)) or self._ensure_entity(nodes, src, source=source)
-            dst_id = name_to_id.get(normalize_name(dst)) or self._ensure_entity(nodes, dst, source=source)
+            src_id = name_to_id.get(normalize_name(src)) or self._ensure_entity(nodes, src, source=source, session_id=session_id)
+            dst_id = name_to_id.get(normalize_name(dst)) or self._ensure_entity(nodes, dst, source=source, session_id=session_id)
             edge = self._normalize_edge(
                 {
                     'from': src_id,
@@ -897,13 +924,22 @@ class GraphStore:
         return result
 
     def search_nodes(self, query: str, *, limit: int = 8) -> list[dict[str, Any]]:
+        ranked = self._rank_nodes_for_query(query, nodes=self._visible_nodes(self.load_nodes(), states=GRAPH_VISIBLE_SEARCH_STATES), edges=self.load_edges())
+        return [item[1] for item in ranked[:limit]]
+
+    def _rank_nodes_for_query(
+        self,
+        query: str,
+        *,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> list[tuple[float, dict[str, Any]]]:
         tokens = {normalize_name(token) for token in str(query or '').split() if normalize_name(token)}
-        nodes = self._visible_nodes(self.load_nodes(), states=GRAPH_VISIBLE_SEARCH_STATES)
         if not tokens:
             ranked = sorted(nodes, key=score_node, reverse=True)
-            return ranked[:limit]
+            return [(score_node(node), node) for node in ranked]
         node_map = {str(node.get('id') or ''): node for node in nodes}
-        related_names = self._related_name_map(node_map, self.load_edges())
+        related_names = self._related_name_map(node_map, edges)
         scored: list[tuple[float, dict[str, Any]]] = []
         for node in nodes:
             lexical = self._lexical_score(node, tokens, related_names.get(str(node.get('id') or ''), []))
@@ -912,10 +948,106 @@ class GraphStore:
             base = max(score_node(node), 0.05)
             scored.append((round(base * lexical, 6), node))
         scored.sort(key=lambda item: (-item[0], str(item[1].get('name') or '')))
-        return [item[1] for item in scored[:limit]]
+        return scored
 
     def top_ranked_nodes(self, query: str, *, limit: int = 8) -> list[dict[str, Any]]:
         return self.search_nodes(query, limit=limit)
+
+    def graph_native_search(
+        self,
+        query: str,
+        *,
+        anchor_names: list[str] | None = None,
+        session_id: str = '',
+        limit: int = 8,
+    ) -> dict[str, Any]:
+        visible_nodes = self._visible_nodes(self.load_nodes(), states=GRAPH_VISIBLE_SEARCH_STATES)
+        visible_edges = self.load_edges()
+        node_map = {str(node.get('id') or ''): node for node in visible_nodes if str(node.get('id') or '').strip()}
+        adjacency = self._adjacency_map(visible_edges)
+        clean_session_id = str(session_id or '').strip()
+        session_nodes = [node for node in visible_nodes if self._node_has_session(node, clean_session_id)] if clean_session_id else []
+        external_nodes = [node for node in visible_nodes if not self._node_has_session(node, clean_session_id)] if clean_session_id else list(visible_nodes)
+        session_ranked = self._rank_nodes_for_query(query, nodes=session_nodes, edges=visible_edges) if session_nodes else []
+        external_ranked = self._rank_nodes_for_query(query, nodes=external_nodes, edges=visible_edges)
+        session_dense_nodes = [item[1] for item in session_ranked[: min(max(limit, 4), 8)]]
+        anchor_nodes = self._anchor_match_nodes(anchor_names or [], node_map)
+        if clean_session_id and session_nodes:
+            session_anchor_nodes = [node for node in anchor_nodes if self._node_has_session(node, clean_session_id)]
+            if session_anchor_nodes:
+                anchor_nodes = session_anchor_nodes
+        external_dense_nodes: list[dict[str, Any]] = []
+        if clean_session_id and session_dense_nodes:
+            external_dense_nodes = [node for score, node in external_ranked if score >= 1.25][: max(limit // 3, 2)]
+        else:
+            external_dense_nodes = [item[1] for item in external_ranked[: min(max(limit // 2, 3), 6)]]
+        dense_nodes = self._merge_ranked_nodes(session_dense_nodes + external_dense_nodes)
+        seed_nodes = self._merge_ranked_nodes(anchor_nodes + dense_nodes)
+        seed_ids = [str(node.get('id') or '') for node in seed_nodes if str(node.get('id') or '').strip()]
+
+        selected_entries: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        def _append_nodes(nodes: list[dict[str, Any]], retrieval_source: str) -> None:
+            for node in nodes:
+                node_id = str(node.get('id') or '').strip()
+                if not node_id or node_id in seen_ids:
+                    continue
+                seen_ids.add(node_id)
+                selected_entries.append(
+                    {
+                        'node': dict(node),
+                        'retrieval_source': retrieval_source,
+                    }
+                )
+
+        _append_nodes(anchor_nodes, 'anchor_match')
+        _append_nodes(dense_nodes, 'semantic_dense')
+
+        one_hop_nodes = self._neighbor_nodes(seed_ids, adjacency, node_map, depth=1, limit=max(limit, 6))
+        _append_nodes(one_hop_nodes, 'local_1hop')
+
+        two_hop_nodes = self._neighbor_nodes(
+            [str(item['node'].get('id') or '') for item in selected_entries],
+            adjacency,
+            node_map,
+            depth=2,
+            limit=max(limit // 2, 3),
+        )
+        _append_nodes(two_hop_nodes, 'local_2hop')
+
+        salient_pool = session_nodes or visible_nodes
+        salient_nodes = self._structural_salience_nodes(
+            nodes=salient_pool,
+            edges=visible_edges,
+            exclude_ids=seen_ids,
+            limit=max(limit // 2, 3),
+        )
+        _append_nodes(salient_nodes, 'structural_salience')
+
+        selected_ids = {str(item['node'].get('id') or '') for item in selected_entries if str(item['node'].get('id') or '').strip()}
+        selected_edges = [
+            dict(edge)
+            for edge in visible_edges
+            if str(edge.get('from') or '') in selected_ids and str(edge.get('to') or '') in selected_ids
+        ]
+        return {
+            'query': query,
+            'entries': selected_entries,
+            'nodes': [dict(item['node']) for item in selected_entries],
+            'edges': selected_edges[: max(limit * 4, 12)],
+            'seed_node_ids': seed_ids,
+            'diagnostics': {
+                'anchor_count': len(anchor_nodes),
+                'semantic_dense_count': len(dense_nodes),
+                'session_dense_count': len(session_dense_nodes),
+                'external_dense_count': len(external_dense_nodes),
+                'one_hop_count': len(one_hop_nodes),
+                'two_hop_count': len(two_hop_nodes),
+                'structural_salience_count': len(salient_nodes),
+                'session_scoped': bool(clean_session_id and session_nodes),
+            },
+        }
 
     def subgraph(self, query: str, *, limit: int = 8, depth: int = 1) -> dict[str, Any]:
         seeds = self.search_nodes(query, limit=limit)
@@ -1198,6 +1330,8 @@ class GraphStore:
         review_count = 0
         for index, left in enumerate(nodes):
             for right in nodes[index + 1 :]:
+                if _is_structural_document_node(left) or _is_structural_document_node(right):
+                    continue
                 left_tokens = {token for token in normalize_name(str(left.get('name') or '')).split() if token}
                 right_tokens = {token for token in normalize_name(str(right.get('name') or '')).split() if token}
                 if not (left_tokens & right_tokens):
@@ -1256,6 +1390,8 @@ class GraphStore:
         reviewed = [self._normalize_node(node) for node in nodes]
         for index, left in enumerate(reviewed):
             for right in reviewed[index + 1 :]:
+                if _is_structural_document_node(left) or _is_structural_document_node(right):
+                    continue
                 left_tokens = {token for token in normalize_name(str(left.get('name') or '')).split() if token}
                 right_tokens = {token for token in normalize_name(str(right.get('name') or '')).split() if token}
                 if not (left_tokens & right_tokens):
@@ -1368,6 +1504,92 @@ class GraphStore:
                 score += overlap * weight
         return score
 
+    def _anchor_match_nodes(self, anchor_names: list[str], node_map: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+        wanted = {normalize_name(item) for item in list(anchor_names or []) if normalize_name(item)}
+        if not wanted:
+            return []
+        matched: list[dict[str, Any]] = []
+        for node in node_map.values():
+            aliases = [str(item).strip() for item in list(node.get('aliases') or []) if str(item).strip()]
+            names = [str(node.get('name') or '').strip(), *aliases]
+            normalized = {normalize_name(item) for item in names if normalize_name(item)}
+            if wanted & normalized:
+                matched.append(node)
+        matched.sort(key=score_node, reverse=True)
+        return matched
+
+    def _merge_ranked_nodes(self, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for node in nodes:
+            node_id = str(node.get('id') or '').strip()
+            if not node_id or node_id in seen:
+                continue
+            seen.add(node_id)
+            merged.append(node)
+        return merged
+
+    def _adjacency_map(self, edges: list[dict[str, Any]]) -> dict[str, set[str]]:
+        adjacency: dict[str, set[str]] = {}
+        for edge in edges:
+            src = str(edge.get('from') or '').strip()
+            dst = str(edge.get('to') or '').strip()
+            if not src or not dst:
+                continue
+            adjacency.setdefault(src, set()).add(dst)
+            adjacency.setdefault(dst, set()).add(src)
+        return adjacency
+
+    def _neighbor_nodes(
+        self,
+        seed_ids: list[str],
+        adjacency: dict[str, set[str]],
+        node_map: dict[str, dict[str, Any]],
+        *,
+        depth: int,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        frontier = {str(item).strip() for item in list(seed_ids or []) if str(item).strip()}
+        visited = set(frontier)
+        collected: list[dict[str, Any]] = []
+        for _ in range(max(int(depth or 1), 1)):
+            next_frontier: set[str] = set()
+            for node_id in frontier:
+                for neighbor_id in adjacency.get(node_id, set()):
+                    if neighbor_id in visited:
+                        continue
+                    visited.add(neighbor_id)
+                    next_frontier.add(neighbor_id)
+                    if neighbor_id in node_map:
+                        collected.append(node_map[neighbor_id])
+            frontier = next_frontier
+            if not frontier or len(collected) >= limit:
+                break
+        collected.sort(key=score_node, reverse=True)
+        return collected[: max(int(limit or 0), 0)]
+
+    def _structural_salience_nodes(
+        self,
+        *,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+        exclude_ids: set[str],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        adjacency = self._adjacency_map(edges)
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for node in nodes:
+            node_id = str(node.get('id') or '').strip()
+            if not node_id or node_id in exclude_ids:
+                continue
+            degree = len(adjacency.get(node_id, set()))
+            structural_score = score_node(node) * (1.0 + math.log1p(degree))
+            if structural_score <= 0:
+                continue
+            scored.append((round(structural_score, 6), node))
+        scored.sort(key=lambda item: (-item[0], str(item[1].get('name') or '')))
+        return [node for _, node in scored[: max(int(limit or 0), 0)]]
+
     def _related_name_map(self, node_map: dict[str, dict[str, Any]], edges: list[dict[str, Any]]) -> dict[str, list[str]]:
         related: dict[str, list[str]] = {}
         for edge in edges:
@@ -1392,7 +1614,7 @@ class GraphStore:
         nodes.append(candidate)
         return candidate
 
-    def _ensure_entity(self, nodes: list[dict[str, Any]], name: str, *, source: str) -> str:
+    def _ensure_entity(self, nodes: list[dict[str, Any]], name: str, *, source: str, session_id: str = '') -> str:
         candidate = self._candidate_node(
             name=name,
             entity_type='CONCEPT',
@@ -1402,6 +1624,7 @@ class GraphStore:
             confidence=0.55,
             source=source,
             importance=0.4,
+            context={'source': source, 'session_ids': [str(session_id).strip()]} if str(session_id or '').strip() else {'source': source},
         )
         return str(self._upsert_node(nodes, candidate).get('id') or '')
 
@@ -1440,10 +1663,22 @@ class GraphStore:
         existing['importance'] = round(max(float(existing.get('importance') or 0.0), float(candidate.get('importance') or 0.0)) + 0.05, 6)
         existing['confidence'] = round(max(float(existing.get('confidence') or 0.0), float(candidate.get('confidence') or 0.0)), 6)
         existing['frequency'] = int(existing.get('frequency') or 0) + max(int(candidate.get('frequency') or 1), 1)
-        existing['context'] = {**dict(existing.get('context') or {}), **dict(candidate.get('context') or {})}
+        merged_context = {**dict(existing.get('context') or {}), **dict(candidate.get('context') or {})}
+        merged_session_ids = _normalize_session_ids({**dict(existing.get('context') or {}), **dict(candidate.get('context') or {})})
+        if merged_session_ids:
+            merged_context['session_ids'] = merged_session_ids
+            if len(merged_session_ids) == 1:
+                merged_context['session_id'] = merged_session_ids[0]
+        existing['context'] = merged_context
         existing['cluster_key'] = str(existing.get('cluster_key') or candidate.get('cluster_key') or '').strip()
         existing['cluster_label'] = str(existing.get('cluster_label') or candidate.get('cluster_label') or '').strip()
         existing['lifecycle_state'] = self._determine_lifecycle_state(existing)
+
+    def _node_has_session(self, node: dict[str, Any], session_id: str) -> bool:
+        clean_session_id = str(session_id or '').strip()
+        if not clean_session_id:
+            return False
+        return clean_session_id in _normalize_session_ids(dict(node.get('context') or {}))
 
     def _merge_duplicates(
         self,
@@ -1575,6 +1810,12 @@ class GraphStore:
             for item in list(node.get('facts') or [])
             if str(item).strip()
         ]
+        context = dict(node.get('context') or {})
+        session_ids = _normalize_session_ids(context)
+        if session_ids:
+            context['session_ids'] = session_ids
+            if len(session_ids) == 1:
+                context['session_id'] = session_ids[0]
         normalized = {
             'id': str(node.get('id') or f'{node_type.lower()}:{_slug(node.get("name") or "item")}').strip(),
             'name': str(node.get('name') or node.get('id') or '').strip(),
@@ -1587,7 +1828,7 @@ class GraphStore:
             'importance': round(max(float(node.get('importance') or 0.1), 0.0), 6),
             'confidence': round(min(max(float(node.get('confidence') or 0.5), 0.0), 1.0), 6),
             'frequency': max(int(node.get('frequency') or 1), 1),
-            'context': dict(node.get('context') or {}),
+            'context': context,
             'cluster_key': str(node.get('cluster_key') or '').strip(),
             'cluster_label': str(node.get('cluster_label') or '').strip(),
         }

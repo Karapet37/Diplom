@@ -8,7 +8,7 @@ from typing import Any
 _TOKEN_RE = re.compile(r"\w+|[^\w\s]", flags=re.UNICODE)
 _HEURISTIC_FACTOR = 1.35
 _MIN_ALLOWED_N_CTX = 1024
-_MAX_ALLOWED_N_CTX = 5000
+_MAX_ALLOWED_N_CTX = 7000
 
 
 def token_count(llm: Any, text: str) -> int:
@@ -53,7 +53,7 @@ def truncate_to_fit(llm: Any, text: str, max_prompt_tokens: int) -> str:
 
 def select_n_ctx(
     target_tokens: int,
-    allowed_n_ctx_list: list[int] | tuple[int, ...] = (1024, 1536, 2048, 3072, 4096, 5000),
+    allowed_n_ctx_list: list[int] | tuple[int, ...] = (1024, 1536, 2048, 3072, 4096, 7000),
 ) -> int:
     allowed = sorted(
         {

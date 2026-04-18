@@ -40,6 +40,10 @@ def test_api_surfaces_chat_runtime(tmp_path, monkeypatch) -> None:
     assert payload['persona_name'] == 'dracula'
     assert payload['repair_status']['status'] == 'skipped'
     assert str(payload['trace_id']).strip()
+    assert 'model_budget' in payload['pipeline']
+    assert 'logical_context' in payload['pipeline']
+    assert int(payload['pipeline']['model_budget'].get('reserved_output_budget') or 0) >= 256
+    assert int(payload['pipeline']['logical_context'].get('assembled_context_tokens') or 0) >= 0
 
 
 def test_api_personality_endpoint_returns_triad(tmp_path, monkeypatch) -> None:
@@ -128,6 +132,14 @@ def test_api_debug_endpoints_expose_metrics_traces_and_graph_health(tmp_path, mo
     assert traces.status_code == 200
     trace_rows = traces.json()['traces']
     assert any(str(item.get('request_id') or '') == trace_id for item in trace_rows)
+    trace_row = next(item for item in trace_rows if str(item.get('request_id') or '') == trace_id)
+    assert int(trace_row['response_meta'].get('n_ctx') or 0) >= 2048
+    assert int(trace_row['response_meta'].get('reserved_output_budget') or 0) >= 256
+    assert 'prompt_nearly_fills_window' in trace_row['response_meta']
+    llm_stage = next(stage for stage in trace_row['stages'] if stage['name'] in {'llm_call', 'response_generation'})
+    assert 'estimated_input_tokens' in llm_stage['meta']
+    assert 'actual_max_tokens' in llm_stage['meta']
+    assert 'prompt_nearly_fills_window' in llm_stage['meta']
 
     graph_health = client.get('/api/cognitive/debug/graph-health')
     assert graph_health.status_code == 200
@@ -244,3 +256,27 @@ def test_api_upload_endpoint_returns_consistent_json_shape_for_multipart_payload
     assert len(payload['files']) == 1
     assert payload['files'][0]['path'] == payload['path']
     assert payload['files'][0]['result'] == payload['result']
+
+
+def test_api_can_delete_session_and_returns_404_afterwards(tmp_path, monkeypatch) -> None:
+    fastapi = pytest.importorskip('fastapi')
+    testclient = pytest.importorskip('fastapi.testclient')
+    assert fastapi
+
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+
+    from agent_system.api import create_app
+
+    client = testclient.TestClient(create_app())
+    created = client.post('/api/cognitive/sessions', json={'session_id': 'delete_api', 'title': 'Delete API'})
+    assert created.status_code == 200
+
+    deleted = client.delete('/api/cognitive/sessions/delete_api')
+    assert deleted.status_code == 200
+    payload = deleted.json()
+    assert payload['ok'] is True
+    assert payload['session_id'] == 'delete_api'
+    assert payload['deleted_paths']
+
+    missing = client.get('/api/cognitive/sessions/delete_api')
+    assert missing.status_code == 404

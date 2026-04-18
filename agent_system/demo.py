@@ -20,7 +20,7 @@ def run_demo(
 ) -> dict[str, Any]:
     session = create_session(session_id, 'Agent System Demo')
     if persona:
-        spawn_head(persona, entity_type='PERSON', source='demo')
+        spawn_head(persona, entity_type='PERSON', source='demo', register=True)
     ingest_result = None
     if str(document or '').strip():
         ingest_result = ingest_file(Path(document))

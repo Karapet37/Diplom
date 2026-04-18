@@ -1,5 +1,8 @@
 # PersonaAgent with GraphRAG: Community-Aware Knowledge Graphs for Personalized LLM
 
+> Repository note: this subdirectory is preserved as an archival research/reference artifact.
+> The actively maintained runtime in this repository now lives under `agent_system/`; see the root `README.md` and `models/README.md` for current behavior and local-GGUF runtime details.
+
 We propose a novel framework for persona-based language model system, motivated by the need for personalized AI agents that adapt to individual user preferences. In our approach, the agent embodies the user's ``persona`` (e.g. user profile or taste) and is powered by a large language model. To enable the agent to leverage rich contextual information, we introduce a Knowledge-Graph-enhanced Retrieval-Augmented Generation (Graph RAG) mechanism that constructs an LLM-derived graph index of relevant documents and summarizes communities of related information. Our framework generates personalized prompts by combining three key components: (1) a structured summary of the user’s profile, (2) semantically relevant user-specific interactions extracted from the graph, and (3) relevant global interaction patterns identified through graph-based community detection. This dynamic prompt engineering approach allows the agent to maintain consistent persona-aligned behaviors while benefiting from collective knowledge. We demonstrate the system on the LaMP benchmarks such as movie tagging, news categorization and e-commerce product rating. Figures below demonstrate the architecture of our proposed framework and an anecdote of our method.
 
 ![Alt Text](./figures/PersonaAgentwGraphRAG.png)

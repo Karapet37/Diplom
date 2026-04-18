@@ -1,179 +1,91 @@
 # System Realism Harness
 
-This subsystem launches the real runtime, seeds a canonical persona, runs dialogue probes through the live API, evaluates behavioral realism, and writes engineering reports.
+This subsystem launches the real runtime, seeds personas, drives live API requests, and evaluates whether the system behaves like the controller-first architecture it claims to implement.
 
-## What it checks
+## What It Checks
+
+The realism harness is aimed at behavioral correctness, not only endpoint reachability.
+
+Main checks include:
 
 - real startup through `start.py`
-- root page reachability
-- health reachability
-- chat API reachability
-- persona materialization in actual storage format
-- persona fidelity vs generic assistant drift
+- health and chat API reachability
+- persona materialization through the real storage path
+- persona creation from structured descriptions
+- persona fast-path behavior for lightweight turns
+- persona graph reasoning for heavier turns
 - memory continuity across turns
-- exploratory prompts that probe less-scripted persona behavior
-- generated unexpected and unseen-generalization prompts
-- live persona evolution through dossier updates
-- memory deletion through real persona revision restore
-- graph editor simulation through graph create/connect/patch/delete actions
-- contradiction resistance and identity continuity after mutations
-- optional low-frequency chaos runs
+- graph-backed retrieval behavior
+- degraded runtime signals
 - latency and timeout behavior
-- degraded runtime signals and graph diagnostics
+- runtime logs and report generation
 
-## How to run
+This harness complements, rather than replaces, the denser unit coverage in `tests/agent_system/` for planning mode, notes, behavior regulation, personality construction, observability, and training-example storage.
 
-Default one-command pytest entry:
+## Why It Exists
+
+The project intentionally avoids “single prompt survival” as a success metric.
+
+This harness helps verify that:
+
+- request routing is correct,
+- persona behavior remains stable,
+- memory layers are used in the right order,
+- the real app still behaves correctly under live conditions.
+
+## Run
+
+Default pytest entry:
 
 ```bash
-python3 -m pytest tests/system_realism -q
+.venv/bin/python -m pytest tests/system_realism -q
 ```
 
-This runs the real subprocess harness and writes reports under `runtime/system_realism_reports/` by default.
-
-By default the pytest entry uses the lighter `advanced` suite:
-
-- generated unexpected prompts
-- unseen paraphrase/generalization prompts
-- persona memory injection and evolution
-- graph editor simulation
-- deletion / restore checks
-- contradiction and identity continuity probes
-
-Use `COGNITIVE_REALISM_SUITE=full` or the direct runner when you want the heavier baseline-plus-advanced pass.
-The pytest entry also defaults to `COGNITIVE_REALISM_MUTATION_SUBSET=smoke`, which keeps the live mutation pass short enough for local GGUF runtimes. Use `all` for the full mutation graph/persona path.
-
-Strict mode, which fails the test on a bad realism verdict:
+Strict mode:
 
 ```bash
-COGNITIVE_REALISM_STRICT=1 python3 -m pytest tests/system_realism -q
+COGNITIVE_REALISM_STRICT=1 .venv/bin/python -m pytest tests/system_realism -q
 ```
 
 Choose a runtime profile:
 
 ```bash
-COGNITIVE_REALISM_PROFILE=local-demo python3 -m pytest tests/system_realism -q
+COGNITIVE_REALISM_PROFILE=local-demo .venv/bin/python -m pytest tests/system_realism -q
 ```
 
-Choose the suite:
+Direct runner:
 
 ```bash
-COGNITIVE_REALISM_SUITE=full python3 -m pytest tests/system_realism -q
+.venv/bin/python -m tests.system_realism --profile local-demo --request-timeout 120 --tag manual
 ```
+
+## Suites
 
 Available suites:
 
-- `baseline`: only baseline dialogue realism
-- `core`: baseline + mutation/evolution realism
-- `advanced`: mutation/evolution realism without the baseline pass
-- `full`: all baseline dialogues, exploratory prompts, and mutation/evolution realism
+- `baseline`
+- `core`
+- `advanced`
+- `full`
 
-Increase request timeout for slower local models:
-
-```bash
-COGNITIVE_REALISM_REQUEST_TIMEOUT=120 python3 -m pytest tests/system_realism -q
-```
-
-Change exploratory prompt coverage:
-
-```bash
-COGNITIVE_REALISM_EXPLORATORY_CASES=8 COGNITIVE_REALISM_EXPLORATORY_SEED=23 python3 -m pytest tests/system_realism -q
-```
-
-Change generated unexpected/generalization coverage:
-
-```bash
-COGNITIVE_REALISM_UNEXPECTED_CASES=4 COGNITIVE_REALISM_GENERALIZATION_CASES=4 python3 -m pytest tests/system_realism -q
-```
-
-Enable low-frequency chaos:
-
-```bash
-COGNITIVE_REALISM_INCLUDE_CHAOS=1 python3 -m pytest tests/system_realism -q
-```
-
-Choose mutation coverage:
-
-```bash
-COGNITIVE_REALISM_MUTATION_SUBSET=all python3 -m pytest tests/system_realism -q
-```
-
-Direct runner, which is better when you want a report without pytest framing:
-
-```bash
-python3 -m tests.system_realism --profile local-demo --request-timeout 120 --tag manual
-```
-
-Or with the full evolution suite:
-
-```bash
-python3 -m tests.system_realism --profile local-demo --suite full --unexpected-cases 4 --generalization-cases 4 --tag manual
-```
-
-Or run the lighter mutation smoke path explicitly:
-
-```bash
-python3 -m tests.system_realism --profile local-demo --suite advanced --mutation-subset smoke --unexpected-cases 1 --generalization-cases 1 --tag manual
-```
-
-## Ports
-
-The harness chooses a free localhost port automatically unless `RealismRunConfig.port` is set explicitly.
-
-## Runtime launcher
-
-The launcher lives in `runtime_launcher.py` and uses the real project entrypoint:
-
-```text
-python start.py --profile <profile> --host <host> --port <port>
-```
-
-It prefers:
-
-1. `COGNITIVE_REALISM_PYTHON`
-2. repo-local `.venv/bin/python`
-3. current `sys.executable`
-
-It captures merged stdout/stderr logs, waits on `/api/cognitive/health`, diagnoses startup failure reasons from real log output, and exposes helpers for:
-
-- root reachability
-- runtime health reachability
-- combined surface health reachability
-- live chat API reachability
+The lighter path is useful for frequent local regression checks. The heavier path is better when validating long-running persona and graph behavior under real subprocess conditions.
 
 ## Reports
 
-The harness writes:
+The harness writes artifacts such as:
 
 - `realism_report.json`
 - `realism_report.md`
 - `server.log`
 - `log_tail.txt`
 
-The default output root is `runtime/system_realism_reports/`, but the pytest entrypoint overrides it with an isolated temporary directory for test isolation.
+Default output root:
 
-## Persona fixture
-
-The canonical persona is defined in `persona_fixture.py` and materialized via the system’s own `materialize_persona(...)` path, so the test uses the real storage format instead of a fake fixture layout.
-
-## Adding new personas or dialogue sets
-
-1. Add or extend a fixture in `persona_fixture.py`.
-2. Add dialogue probes in `dialogue_cases.py`.
-3. Extend heuristic scoring in `evaluator.py` if the new persona has important style or memory signals that are not yet covered.
-
-The realism harness now has two dialogue layers:
-
-1. the fixed canonical benchmark
-2. a larger exploratory prompt pool sampled by seed
-3. generated unexpected / unseen-generalization prompts
-4. live mutation scenarios that change persona or graph state and then probe adaptation
-
-The fixed benchmark makes regressions reproducible. The exploratory pool reduces overfitting to one narrow prompt set.
-The mutation scenarios test whether the system behaves from state rather than from memorized prompts.
+- `runtime/system_realism_reports/`
 
 ## Notes
 
-- The markdown report is the primary human-readable artifact; the JSON report is intended for automation or later aggregation.
-- `test_runtime_realism.py` is the top-level integration entry that wires together launcher, persona materialization, dialogue benchmark, evaluator, and report generation.
-- The direct runner in `runner.py` uses the same harness but is friendlier for manual operator use.
+- The harness uses the real project entrypoint instead of a fake in-process mock.
+- It is intended to catch route drift, persona drift, and live-runtime regressions that unit tests may miss.
+- It is strongest for startup, subprocess orchestration, reporting, and end-to-end realism signals; planning/note/regulator correctness is covered more exhaustively in the unit suite.
+- In restricted sandboxes that disallow opening TCP sockets, runtime-launcher tests can fail with `PermissionError` during free-port allocation even when the harness code is otherwise correct.

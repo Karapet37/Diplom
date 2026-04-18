@@ -206,6 +206,14 @@ class LlmRetryConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ChatOrchestrationConfig:
+    strategy: str
+    primary_role: str
+    reviewer_role: str
+    review_mode: str
+
+
+@dataclass(frozen=True, slots=True)
 class FeatureFlagConfig:
     enable_frontend_root: bool
     enable_frontend_assets: bool
@@ -260,6 +268,7 @@ class RuntimeConfig:
     context: ContextBudgetConfig
     roles: LlmRoleConfig
     retries: LlmRetryConfig
+    chat_orchestration: ChatOrchestrationConfig
     features: FeatureFlagConfig
     memory: MemoryLifecycleConfig
     graph: GraphLifecycleConfig
@@ -268,13 +277,41 @@ class RuntimeConfig:
     def llm_window(self, mode: str, *, role: str) -> tuple[int, int]:
         mode_key = str(mode or 'chat').strip().lower()
         role_key = str(role or self.roles.chat).strip().lower()
+        role_env_prefix = {
+            'general': 'LOCAL_GGUF',
+            'analyst': 'LOCAL_ANALYST',
+            'translator': 'LOCAL_TRANSLATOR',
+            'creative': 'LOCAL_CREATIVE',
+            'planner': 'LOCAL_PLANNER',
+            'coder_architect': 'LOCAL_CODER_ARCHITECT',
+            'coder_reviewer': 'LOCAL_CODER_REVIEWER',
+            'coder_refactor': 'LOCAL_CODER_REFACTOR',
+            'coder_debug': 'LOCAL_CODER_DEBUG',
+            'uncensored': 'LOCAL_UNCENSORED_GGUF',
+        }.get(role_key, 'LOCAL_GGUF')
+
         if mode_key == 'translation':
-            return 896, 160
-        if mode_key == 'knowledge':
-            return (1152, 288) if role_key == 'analyst' else (1280, 352)
-        if mode_key == 'chat':
-            return (1024, 80) if role_key == 'analyst' else (1152, 64)
-        return 1152, 288
+            default_n_ctx, default_max_tokens = 1024, 192
+        elif mode_key == 'knowledge':
+            default_n_ctx, default_max_tokens = ((2048, 384) if role_key == 'analyst' else (3072, 448))
+        elif mode_key == 'chat':
+            default_n_ctx, default_max_tokens = ((2048, 256) if role_key == 'analyst' else (3072, 320))
+        else:
+            default_n_ctx, default_max_tokens = 2048, 320
+
+        resolved_n_ctx = _env_int(
+            f'{role_env_prefix}_N_CTX',
+            _env_int('LOCAL_GGUF_N_CTX', default_n_ctx, minimum=1024, maximum=7000),
+            minimum=1024,
+            maximum=7000,
+        )
+        resolved_max_tokens = _env_int(
+            f'{role_env_prefix}_MAX_TOKENS',
+            _env_int('LOCAL_GGUF_MAX_TOKENS', default_max_tokens, minimum=96, maximum=2048),
+            minimum=96,
+            maximum=2048,
+        )
+        return resolved_n_ctx, resolved_max_tokens
 
     def max_context_attempts_for_role(self, role: str) -> int:
         role_key = str(role or '').strip().lower()
@@ -468,6 +505,12 @@ def get_runtime_config() -> RuntimeConfig:
         fast_role_context_attempts=_env_int('LOCAL_LLM_FAST_CONTEXT_ATTEMPTS', 1, minimum=1, maximum=3),
         general_context_attempts=_env_int('LOCAL_LLM_MAX_CONTEXT_ATTEMPTS', 2, minimum=1, maximum=4),
     )
+    chat_orchestration = ChatOrchestrationConfig(
+        strategy=_env_text('COGNITIVE_CHAT_ORCHESTRATION', 'primary_with_reviewer').lower(),
+        primary_role=_env_text('COGNITIVE_CHAT_PRIMARY_ROLE', roles.chat).lower(),
+        reviewer_role=_env_text('COGNITIVE_CHAT_REVIEW_ROLE', roles.rethink or 'analyst').lower(),
+        review_mode=_env_text('COGNITIVE_CHAT_REVIEW_MODE', 'on_failure').lower(),
+    )
     features = FeatureFlagConfig(
         enable_frontend_root=_env_flag('COGNITIVE_ENABLE_FRONTEND_ROOT', True),
         enable_frontend_assets=_env_flag('COGNITIVE_ENABLE_FRONTEND_ASSETS', True),
@@ -539,6 +582,7 @@ def get_runtime_config() -> RuntimeConfig:
         context=context,
         roles=roles,
         retries=retries,
+        chat_orchestration=chat_orchestration,
         features=features,
         memory=memory,
         graph=graph,

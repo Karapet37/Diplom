@@ -123,12 +123,8 @@ def test_chat_degrades_to_behavioral_fallback_when_provider_is_unavailable(tmp_p
         },
     )
     monkeypatch.setattr(
-        'agent_system.chat_engine.generate_chat_reply',
-        lambda prompt, language='en', persona_selected=False: (
-            'I will answer in first person from the current persona graph and emotional state.'
-            if persona_selected
-            else 'I do not have enough reliable context yet. Clarify the entity or add one fact.'
-        ),
+        'agent_system.state_transition_runtime.call_json_model_for_role',
+        lambda *args, **kwargs: None,
     )
 
     from agent_system.chat_engine import generate_response

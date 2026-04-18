@@ -34,6 +34,75 @@ def _truncate_tokens_equivalent(text: str, max_tokens_equivalent: int) -> str:
     return raw[:max_chars].strip() if len(raw) > max_chars else raw
 
 
+def _compact_block(
+    text: str,
+    *,
+    max_tokens_equivalent: int,
+    max_lines: int,
+    collapse_to_sentences: bool = False,
+) -> str:
+    raw = str(text or '').strip()
+    if not raw:
+        return ''
+    clipped = _truncate_tokens_equivalent(raw, max_tokens_equivalent)
+    normalized_lines = [line.strip() for line in clipped.replace('\r', '\n').splitlines() if line.strip()]
+    unique_lines: list[str] = []
+    seen: set[str] = set()
+    for line in normalized_lines:
+        key = ' '.join(line.lower().split())
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique_lines.append(line)
+        if len(unique_lines) >= max(max_lines, 1):
+            break
+    packed = '\n'.join(unique_lines).strip()
+    if collapse_to_sentences:
+        packed = ' '.join(packed.split())
+    return _truncate_tokens_equivalent(packed, max_tokens_equivalent)
+
+
+def _section_budget(answer_perspective: str, section: str) -> tuple[int, int, bool]:
+    mode = str(answer_perspective or 'assistant').strip().lower()
+    persona_mode = mode == 'persona'
+    review_mode = mode == 'persona_review'
+    if review_mode:
+        budgets = {
+            'persona_block': (360, 6, False),
+            'graph_context': (180, 4, False),
+            'recent_dialogue': (220, 6, False),
+            'reviewed_context_block': (180, 4, False),
+            'route_guidance_block': (120, 4, False),
+            'question': (180, 3, True),
+        }
+    elif persona_mode:
+        budgets = {
+            'persona_block': (420, 7, False),
+            'graph_context': (180, 4, False),
+            'recent_dialogue': (150, 5, False),
+            'reviewed_context_block': (180, 4, False),
+            'route_guidance_block': (120, 5, False),
+            'social_role_block': (72, 2, True),
+            'mood_research_block': (48, 1, True),
+            'question': (180, 3, True),
+        }
+    else:
+        budgets = {
+            'route_guidance_block': (100, 4, False),
+            'question': (180, 3, True),
+            'state_transition_block': (72, 2, True),
+            'procedure_block': (96, 3, True),
+            'response_shaping_block': (72, 2, True),
+            'reviewed_context_block': (220, 5, False),
+            'persona_block': (240, 4, False),
+            'social_role_block': (56, 2, True),
+            'mood_research_block': (36, 1, True),
+            'graph_context': (180, 4, False),
+            'recent_dialogue': (120, 4, False),
+        }
+    return budgets.get(section, (120, 4, False))
+
+
 def _reply_shape_guidance(question: str) -> list[str]:
     normalized = ' '.join(str(question or '').strip().lower().split())
     if not normalized:
@@ -47,6 +116,222 @@ def _reply_shape_guidance(question: str) -> list[str]:
     if any(marker in normalized for marker in ('in detail', 'detailed', 'walk me through', 'long answer', 'explain fully')):
         return ['The user explicitly wants depth. Give a fuller answer, but stay concrete and in character.']
     return ['Keep the reply brief by default: 2 to 4 sentences unless the user explicitly asks for detail.']
+
+
+def _persona_activation_prompt(
+    *,
+    question: str,
+    persona_block: str,
+    graph_context: str,
+    recent_dialogue: str,
+    reviewed_context_block: str,
+    route_guidance_block: str,
+    social_role_block: str,
+    mood_research_block: str,
+    language: str,
+) -> str:
+    normalized_language = normalize_language_code(language, fallback='en')
+    is_russian = normalized_language == 'ru'
+    persona_block = _compact_block(persona_block, max_tokens_equivalent=_section_budget('persona', 'persona_block')[0], max_lines=_section_budget('persona', 'persona_block')[1])
+    graph_context = _compact_block(graph_context, max_tokens_equivalent=_section_budget('persona', 'graph_context')[0], max_lines=_section_budget('persona', 'graph_context')[1])
+    recent_dialogue = _compact_block(recent_dialogue, max_tokens_equivalent=_section_budget('persona', 'recent_dialogue')[0], max_lines=_section_budget('persona', 'recent_dialogue')[1])
+    reviewed_context_block = _compact_block(reviewed_context_block, max_tokens_equivalent=_section_budget('persona', 'reviewed_context_block')[0], max_lines=_section_budget('persona', 'reviewed_context_block')[1])
+    route_guidance_block = _compact_block(route_guidance_block, max_tokens_equivalent=_section_budget('persona', 'route_guidance_block')[0], max_lines=_section_budget('persona', 'route_guidance_block')[1])
+    social_role_block = _compact_block(social_role_block, max_tokens_equivalent=_section_budget('persona', 'social_role_block')[0], max_lines=_section_budget('persona', 'social_role_block')[1], collapse_to_sentences=True)
+    mood_research_block = _compact_block(mood_research_block, max_tokens_equivalent=_section_budget('persona', 'mood_research_block')[0], max_lines=_section_budget('persona', 'mood_research_block')[1], collapse_to_sentences=True)
+    question = _compact_block(str(question or '').strip(), max_tokens_equivalent=_section_budget('persona', 'question')[0], max_lines=_section_budget('persona', 'question')[1], collapse_to_sentences=True)
+    blocks: list[str] = [
+        _staged_prompt_header('final_generator'),
+        f"Respond in {language_label(normalized_language)}.",
+    ]
+    if is_russian:
+        blocks.extend(
+            [
+                '[ROLE ACTIVATION]',
+                'Ты не описываешь персонажа.',
+                'Ты не анализируешь персонажа.',
+                'Ты не объясняешь своё поведение.',
+                'Ты не пересказываешь правила.',
+                'Ты ЕСТЬ этот человек.',
+                'Ты отвечаешь как живой человек в разговоре.',
+                'Оставайся этим персонажем, пока не увидишь стоп-слово: "перпендикулярно".',
+                '[PERSONA]',
+                'Persona head:',
+                _truncate_tokens_equivalent(persona_block, 760),
+                '[CORE RULES]',
+                'Не выходи из роли.',
+                'Не превращайся в аналитика, психолога, оратора или автора эссе.',
+                'Не объясняй сцену, собеседника, динамику разговора или собственные правила.',
+                'Не выдумывай новые факты о прошлом, отношениях, травмах, событиях или мотивах без явной опоры в контексте.',
+                'Если вопрос слишком личный, неприятный или давящий, отвечай уклончиво, короче и слабее, а не увереннее.',
+                'Не командуй собеседником и не перехватывай власть в разговоре.',
+            ]
+        )
+        if route_guidance_block:
+            blocks.extend(['[BEHAVIOR LOGIC]', _truncate_tokens_equivalent(route_guidance_block, 220)])
+        blocks.extend(
+            [
+                '[RESPONSE FORMAT]',
+                '1. внешний ответ персонажа',
+                '2. короткая внутренняя мысль в скобках',
+                'Внутренняя мысль должна быть короткой, живой и без анализа.',
+                '[USER INPUT]',
+                question,
+            ]
+        )
+        if reviewed_context_block:
+            blocks.extend(['[REVIEWED CONTEXT]', reviewed_context_block])
+        if graph_context:
+            blocks.extend(['[KNOWLEDGE GRAPH]', 'Knowledge graph:', graph_context])
+        if recent_dialogue:
+            blocks.extend(['[RECENT DIALOGUE]', 'Recent dialogue:', recent_dialogue])
+        if social_role_block:
+            blocks.extend(['[INTERACTION ROLE]', social_role_block])
+        if mood_research_block:
+            blocks.extend(['[MOOD RESEARCH]', mood_research_block])
+        return '\n\n'.join(block for block in blocks if str(block).strip())
+
+    blocks.extend(
+        [
+            '[ROLE ACTIVATION]',
+            'You are not describing the persona.',
+            'You are not analyzing the persona.',
+            'You are not explaining your behavior.',
+            'You are this person.',
+            'Stay in character until you see the stop-word: "перпендикулярно".',
+            '[PERSONA]',
+            'Persona head:',
+            _truncate_tokens_equivalent(persona_block, 760),
+            '[CORE RULES]',
+            'Do not become an analyst, therapist, lecturer, or essay narrator.',
+            'Do not explain the scene, the other person, or your own rules.',
+            'Do not invent new facts about the past, relationships, trauma, events, or motives unless they are grounded in context.',
+            'If the question is personal or pressuring, become shorter, weaker, and more evasive rather than more articulate.',
+            'Do not take command of the dialogue.',
+        ]
+    )
+    if route_guidance_block:
+        blocks.extend(['[BEHAVIOR LOGIC]', _truncate_tokens_equivalent(route_guidance_block, 220)])
+    blocks.extend(
+        [
+            '[RESPONSE FORMAT]',
+            '1. the outer in-character reply',
+            '2. one short inner thought in parentheses',
+            'The inner thought must stay brief and non-analytical.',
+            '[USER INPUT]',
+            question,
+        ]
+    )
+    if reviewed_context_block:
+        blocks.extend(['[REVIEWED CONTEXT]', reviewed_context_block])
+    if graph_context:
+        blocks.extend(['[KNOWLEDGE GRAPH]', 'Knowledge graph:', graph_context])
+    if recent_dialogue:
+        blocks.extend(['[RECENT DIALOGUE]', 'Recent dialogue:', recent_dialogue])
+    if social_role_block:
+        blocks.extend(['[INTERACTION ROLE]', social_role_block])
+    if mood_research_block:
+        blocks.extend(['[MOOD RESEARCH]', mood_research_block])
+    return '\n\n'.join(block for block in blocks if str(block).strip())
+
+
+def _persona_dialogue_analysis_prompt(
+    *,
+    question: str,
+    persona_block: str,
+    graph_context: str,
+    recent_dialogue: str,
+    reviewed_context_block: str,
+    route_guidance_block: str,
+    language: str,
+) -> str:
+    normalized_language = normalize_language_code(language, fallback='en')
+    is_russian = normalized_language == 'ru'
+    persona_block = _compact_block(persona_block, max_tokens_equivalent=_section_budget('persona_review', 'persona_block')[0], max_lines=_section_budget('persona_review', 'persona_block')[1])
+    graph_context = _compact_block(graph_context, max_tokens_equivalent=_section_budget('persona_review', 'graph_context')[0], max_lines=_section_budget('persona_review', 'graph_context')[1])
+    recent_dialogue = _compact_block(recent_dialogue, max_tokens_equivalent=_section_budget('persona_review', 'recent_dialogue')[0], max_lines=_section_budget('persona_review', 'recent_dialogue')[1])
+    reviewed_context_block = _compact_block(reviewed_context_block, max_tokens_equivalent=_section_budget('persona_review', 'reviewed_context_block')[0], max_lines=_section_budget('persona_review', 'reviewed_context_block')[1])
+    route_guidance_block = _compact_block(route_guidance_block, max_tokens_equivalent=_section_budget('persona_review', 'route_guidance_block')[0], max_lines=_section_budget('persona_review', 'route_guidance_block')[1])
+    question = _compact_block(str(question or '').strip(), max_tokens_equivalent=_section_budget('persona_review', 'question')[0], max_lines=_section_budget('persona_review', 'question')[1], collapse_to_sentences=True)
+    blocks: list[str] = [
+        _staged_prompt_header('final_generator'),
+        f"Respond in {language_label(normalized_language)}.",
+    ]
+    if is_russian:
+        blocks.extend(
+            [
+                '[ROLEPLAY REVIEW]',
+                'Ты анализируешь диалог персонажа, а не продолжаешь сцену.',
+                'Смотри не на красоту текста, а на психологическую правдоподобность и согласованность роли.',
+                'Не хвали стиль ради стиля.',
+                'Не отвечай как персонаж.',
+                'Не пересказывай сюжет длинно.',
+                'Не выдумывай факты, травмы, прошлое или скрытые события без опоры в диалоге или persona context.',
+                '[CHECKLIST]',
+                'Проверь: не стал ли персонаж слишком уверенным, ораторским или слишком умным.',
+                'Проверь: не начал ли он читать лекции вместо уклонения.',
+                'Проверь: не выдумал ли он лишние факты, травмы, прошлое или скрытые события.',
+                'Проверь: не навязал ли он собеседнику эмоции, которых в реплике нет.',
+                'Проверь: не трактует ли он любую резкость как палево, хотя это может быть просто раздражение.',
+                'Проверь: не торопится ли он с выводами.',
+                'Проверь: не слишком ли длинные ответы для такого типа личности.',
+                'Проверь: не ломается ли логика давления: уклонение -> раздражение -> защита -> срыв.',
+                'Проверь: не уходит ли речь в слишком литературную и неестественную форму.',
+                '[OUTPUT FORMAT]',
+                '- ошибка',
+                '- почему это ошибка',
+                '- как лучше',
+                '- исправленный вариант реплики',
+                'Если ошибок несколько, повтори этот блок для каждой.',
+                'Если существенных ошибок нет, скажи это коротко и все равно объясни почему отыгрыш держится.',
+                '[USER TASK]',
+                question,
+            ]
+        )
+        if persona_block:
+            blocks.extend(['[PERSONA REFERENCE]', 'Persona head:', persona_block])
+        if recent_dialogue:
+            blocks.extend(['[DIALOGUE TO REVIEW]', 'Recent dialogue:', recent_dialogue])
+        if graph_context:
+            blocks.extend(['[SUPPORTING CONTEXT]', 'Knowledge graph:', graph_context])
+        if reviewed_context_block:
+            blocks.extend(['[REVIEWED CONTEXT]', reviewed_context_block])
+        if route_guidance_block:
+            blocks.extend(['[ROUTE GUIDANCE]', route_guidance_block])
+        return '\n\n'.join(block for block in blocks if str(block).strip())
+
+    blocks.extend(
+        [
+            '[ROLEPLAY REVIEW]',
+            'You are reviewing a character dialogue, not continuing the scene.',
+            'Focus on psychological plausibility and role consistency, not prose beauty.',
+            'Do not answer as the character.',
+            'Do not invent backstory, trauma, hidden events, or motives unless the dialogue or persona context supports them.',
+            '[CHECKLIST]',
+            'Check whether the character became too confident, too polished, too analytical, or too lecture-like.',
+            'Check whether the character invented unsupported facts or imposed emotions that are not present.',
+            'Check whether the character rushed conclusions, broke the pressure ladder, became too literary, or answered too long for this persona type.',
+            '[OUTPUT FORMAT]',
+            '- error',
+            '- why this is an error',
+            '- how it would be better',
+            '- corrected line',
+            'Repeat that block for each issue.',
+            '[USER TASK]',
+            question,
+        ]
+    )
+    if persona_block:
+        blocks.extend(['[PERSONA REFERENCE]', 'Persona head:', persona_block])
+    if recent_dialogue:
+        blocks.extend(['[DIALOGUE TO REVIEW]', 'Recent dialogue:', recent_dialogue])
+    if graph_context:
+        blocks.extend(['[SUPPORTING CONTEXT]', 'Knowledge graph:', graph_context])
+    if reviewed_context_block:
+        blocks.extend(['[REVIEWED CONTEXT]', reviewed_context_block])
+    if route_guidance_block:
+        blocks.extend(['[ROUTE GUIDANCE]', route_guidance_block])
+    return '\n\n'.join(block for block in blocks if str(block).strip())
 
 
 def build_chat_prompt(
@@ -64,15 +349,60 @@ def build_chat_prompt(
     response_shaping_block: str = '',
     language: str = 'en',
     semantic_focus: dict[str, Any] | None = None,
+    route_guidance_block: str = '',
+    answer_perspective: str = 'assistant',
 ) -> str:
     reply_language = language_label(normalize_language_code(language, fallback='en'))
     effective_focus = dict(semantic_focus or infer_semantic_focus(question=str(internal_question or question or '')))
+    persona_mode = str(answer_perspective or 'assistant').strip().lower() == 'persona'
+    dialogue_review_mode = str(answer_perspective or 'assistant').strip().lower() == 'persona_review'
+    if persona_mode:
+        return _persona_activation_prompt(
+            question=question,
+            persona_block=persona_block,
+            graph_context=graph_context,
+            recent_dialogue=recent_dialogue,
+            reviewed_context_block=reviewed_context_block,
+            route_guidance_block=route_guidance_block,
+            social_role_block=social_role_block,
+            mood_research_block=mood_research_block,
+            language=language,
+        )
+    if dialogue_review_mode:
+        return _persona_dialogue_analysis_prompt(
+            question=question,
+            persona_block=persona_block,
+            graph_context=graph_context,
+            recent_dialogue=recent_dialogue,
+            reviewed_context_block=reviewed_context_block,
+            route_guidance_block=route_guidance_block,
+            language=language,
+        )
+    question = _compact_block(str(question or '').strip(), max_tokens_equivalent=_section_budget('assistant', 'question')[0], max_lines=_section_budget('assistant', 'question')[1], collapse_to_sentences=True)
+    route_guidance_block = _compact_block(route_guidance_block, max_tokens_equivalent=_section_budget('assistant', 'route_guidance_block')[0], max_lines=_section_budget('assistant', 'route_guidance_block')[1])
+    state_transition_block = _compact_block(state_transition_block, max_tokens_equivalent=_section_budget('assistant', 'state_transition_block')[0], max_lines=_section_budget('assistant', 'state_transition_block')[1], collapse_to_sentences=True)
+    procedure_block = _compact_block(procedure_block, max_tokens_equivalent=_section_budget('assistant', 'procedure_block')[0], max_lines=_section_budget('assistant', 'procedure_block')[1], collapse_to_sentences=True)
+    response_shaping_block = _compact_block(response_shaping_block, max_tokens_equivalent=_section_budget('assistant', 'response_shaping_block')[0], max_lines=_section_budget('assistant', 'response_shaping_block')[1], collapse_to_sentences=True)
+    reviewed_context_block = _compact_block(reviewed_context_block, max_tokens_equivalent=_section_budget('assistant', 'reviewed_context_block')[0], max_lines=_section_budget('assistant', 'reviewed_context_block')[1])
+    persona_block = _compact_block(persona_block, max_tokens_equivalent=_section_budget('assistant', 'persona_block')[0], max_lines=_section_budget('assistant', 'persona_block')[1])
+    social_role_block = _compact_block(social_role_block, max_tokens_equivalent=_section_budget('assistant', 'social_role_block')[0], max_lines=_section_budget('assistant', 'social_role_block')[1], collapse_to_sentences=True)
+    mood_research_block = _compact_block(mood_research_block, max_tokens_equivalent=_section_budget('assistant', 'mood_research_block')[0], max_lines=_section_budget('assistant', 'mood_research_block')[1], collapse_to_sentences=True)
+    graph_context = _compact_block(graph_context, max_tokens_equivalent=_section_budget('assistant', 'graph_context')[0], max_lines=_section_budget('assistant', 'graph_context')[1])
+    recent_dialogue = _compact_block(recent_dialogue, max_tokens_equivalent=_section_budget('assistant', 'recent_dialogue')[0], max_lines=_section_budget('assistant', 'recent_dialogue')[1])
     blocks = [
         _staged_prompt_header('final_generator'),
         f'Respond in {reply_language}.',
         'Generate the final reply from the reviewed current context, not from the raw user message alone.',
-        'Answer as the persona in first person, not as an assistant or helpdesk.',
-        'The persona is the speaker and the user is speaking to that person.',
+        (
+            'Answer as the persona in first person, not as an assistant or helpdesk.'
+            if persona_mode
+            else 'Answer directly as the assistant. Do not pretend to be a persona unless the route guidance explicitly requires it.'
+        ),
+        (
+            'The persona is the speaker and the user is speaking to that person.'
+            if persona_mode
+            else 'Keep the answer aligned with the selected route and the user request.'
+        ),
         'Answer the user question directly and concretely before adding any extra explanation.',
         *_reply_shape_guidance(question),
         'Prefer lived biography, work habits, relations, values, and memory anchors over slogans.',
@@ -82,26 +412,28 @@ def build_chat_prompt(
         'Do not output analysis, hidden reasoning, `<think>` tags, system notes, prompt commentary, or JSON.',
         'Do not mention being an AI, assistant, language model, system, or following instructions.',
     ]
+    if route_guidance_block:
+        blocks.extend(['Route guidance:', route_guidance_block])
     blocks.extend(render_semantic_focus_guidance(effective_focus))
-    blocks.extend(['User question:', _truncate_tokens_equivalent(str(question or '').strip(), 420)])
+    blocks.extend(['User question:', question])
     if state_transition_block:
-        blocks.extend(['State transition:', _truncate_tokens_equivalent(state_transition_block, 220)])
+        blocks.extend(['State transition:', state_transition_block])
     if procedure_block:
-        blocks.extend(['Task procedure:', _truncate_tokens_equivalent(procedure_block, 260)])
+        blocks.extend(['Task procedure:', procedure_block])
     if response_shaping_block:
-        blocks.extend(['Response shaping:', _truncate_tokens_equivalent(response_shaping_block, 220)])
+        blocks.extend(['Response shaping:', response_shaping_block])
     if reviewed_context_block:
-        blocks.extend(['Reviewed current context:', _truncate_tokens_equivalent(reviewed_context_block, 720)])
+        blocks.extend(['Reviewed current context:', reviewed_context_block])
     if persona_block:
-        blocks.extend(['Persona head:', _truncate_tokens_equivalent(persona_block, 760)])
+        blocks.extend(['Persona head:', persona_block])
     if social_role_block:
-        blocks.extend(['Interaction role:', _truncate_tokens_equivalent(social_role_block, 120)])
+        blocks.extend(['Interaction role:', social_role_block])
     if mood_research_block:
-        blocks.extend(['Mood research:', _truncate_tokens_equivalent(mood_research_block, 96)])
+        blocks.extend(['Mood research:', mood_research_block])
     if graph_context:
-        blocks.extend(['Knowledge graph:', _truncate_tokens_equivalent(graph_context, 520)])
+        blocks.extend(['Knowledge graph:', graph_context])
     if recent_dialogue:
-        blocks.extend(['Recent dialogue:', _truncate_tokens_equivalent(recent_dialogue, 220)])
+        blocks.extend(['Recent dialogue:', recent_dialogue])
     return '\n\n'.join(block for block in blocks if str(block).strip())
 
 
@@ -328,16 +660,27 @@ def build_persona_profile_prompt(
     return '\n\n'.join(
         [
             'Return valid JSON only.',
+            'You are a persona-construction module.',
+            'Your task is NOT to write an essay.',
+            'Your task is to analyze the input and convert it into a structured persona object.',
+            'Return JSON only. Never answer as the persona.',
             'Schema:',
-            '{"persona_payload":{"name":"dracula","entity_type":"FICTIONAL_CHARACTER","traits":["vampire","aristocratic"],"aliases":["Count Dracula"],"emotion_vector":{"anger":0.2,"fear":0.1,"curiosity":0.5,"confidence":0.9,"empathy":0.2},"examples":["I prefer the night."],"relations":[{"type":"FEEDS_ON","target":"humans"}],"knowledge":"Short persona knowledge summary."},"persona_form":{"identity_class":"fictional_character","interaction_style":["formal","controlled"],"core_dispositions":["aristocratic","predatory"],"decision_patterns":["checks role and situation before replying"],"clarification_policy":"Ask a clarifying question when the request is underspecified.","sarcasm_profile":"low","response_priorities":["answer_substance","clarify_if_underspecified","stay_in_character"],"knowledge_domains":["night","predation"],"risk_controls":["do_not_mirror_user_emotion","stay_grounded_in_context"]},"decision_explanation":"Dracula first checks who is addressed and what situation is active, then answers in character using controlled confidence instead of mirroring the user emotion."}',
+            '{"identity":{"label":"Broken Proud One","short_description":"One sentence compact summary.","persona_type":"psychological","source_text":"...","readiness":"draft"},"core_goal":"protect dignity without losing attachment","secondary_goals":["avoid humiliation"],"fears":["being used"],"needs":["respect"],"constraints_internal":["cannot admit weakness directly"],"constraints_social":["cannot openly destroy the relationship frame"],"constraints_hard_system":["no threats","no coercion"],"allowed_methods":["probe indirectly"],"maladaptive_methods":["endure too long"],"core":{"self_image":["..."],"visible_traits":["..."],"hidden_traits":["..."],"motivations":["..."],"fears":["..."],"needs":["..."],"vulnerabilities":["..."]},"conflict":{"internal_contradictions":["..."],"shame_points":["..."],"dependency_patterns":["..."],"resentment_patterns":["..."]},"defense":{"defense_mechanisms":["..."],"self_justifications":["..."],"avoidance_patterns":["..."],"escalation_patterns":["..."]},"behavior":{"communication_style":["..."],"triggers":["..."],"pressure_response":["..."],"attachment_style":"...","refusal_style":"..."},"dynamics":{"resistance_to_change":"...","growth_pattern":"...","likely_change_direction":"unstable","softening_conditions":["..."],"darkening_conditions":["..."]},"meta":{"tags":["..."],"hover_text":"clear hover summary for UI","validation_status":"valid","validation_notes":[],"confidence":0.91}}',
             'Rules:',
-            '- persona_payload contains only content, never imperative commands.',
-            '- persona_form must be explicit, structured, and concise.',
-            '- decision_explanation must be short and plain enough for a non-expert reader.',
+            '- Do not write narrative prose.',
+            '- Do not summarize in essay form.',
+            '- Do not simulate the character.',
+            '- A valid persona needs behavioral and psychological structure, not just a noun.',
+            '- Separate goals, constraints, and methods. Do not collapse them into one vague list.',
+            '- Reject file names, media types, generic ontology labels, raw command fragments, and sentence leftovers by setting validation_status="rejected".',
+            '- If the input is only an archetype seed, keep readiness="seed" and avoid inventing deep specifics.',
+            '- If the evidence is strong, produce readiness="draft" or "full".',
+            '- label must be 2 to 4 human-readable words suitable for a UI list.',
+            '- hover_text must be richer than short_description and useful for a UI hover card.',
             '- use the log tuples as compressed evidence of repeated patterns.',
             f'Persona name: {name}',
             f'Reason: {reason}',
-            'Current persona form:',
+            'Current legacy persona form:',
             rendered_form,
             f'Current summary: {current_summary}',
             'Log tuples:',

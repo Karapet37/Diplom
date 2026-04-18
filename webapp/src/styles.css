@@ -320,6 +320,14 @@ small,
   gap: 0.75rem;
 }
 
+.session-create-button {
+  width: 100%;
+  justify-content: center;
+  margin-top: 0.2rem;
+  margin-bottom: 0.75rem;
+  padding: 0.92rem 1.1rem;
+}
+
 .field-stack {
   display: grid;
   gap: 0.45rem;
@@ -332,6 +340,25 @@ small,
 
 .field-stack.compact small {
   color: var(--muted);
+}
+
+.sidebar-persona-summary {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  background: rgba(12, 22, 34, 0.72);
+  border: 1px solid rgba(92, 118, 164, 0.18);
+}
+
+.sidebar-persona-summary strong {
+  font-size: 0.94rem;
+}
+
+.sidebar-persona-summary span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
 }
 
 .filter-checks {
@@ -472,6 +499,68 @@ small,
 
 .operator-card-block h3 {
   margin: 0 0 0.75rem;
+}
+
+/* ── Safety badge ─────────────────────────────────────────────────────────── */
+.safety-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--badge-color) 15%, transparent);
+  color: var(--badge-color);
+  border: 1px solid color-mix(in srgb, var(--badge-color) 35%, transparent);
+  white-space: nowrap;
+}
+
+.safety-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--badge-color);
+  flex-shrink: 0;
+}
+
+.safety-panel {
+  background: color-mix(in srgb, var(--badge-color, var(--surface)) 6%, rgba(6, 14, 24, 0.6));
+}
+
+.safety-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.safety-action-tag {
+  font-size: 0.72rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(146, 167, 191, 0.1);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  text-transform: lowercase;
+}
+
+.safety-conf {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.safety-features {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.6;
+  word-break: break-word;
 }
 
 .operator-kv-grid {
@@ -1596,6 +1685,13 @@ small,
   overflow: auto;
 }
 
+.session-list__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  align-items: stretch;
+}
+
 .session-card {
   width: 100%;
   text-align: left;
@@ -1627,6 +1723,21 @@ small,
   margin: 0.45rem 0 0;
   color: var(--text);
   line-height: 1.45;
+}
+
+.session-delete-button {
+  min-width: 2.9rem;
+  padding: 0.8rem 0.84rem;
+  align-self: stretch;
+  border-radius: 16px;
+  border-color: rgba(255, 107, 122, 0.28);
+  background: rgba(43, 15, 22, 0.82);
+  color: #ffe5e8;
+}
+
+.session-delete-button:hover:not(:disabled) {
+  box-shadow: none;
+  background: rgba(74, 21, 35, 0.92);
 }
 
 .sidebar-inline-note {

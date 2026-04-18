@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal, Optional
 
 ENTITY_TYPES = (
     'PERSON',
@@ -27,6 +27,10 @@ HEAD_ENTITY_TYPES = (
 )
 
 EMOTION_KEYS = ('anger', 'fear', 'curiosity', 'confidence', 'empathy')
+PersonaType = Literal['archetype', 'psychological', 'situational', 'hybrid']
+ChangeDirection = Literal['lighter', 'darker', 'mixed', 'unstable']
+ValidationStatus = Literal['valid', 'partial', 'rejected']
+PersonaReadiness = Literal['seed', 'draft', 'full']
 SITUATION_TYPES = (
     'insult',
     'user_distress',
@@ -256,6 +260,191 @@ class PersonaLearnedPatterns:
             'learned_traits': list(self.learned_traits),
             'revision': int(self.revision or 0),
             'updated_at': self.updated_at,
+        }
+
+
+@dataclass(slots=True)
+class PersonaIdentity:
+    label: str = ''
+    short_description: str = ''
+    persona_type: PersonaType = 'hybrid'
+    source_text: str = ''
+    readiness: PersonaReadiness = 'draft'
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'label': self.label,
+            'short_description': self.short_description,
+            'persona_type': self.persona_type,
+            'source_text': self.source_text,
+            'readiness': self.readiness,
+        }
+
+
+@dataclass(slots=True)
+class PersonaCore:
+    self_image: list[str] = field(default_factory=list)
+    visible_traits: list[str] = field(default_factory=list)
+    hidden_traits: list[str] = field(default_factory=list)
+    motivations: list[str] = field(default_factory=list)
+    fears: list[str] = field(default_factory=list)
+    needs: list[str] = field(default_factory=list)
+    vulnerabilities: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'self_image': list(self.self_image),
+            'visible_traits': list(self.visible_traits),
+            'hidden_traits': list(self.hidden_traits),
+            'motivations': list(self.motivations),
+            'fears': list(self.fears),
+            'needs': list(self.needs),
+            'vulnerabilities': list(self.vulnerabilities),
+        }
+
+
+@dataclass(slots=True)
+class PersonaConflict:
+    internal_contradictions: list[str] = field(default_factory=list)
+    shame_points: list[str] = field(default_factory=list)
+    dependency_patterns: list[str] = field(default_factory=list)
+    resentment_patterns: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'internal_contradictions': list(self.internal_contradictions),
+            'shame_points': list(self.shame_points),
+            'dependency_patterns': list(self.dependency_patterns),
+            'resentment_patterns': list(self.resentment_patterns),
+        }
+
+
+@dataclass(slots=True)
+class PersonaDefense:
+    defense_mechanisms: list[str] = field(default_factory=list)
+    self_justifications: list[str] = field(default_factory=list)
+    avoidance_patterns: list[str] = field(default_factory=list)
+    escalation_patterns: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'defense_mechanisms': list(self.defense_mechanisms),
+            'self_justifications': list(self.self_justifications),
+            'avoidance_patterns': list(self.avoidance_patterns),
+            'escalation_patterns': list(self.escalation_patterns),
+        }
+
+
+@dataclass(slots=True)
+class PersonaBehavior:
+    communication_style: list[str] = field(default_factory=list)
+    triggers: list[str] = field(default_factory=list)
+    pressure_response: list[str] = field(default_factory=list)
+    attachment_style: Optional[str] = None
+    refusal_style: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'communication_style': list(self.communication_style),
+            'triggers': list(self.triggers),
+            'pressure_response': list(self.pressure_response),
+            'attachment_style': self.attachment_style,
+            'refusal_style': self.refusal_style,
+        }
+
+
+@dataclass(slots=True)
+class PersonaDynamics:
+    resistance_to_change: str = ''
+    growth_pattern: str = ''
+    likely_change_direction: ChangeDirection = 'unstable'
+    softening_conditions: list[str] = field(default_factory=list)
+    darkening_conditions: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'resistance_to_change': self.resistance_to_change,
+            'growth_pattern': self.growth_pattern,
+            'likely_change_direction': self.likely_change_direction,
+            'softening_conditions': list(self.softening_conditions),
+            'darkening_conditions': list(self.darkening_conditions),
+        }
+
+
+@dataclass(slots=True)
+class PersonaMeta:
+    tags: list[str] = field(default_factory=list)
+    hover_text: str = ''
+    validation_status: ValidationStatus = 'partial'
+    validation_notes: list[str] = field(default_factory=list)
+    confidence: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'tags': list(self.tags),
+            'hover_text': self.hover_text,
+            'validation_status': self.validation_status,
+            'validation_notes': list(self.validation_notes),
+            'confidence': round(float(self.confidence or 0.0), 6),
+        }
+
+
+@dataclass(slots=True)
+class StructuredPersona:
+    identity: PersonaIdentity = field(default_factory=PersonaIdentity)
+    core_goal: str = ''
+    secondary_goals: list[str] = field(default_factory=list)
+    fears: list[str] = field(default_factory=list)
+    needs: list[str] = field(default_factory=list)
+    constraints_internal: list[str] = field(default_factory=list)
+    constraints_social: list[str] = field(default_factory=list)
+    constraints_hard_system: list[str] = field(default_factory=list)
+    allowed_methods: list[str] = field(default_factory=list)
+    maladaptive_methods: list[str] = field(default_factory=list)
+    core: PersonaCore = field(default_factory=PersonaCore)
+    conflict: PersonaConflict = field(default_factory=PersonaConflict)
+    defense: PersonaDefense = field(default_factory=PersonaDefense)
+    behavior: PersonaBehavior = field(default_factory=PersonaBehavior)
+    dynamics: PersonaDynamics = field(default_factory=PersonaDynamics)
+    meta: PersonaMeta = field(default_factory=PersonaMeta)
+
+    def is_minimally_valid(self) -> bool:
+        return (
+            bool(self.identity.label.strip())
+            and len(self.core.visible_traits) + len(self.core.hidden_traits) >= 2
+            and (
+                bool(str(self.core_goal or '').strip())
+                or len(self.secondary_goals) > 0
+                or len(self.needs) > 0
+            )
+            and (
+                len(self.conflict.internal_contradictions) > 0
+                or len(self.conflict.dependency_patterns) > 0
+                or len(self.defense.defense_mechanisms) > 0
+                or len(self.constraints_internal) > 0
+                or len(self.constraints_social) > 0
+            )
+            and bool(self.meta.hover_text.strip())
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'identity': self.identity.to_dict(),
+            'core_goal': self.core_goal,
+            'secondary_goals': list(self.secondary_goals),
+            'fears': list(self.fears),
+            'needs': list(self.needs),
+            'constraints_internal': list(self.constraints_internal),
+            'constraints_social': list(self.constraints_social),
+            'constraints_hard_system': list(self.constraints_hard_system),
+            'allowed_methods': list(self.allowed_methods),
+            'maladaptive_methods': list(self.maladaptive_methods),
+            'core': self.core.to_dict(),
+            'conflict': self.conflict.to_dict(),
+            'defense': self.defense.to_dict(),
+            'behavior': self.behavior.to_dict(),
+            'dynamics': self.dynamics.to_dict(),
+            'meta': self.meta.to_dict(),
         }
 
 
@@ -590,6 +779,7 @@ class HeadBundle:
     learned_patterns: PersonaLearnedPatterns | None = None
     indicators: PersonaIndicators | None = None
     revision_meta: dict[str, Any] = field(default_factory=dict)
+    structured_persona: StructuredPersona | None = None
 
 
 @dataclass(slots=True)
@@ -856,6 +1046,246 @@ class ChatTurnRequest:
 
 
 @dataclass(slots=True)
+class RequestEnvelope:
+    request_id: str
+    session_id: str
+    raw_text: str
+    normalized_text: str
+    timestamp: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'request_id': self.request_id,
+            'session_id': self.session_id,
+            'raw_text': self.raw_text,
+            'normalized_text': self.normalized_text,
+            'timestamp': self.timestamp,
+        }
+
+
+@dataclass(slots=True)
+class ControllerState:
+    envelope: RequestEnvelope
+    interaction_frame: InteractionFrame
+    analysis: MessageAnalysis
+    preprocessing: RequestPreprocessing
+    route: RouteDecision
+    capability_plan: CapabilityPlan
+    selected_persona: str = ''
+    session_persona: str = ''
+    current_entity: str = ''
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'envelope': self.envelope.to_dict(),
+            'interaction_frame': self.interaction_frame.to_dict(),
+            'analysis': self.analysis.to_dict(),
+            'preprocessing': self.preprocessing.to_dict(),
+            'route': self.route.to_dict(),
+            'capability_plan': self.capability_plan.to_dict(),
+            'selected_persona': self.selected_persona,
+            'session_persona': self.session_persona,
+            'current_entity': self.current_entity,
+        }
+
+
+@dataclass(slots=True)
+class RequestPreprocessing:
+    request_type: str = 'general_chat'
+    detected_language: str = 'en'
+    intent_type: str = 'statement'
+    interaction_mode: str = 'conversation'
+    request_kind: str = 'statement'
+    hypothetical: bool = False
+    hypothetical_continuation: bool = False
+    meta_request: bool = False
+    file_related: bool = False
+    system_debug: bool = False
+    clarification_needed: bool = False
+    persona_style_traits: list[str] = field(default_factory=list)
+    speech_style_hints: list[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'request_type': self.request_type,
+            'detected_language': self.detected_language,
+            'intent_type': self.intent_type,
+            'interaction_mode': self.interaction_mode,
+            'request_kind': self.request_kind,
+            'hypothetical': bool(self.hypothetical),
+            'hypothetical_continuation': bool(self.hypothetical_continuation),
+            'meta_request': bool(self.meta_request),
+            'file_related': bool(self.file_related),
+            'system_debug': bool(self.system_debug),
+            'clarification_needed': bool(self.clarification_needed),
+            'persona_style_traits': list(self.persona_style_traits),
+            'speech_style_hints': list(self.speech_style_hints),
+            'evidence': list(self.evidence),
+        }
+
+
+@dataclass(slots=True)
+class RouteDecision:
+    selected_route: str = 'factual_answer'
+    request_type: str = 'general_chat'
+    detected_language: str = 'en'
+    intent_type: str = 'statement'
+    interaction_mode: str = 'conversation'
+    requires_history: bool = False
+    requires_graph: bool = False
+    requires_persona: bool = False
+    requires_llm: bool = True
+    strict_grounding: bool = True
+    response_style: str = 'direct_answer'
+    validation_mode: str = 'grounded_factual'
+    fast_path: bool = False
+    persona_style_traits: list[str] = field(default_factory=list)
+    speech_style_hints: list[str] = field(default_factory=list)
+    secondary_flags: list[str] = field(default_factory=list)
+    reason_codes: list[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'selected_route': self.selected_route,
+            'request_type': self.request_type,
+            'detected_language': self.detected_language,
+            'intent_type': self.intent_type,
+            'interaction_mode': self.interaction_mode,
+            'requires_history': bool(self.requires_history),
+            'requires_graph': bool(self.requires_graph),
+            'requires_persona': bool(self.requires_persona),
+            'requires_llm': bool(self.requires_llm),
+            'strict_grounding': bool(self.strict_grounding),
+            'response_style': self.response_style,
+            'validation_mode': self.validation_mode,
+            'fast_path': bool(self.fast_path),
+            'persona_style_traits': list(self.persona_style_traits),
+            'speech_style_hints': list(self.speech_style_hints),
+            'secondary_flags': list(self.secondary_flags),
+            'reason_codes': list(self.reason_codes),
+            'evidence': list(self.evidence),
+        }
+
+
+@dataclass(slots=True)
+class RouteMemory:
+    previous_route: str = ''
+    previous_request_type: str = ''
+    previous_interaction_mode: str = ''
+    previous_response_style: str = ''
+    previous_persona_name: str = ''
+    previous_current_entity: str = ''
+    persona_style_traits: list[str] = field(default_factory=list)
+    speech_style_hints: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'previous_route': self.previous_route,
+            'previous_request_type': self.previous_request_type,
+            'previous_interaction_mode': self.previous_interaction_mode,
+            'previous_response_style': self.previous_response_style,
+            'previous_persona_name': self.previous_persona_name,
+            'previous_current_entity': self.previous_current_entity,
+            'persona_style_traits': list(self.persona_style_traits),
+            'speech_style_hints': list(self.speech_style_hints),
+        }
+
+
+@dataclass(slots=True)
+class TraceLearningPolicy:
+    selected_route: str = ''
+    batch_size: int = 0
+    sampled_trace_count: int = 0
+    session_trace_count: int = 0
+    global_trace_count: int = 0
+    signal_trace_count: int = 0
+    failure_density: float = 0.0
+    output_budget_boost: int = 0
+    route_guidance_lines: list[str] = field(default_factory=list)
+    reason_codes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'selected_route': self.selected_route,
+            'batch_size': int(self.batch_size or 0),
+            'sampled_trace_count': int(self.sampled_trace_count or 0),
+            'session_trace_count': int(self.session_trace_count or 0),
+            'global_trace_count': int(self.global_trace_count or 0),
+            'signal_trace_count': int(self.signal_trace_count or 0),
+            'failure_density': float(self.failure_density or 0.0),
+            'output_budget_boost': int(self.output_budget_boost or 0),
+            'route_guidance_lines': list(self.route_guidance_lines),
+            'reason_codes': list(self.reason_codes),
+        }
+
+
+@dataclass(slots=True)
+class CapabilityPlan:
+    requires_history: bool = False
+    requires_graph: bool = False
+    requires_persona: bool = False
+    requires_llm: bool = True
+    use_context_builder: bool = False
+    use_heavy_persona_pipeline: bool = False
+    strict_grounding: bool = True
+    preferred_generation_mode: str = 'chat_llm'
+    context_sources: list[str] = field(default_factory=list)
+    skipped_components: list[str] = field(default_factory=list)
+    reason_codes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'requires_history': bool(self.requires_history),
+            'requires_graph': bool(self.requires_graph),
+            'requires_persona': bool(self.requires_persona),
+            'requires_llm': bool(self.requires_llm),
+            'use_context_builder': bool(self.use_context_builder),
+            'use_heavy_persona_pipeline': bool(self.use_heavy_persona_pipeline),
+            'strict_grounding': bool(self.strict_grounding),
+            'preferred_generation_mode': self.preferred_generation_mode,
+            'context_sources': list(self.context_sources),
+            'skipped_components': list(self.skipped_components),
+            'reason_codes': list(self.reason_codes),
+        }
+
+
+@dataclass(slots=True)
+class ResponseValidation:
+    ok: bool = True
+    validation_mode: str = 'grounded_factual'
+    route_match: bool = True
+    relevance_match: bool = True
+    used_history: bool = False
+    used_graph: bool = False
+    used_persona: bool = False
+    fallback_triggered: bool = False
+    fallback_reason_code: str = ''
+    mismatch_reason: str = ''
+    repair_strategy: str = ''
+    repaired: bool = False
+    reason_codes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'ok': bool(self.ok),
+            'validation_mode': self.validation_mode,
+            'route_match': bool(self.route_match),
+            'relevance_match': bool(self.relevance_match),
+            'used_history': bool(self.used_history),
+            'used_graph': bool(self.used_graph),
+            'used_persona': bool(self.used_persona),
+            'fallback_triggered': bool(self.fallback_triggered),
+            'fallback_reason_code': self.fallback_reason_code,
+            'mismatch_reason': self.mismatch_reason,
+            'repair_strategy': self.repair_strategy,
+            'repaired': bool(self.repaired),
+            'reason_codes': list(self.reason_codes),
+        }
+
+
+@dataclass(slots=True)
 class BackgroundRebuildDecision:
     session_id: str
     personality_name: str = ''
@@ -875,6 +1305,7 @@ class BackgroundRebuildDecision:
 class ChatSideEffects:
     graph_write_sources: list[str] = field(default_factory=list)
     history_write_path: str = ''
+    route_state_path: str = ''
     current_context_path: str = ''
     transition_log_path: str = ''
     persona_updates: list[str] = field(default_factory=list)
@@ -894,6 +1325,7 @@ class ChatSideEffects:
         return {
             'graph_write_sources': list(self.graph_write_sources),
             'history_write_path': self.history_write_path,
+            'route_state_path': self.route_state_path,
             'current_context_path': self.current_context_path,
             'transition_log_path': self.transition_log_path,
             'persona_updates': list(self.persona_updates),
@@ -913,6 +1345,8 @@ class ChatTurnResult:
     analysis: MessageAnalysis
     classifications: list[ClassificationDecision]
     repair_status: dict[str, Any]
+    pipeline: dict[str, Any] = field(default_factory=dict)
+    validation: ResponseValidation = field(default_factory=ResponseValidation)
     proposal_requested: bool = False
     trace_id: str = ''
     side_effects: ChatSideEffects = field(default_factory=ChatSideEffects)
@@ -926,6 +1360,7 @@ class ChatTurnResult:
     context_preview: dict[str, Any] = field(default_factory=dict)
     runtime_status: dict[str, Any] = field(default_factory=dict)
     operator_messages: list[str] = field(default_factory=list)
+    persona_action: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self, *, include_side_effects: bool = True) -> dict[str, Any]:
         payload = {
@@ -948,6 +1383,8 @@ class ChatTurnResult:
                 for decision in self.classifications
             ],
             'repair_status': dict(self.repair_status),
+            'pipeline': dict(self.pipeline),
+            'validation': self.validation.to_dict(),
             'proposal_requested': self.proposal_requested,
             'persona_selection': self.persona_selection.to_dict(),
             'persona_response': self.persona_response.to_dict(),
@@ -959,6 +1396,7 @@ class ChatTurnResult:
             'context_preview': dict(self.context_preview),
             'runtime_status': dict(self.runtime_status),
             'operator_messages': list(self.operator_messages),
+            'persona_action': dict(self.persona_action),
         }
         if include_side_effects:
             payload['side_effects'] = self.side_effects.to_dict()

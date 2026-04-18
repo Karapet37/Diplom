@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from .duplicate_resolver import normalize_name
 from .llm import call_json_model_for_role
+from .history_store import load_session_route_state
 from .models import (
     HeadBundle,
     InfluenceInterpretation,
@@ -57,6 +58,10 @@ def infer_session_active_persona(session_id: str) -> str:
     clean_session_id = str(session_id or '').strip()
     if not clean_session_id:
         return ''
+    route_state = load_session_route_state(clean_session_id)
+    route_persona = str(route_state.get('persona_name') or '').strip()
+    if route_persona:
+        return route_persona
     path = get_runtime_config().paths.state_transitions_log_path
     if not path.exists():
         return ''

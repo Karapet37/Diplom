@@ -24,7 +24,7 @@ def test_interaction_router_can_separate_speaker_persona_from_topic_entity_with_
     monkeypatch.setattr('agent_system.llm._call_model', fake_model)
 
     frame = route_interaction(
-        message="Okay, you're Peter Parker. Why is Mysterio dangerous?",
+        message='Why did he do that?',
         session_persona='',
         current_entity='',
         known_entities=[
@@ -38,6 +38,41 @@ def test_interaction_router_can_separate_speaker_persona_from_topic_entity_with_
     assert frame.requested_persona == 'Peter Parker'
     assert frame.topic_entity == 'Mysterio'
     assert frame.routed_message == 'Why is Mysterio dangerous?'
+
+
+def test_interaction_router_detects_second_person_identity_frame_deterministically() -> None:
+    frame = route_interaction(
+        message='ты вампир, изгнанный из своей стаи. как ты питаешься?',
+        session_persona='',
+        current_entity='',
+        known_entities=[],
+    )
+
+    assert frame.source == 'deterministic'
+    assert frame.explicit_persona_switch is True
+    assert frame.requested_persona == 'Вампир'
+    assert frame.topic_mode in {'persona_switch', 'persona_self'}
+    assert frame.question_present is True
+
+
+def test_interaction_router_skips_llm_when_deterministic_seed_is_decisive(monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_STAGE_MODEL_STEPS', 'interaction_router')
+    monkeypatch.setattr('agent_system.llm._call_model', lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('llm router should be skipped')))
+
+    frame = route_interaction(
+        message="Okay, you're Peter Parker. Why is Mysterio dangerous?",
+        session_persona='',
+        current_entity='',
+        known_entities=[
+            {'name': 'Peter Parker', 'aliases': ['Spider-Man'], 'type': 'FICTIONAL_CHARACTER'},
+            {'name': 'Mysterio', 'aliases': ['Quentin Beck'], 'type': 'FICTIONAL_CHARACTER'},
+        ],
+    )
+
+    assert frame.source == 'deterministic'
+    assert frame.explicit_persona_switch is True
+    assert frame.requested_persona == 'Peter Parker'
+    assert frame.topic_entity == 'Mysterio'
 
 
 def test_message_analyzer_uses_interaction_frame_as_source_of_followup_topic() -> None:

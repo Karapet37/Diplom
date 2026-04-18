@@ -11,8 +11,13 @@ def test_runtime_config_resolves_memory_paths_and_roles(tmp_path, monkeypatch) -
     monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
     monkeypatch.setenv('COGNITIVE_CHAT_ROLE', 'analyst')
     monkeypatch.setenv('COGNITIVE_EXTRACTION_ROLE', 'analyst')
+    monkeypatch.setenv('COGNITIVE_PERSONA_ROLE', 'general')
     monkeypatch.setenv('COGNITIVE_RETHINK_ROLE', 'analyst')
     monkeypatch.setenv('COGNITIVE_TRANSLATION_ROLE', 'translator')
+    monkeypatch.setenv('COGNITIVE_CHAT_ORCHESTRATION', 'alternate')
+    monkeypatch.setenv('COGNITIVE_CHAT_PRIMARY_ROLE', 'general')
+    monkeypatch.setenv('COGNITIVE_CHAT_REVIEW_ROLE', 'analyst')
+    monkeypatch.setenv('COGNITIVE_CHAT_REVIEW_MODE', 'always')
     monkeypatch.setenv('COGNITIVE_BACKGROUND_REBUILD_INTERVAL', '9')
 
     config = get_runtime_config()
@@ -28,8 +33,13 @@ def test_runtime_config_resolves_memory_paths_and_roles(tmp_path, monkeypatch) -
     assert config.paths.archive_graphs_dir.exists()
     assert config.roles.chat == 'analyst'
     assert config.roles.extraction == 'analyst'
+    assert config.roles.persona_synthesis == 'general'
     assert config.roles.rethink == 'analyst'
     assert config.roles.translation == 'translator'
+    assert config.chat_orchestration.strategy == 'alternate'
+    assert config.chat_orchestration.primary_role == 'general'
+    assert config.chat_orchestration.reviewer_role == 'analyst'
+    assert config.chat_orchestration.review_mode == 'always'
     assert config.settings.background_rebuild_interval == 9
     assert config.context.max_context_tokens == 4000
     assert config.memory.session_archive_after_messages >= config.memory.session_keep_recent_messages
@@ -52,9 +62,9 @@ def test_runtime_config_resolves_relative_paths_against_repo_root(monkeypatch) -
 def test_runtime_config_llm_windows_and_context_attempts() -> None:
     config = get_runtime_config()
 
-    assert config.llm_window('chat', role='analyst') == (1024, 80)
-    assert config.llm_window('knowledge', role='analyst') == (1152, 288)
-    assert config.llm_window('translation', role='translator') == (896, 160)
+    assert config.llm_window('chat', role='analyst') == (2048, 256)
+    assert config.llm_window('knowledge', role='analyst') == (2048, 384)
+    assert config.llm_window('translation', role='translator') == (1024, 192)
     assert config.max_context_attempts_for_role('analyst') >= 1
     assert config.max_context_attempts_for_role('general') >= 1
 

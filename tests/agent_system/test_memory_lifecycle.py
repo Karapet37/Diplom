@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from agent_system.graph_store import GraphStore
-from agent_system.history_store import append_turn, create_session, infer_current_entity, parse_active_session, parse_session, recent_dialogue
-from agent_system.memory_layers import describe_memory_layers, load_persona_overflow_archive, load_session_archive
+from agent_system.history_store import append_turn, create_session, delete_session, infer_current_entity, parse_active_session, parse_session, recent_dialogue, save_session_route_state, session_files_dir, session_text_path
+from agent_system.memory_layers import append_session_archive, describe_memory_layers, load_persona_overflow_archive, load_session_archive
 from agent_system.persona_engine import load_persona, materialize_persona
 
 
@@ -126,3 +126,35 @@ def test_infer_current_entity_keeps_multiword_name_from_last_user_turn(tmp_path,
     )
 
     assert infer_current_entity('entity_multiword') == 'Jack Sparrow'
+
+
+def test_delete_session_removes_text_route_state_uploads_and_archive(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+
+    create_session('delete_me', 'Delete Me')
+    append_turn('delete_me', 'user 0', 'assistant 0')
+    append_session_archive(
+        'delete_me',
+        title='Delete Me',
+        messages=[
+            {'timestamp': '2026-01-01T00:00:00Z', 'role': 'user', 'message': 'older user'},
+            {'timestamp': '2026-01-01T00:00:01Z', 'role': 'assistant', 'message': 'older assistant'},
+        ],
+        reason='test_setup',
+    )
+
+    save_session_route_state('delete_me', {'selected_route': 'factual_answer'})
+    upload_path = session_files_dir('delete_me') / 'notes.txt'
+    upload_path.write_text('hello', encoding='utf-8')
+    archive = load_session_archive('delete_me')
+
+    assert session_text_path('delete_me').exists()
+    assert upload_path.exists()
+    assert archive['archived_messages']
+
+    result = delete_session('delete_me')
+
+    assert result['ok'] is True
+    assert parse_session('delete_me') is None
+    assert not upload_path.exists()
+    assert not any('delete_me.txt' in path for path in result['missing_paths'])

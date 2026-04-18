@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import json
 from pathlib import Path
+import shutil
 from typing import Any
 
 from .duplicate_resolver import normalize_name
-from .memory_layers import append_session_archive, load_session_archive
+from .memory_layers import append_session_archive, load_session_archive, session_archive_path
 from .runtime_config import get_runtime_config
 from .text_resources import capitalized_entity_phrases, compiled_entity_patterns
 
@@ -87,6 +89,31 @@ def session_files_dir(session_id: str) -> Path:
     return path
 
 
+def session_route_state_path(session_id: str) -> Path:
+    path = sessions_dir() / '_route_state'
+    path.mkdir(parents=True, exist_ok=True)
+    return path / f'{_safe_session_id(session_id)}.json'
+
+
+def load_session_route_state(session_id: str) -> dict[str, Any]:
+    path = session_route_state_path(session_id)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def save_session_route_state(session_id: str, payload: dict[str, Any]) -> Path:
+    path = session_route_state_path(session_id)
+    clean_payload = dict(payload or {})
+    clean_payload['session_id'] = _safe_session_id(session_id)
+    path.write_text(json.dumps(clean_payload, ensure_ascii=False, indent=2), encoding='utf-8')
+    return path
+
+
 def create_session(session_id: str = '', title: str = '') -> dict[str, Any]:
     clean = _safe_session_id(session_id)
     path = session_text_path(clean)
@@ -106,6 +133,24 @@ def create_session(session_id: str = '', title: str = '') -> dict[str, Any]:
         'updated_at': _utc_now(),
         'path': str(path),
     }
+
+
+def _session_uploaded_files_path(session_id: str) -> Path:
+    return files_dir() / _safe_session_id(session_id)
+
+
+def _session_route_state_file(session_id: str) -> Path:
+    return sessions_dir() / '_route_state' / f'{_safe_session_id(session_id)}.json'
+
+
+def _session_mood_dataset_path(session_id: str) -> Path:
+    token = normalize_name(_safe_session_id(session_id)) or 'session'
+    return get_runtime_config().paths.mood_sessions_dir / f'{token}.jsonl'
+
+
+def _session_mood_report_path(session_id: str) -> Path:
+    token = normalize_name(_safe_session_id(session_id)) or 'session'
+    return get_runtime_config().paths.mood_reports_dir / f'session__{token}.json'
 
 
 def _render_session_text(title: str, messages: list[dict[str, Any]]) -> str:
@@ -257,6 +302,49 @@ def list_sessions() -> list[dict[str, Any]]:
         if parsed is not None:
             rows.append(parsed)
     return rows
+
+
+def delete_session(session_id: str) -> dict[str, Any]:
+    clean_session_id = _safe_session_id(session_id)
+    file_paths = [
+        session_text_path(clean_session_id),
+        _session_route_state_file(clean_session_id),
+        session_archive_path(clean_session_id),
+        _session_mood_dataset_path(clean_session_id),
+        _session_mood_report_path(clean_session_id),
+    ]
+    dir_paths = [
+        _session_uploaded_files_path(clean_session_id),
+    ]
+    deleted_paths: list[str] = []
+    missing_paths: list[str] = []
+
+    for path in file_paths:
+        try:
+            if path.exists():
+                path.unlink()
+                deleted_paths.append(str(path))
+            else:
+                missing_paths.append(str(path))
+        except OSError:
+            missing_paths.append(str(path))
+
+    for path in dir_paths:
+        try:
+            if path.exists():
+                shutil.rmtree(path)
+                deleted_paths.append(str(path))
+            else:
+                missing_paths.append(str(path))
+        except OSError:
+            missing_paths.append(str(path))
+
+    return {
+        'ok': bool(deleted_paths),
+        'session_id': clean_session_id,
+        'deleted_paths': deleted_paths,
+        'missing_paths': missing_paths,
+    }
 
 
 def recent_dialogue(session_id: str, *, max_messages: int = 6, max_tokens_equivalent: int = 1200) -> str:

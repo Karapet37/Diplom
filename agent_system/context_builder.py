@@ -8,7 +8,7 @@ from .duplicate_resolver import normalize_name, score_node
 from .graph_store import GraphStore
 from .history_store import infer_current_entity, parse_session, recent_dialogue
 from .models import ContextCandidate, ContextPayload, ContextScoreBreakdown, HeadBundle, MessageAnalysis, MoodResearchReport, Situation, SocialRoleDecision
-from .persona_engine import infer_persona_name, load_persona, load_persona_graph, persona_exists, reaction_policy, relevant_reactions
+from .persona_engine import infer_persona_name, load_active_persona, load_persona_graph, persona_is_registered, reaction_policy, relevant_reactions
 from .prompt_builder import render_graph_context
 from .runtime_config import get_runtime_config
 from .semantic_routing import infer_semantic_focus
@@ -31,10 +31,11 @@ _SOURCE_PRIORITY: dict[str, int] = {
     'persona_triad': 1,
     'social_role': 2,
     'mood_research': 3,
-    'local_graph_neighborhood': 4,
-    'global_graph_facts': 5,
-    'file_ingested_knowledge': 6,
-    'session_short_term_history': 7,
+    'session_graph_context': 4,
+    'local_graph_neighborhood': 5,
+    'global_graph_facts': 6,
+    'file_ingested_knowledge': 7,
+    'session_short_term_history': 8,
 }
 
 _PERSONA_RENDER_ORDER: dict[str, int] = {
@@ -43,14 +44,15 @@ _PERSONA_RENDER_ORDER: dict[str, int] = {
     'persona_work_profile': 2,
     'persona_social_role': 3,
     'persona_mood_dynamics': 4,
-    'persona_knowledge': 5,
-    'persona_relations': 6,
-    'persona_form': 7,
-    'persona_decision_explanation': 8,
-    'persona_state': 9,
-    'persona_reactions': 10,
-    'persona_examples': 11,
-    'persona_log_tuples': 12,
+    'persona_control': 5,
+    'persona_knowledge': 6,
+    'persona_relations': 7,
+    'persona_form': 8,
+    'persona_decision_explanation': 9,
+    'persona_state': 10,
+    'persona_reactions': 11,
+    'persona_examples': 12,
+    'persona_log_tuples': 13,
 }
 
 
@@ -183,9 +185,23 @@ def _render_learned_reaction_line(situation_label: str, reaction_label: str) -> 
     return f'{situation_text} -> {reaction_text}'
 
 
-def _context_source_for_node(node: dict[str, Any], *, local_neighbor: bool = False) -> str:
+def _context_source_for_node(
+    node: dict[str, Any],
+    *,
+    session_id: str = '',
+    local_neighbor: bool = False,
+    retrieval_source: str = '',
+) -> str:
     context = node.get('context') if isinstance(node.get('context'), dict) else {}
     source = str(context.get('source') or '').strip().lower()
+    retrieval = str(retrieval_source or '').strip().lower()
+    session_ids = {str(item).strip() for item in list(context.get('session_ids') or []) if str(item).strip()}
+    if str(context.get('session_id') or '').strip():
+        session_ids.add(str(context.get('session_id') or '').strip())
+    if str(session_id or '').strip() and str(session_id or '').strip() in session_ids:
+        return 'session_graph_context'
+    if retrieval in {'anchor_match', 'local_1hop', 'local_2hop'}:
+        return 'local_graph_neighborhood'
     if source == 'file':
         return 'file_ingested_knowledge'
     if local_neighbor:
@@ -199,6 +215,7 @@ def _candidate_recency(candidate: ContextCandidate) -> float:
     return {
         'persona_memory': 0.62,
         'persona_triad': 0.58,
+        'session_graph_context': 0.68,
         'local_graph_neighborhood': 0.56,
         'global_graph_facts': 0.44,
         'file_ingested_knowledge': 0.4,
@@ -215,6 +232,8 @@ def _candidate_importance(candidate: ContextCandidate) -> float:
         return 0.98
     if candidate.item_type == 'persona_work_profile':
         return 0.95
+    if candidate.item_type == 'persona_control':
+        return 0.94
     if candidate.item_type in {'persona_form', 'persona_decision_explanation'}:
         return 0.9
     if candidate.item_type == 'persona_reactions':
@@ -411,7 +430,7 @@ def _compress_candidates(candidates: list[ContextCandidate]) -> int:
 def _persona_query_hints(name: str) -> str:
     if not name:
         return ''
-    bundle = load_persona(name)
+    bundle = load_active_persona(name)
     if bundle is None:
         return ''
     relation_targets = ' '.join(str(item.get('target') or '').strip() for item in bundle.relations[:6] if str(item.get('target') or '').strip())
@@ -429,7 +448,7 @@ def _persona_query_hints(name: str) -> str:
 
 
 def _build_persona_candidates(name: str, situation: Situation | dict[str, Any] | str) -> tuple[HeadBundle | None, list[ContextCandidate]]:
-    bundle = load_persona(name)
+    bundle = load_active_persona(name)
     if bundle is None:
         return None, []
     fallback_situation = Situation(type='neutral_statement', target='external', severity=0.2, summary='type=neutral_statement; target=external; severity=0.20')
@@ -640,6 +659,46 @@ def _build_persona_candidates(name: str, situation: Situation | dict[str, Any] |
                 )
             )
 
+    structured = bundle.structured_persona
+    if structured is not None:
+        control_lines: list[str] = []
+        if str(structured.core_goal or '').strip():
+            control_lines.append(f'Core goal: {structured.core_goal}.')
+        if list(structured.secondary_goals or []):
+            control_lines.append(
+                f"Secondary goals: {' | '.join(str(item).strip() for item in list(structured.secondary_goals or [])[:4] if str(item).strip())}."
+            )
+        if list(structured.constraints_internal or []):
+            control_lines.append(
+                f"Internal constraints: {' | '.join(str(item).strip() for item in list(structured.constraints_internal or [])[:4] if str(item).strip())}."
+            )
+        if list(structured.constraints_social or []):
+            control_lines.append(
+                f"Social constraints: {' | '.join(str(item).strip() for item in list(structured.constraints_social or [])[:4] if str(item).strip())}."
+            )
+        if list(structured.allowed_methods or []):
+            control_lines.append(
+                f"Allowed methods: {' | '.join(str(item).strip() for item in list(structured.allowed_methods or [])[:4] if str(item).strip())}."
+            )
+        if list(structured.maladaptive_methods or []):
+            control_lines.append(
+                f"Maladaptive methods: {' | '.join(str(item).strip() for item in list(structured.maladaptive_methods or [])[:4] if str(item).strip())}."
+            )
+        if control_lines:
+            control_text = '\n'.join(control_lines).strip()
+            candidates.append(
+                ContextCandidate(
+                    candidate_id=f'persona:{normalize_name(bundle.name)}:control',
+                    source='persona_memory',
+                    section='persona_block',
+                    item_type='persona_control',
+                    title='persona_control',
+                    text=control_text,
+                    token_estimate=_estimate_tokens(control_text),
+                    metadata={'persona_name': bundle.name},
+                )
+            )
+
     if bundle.decision_explanation:
         candidates.append(
             ContextCandidate(
@@ -817,10 +876,17 @@ def _merge_node_payload(base: dict[str, Any], overlay: dict[str, Any]) -> dict[s
 def _build_graph_candidates(
     *,
     query: str,
+    session_id: str,
     resolved_persona: str,
+    current_entity: str,
     store: GraphStore,
 ) -> tuple[list[ContextCandidate], list[dict[str, Any]], list[dict[str, Any]]]:
-    subgraph = store.subgraph(query, limit=6, depth=1)
+    graph_native = store.graph_native_search(
+        query,
+        anchor_names=[item for item in (resolved_persona, current_entity) if str(item).strip()],
+        session_id=session_id,
+        limit=6,
+    )
     local_graph = load_persona_graph(resolved_persona) if resolved_persona else {'nodes': [], 'edges': []}
     global_by_name = {
         normalize_name(str(node.get('name') or node.get('id') or '')): dict(node)
@@ -829,11 +895,17 @@ def _build_graph_candidates(
     }
 
     entries: dict[str, dict[str, Any]] = {}
-    for node in list(subgraph.get('nodes') or []):
+    for entry in list(graph_native.get('entries') or []):
+        node = dict(entry.get('node') or {})
+        retrieval_source = str(entry.get('retrieval_source') or '').strip()
         node_id = str(node.get('id') or '')
         if not node_id:
             continue
-        entries[node_id] = {'node': dict(node), 'local_neighbor': False}
+        entries[node_id] = {
+            'node': dict(node),
+            'local_neighbor': retrieval_source in {'anchor_match', 'local_1hop', 'local_2hop'},
+            'retrieval_source': retrieval_source or 'semantic_dense',
+        }
     for node in list(local_graph.get('nodes') or []):
         node_id = str(node.get('id') or '')
         if not node_id:
@@ -844,8 +916,13 @@ def _build_graph_candidates(
         if node_id in entries:
             entries[node_id]['node'] = _merge_node_payload(entries[node_id]['node'], dict(node))
             entries[node_id]['local_neighbor'] = True
+            entries[node_id]['retrieval_source'] = str(entries[node_id].get('retrieval_source') or 'persona_graph')
         else:
-            entries[node_id] = {'node': dict(node), 'local_neighbor': True}
+            entries[node_id] = {
+                'node': dict(node),
+                'local_neighbor': True,
+                'retrieval_source': 'persona_graph',
+            }
 
     collapsed_entries: dict[str, dict[str, Any]] = {}
     for payload in entries.values():
@@ -858,10 +935,15 @@ def _build_graph_candidates(
             collapsed_entries[collapse_key]['local_neighbor'] = bool(collapsed_entries[collapse_key].get('local_neighbor')) or bool(
                 payload.get('local_neighbor')
             )
+            existing_retrieval = str(collapsed_entries[collapse_key].get('retrieval_source') or '').strip()
+            incoming_retrieval = str(payload.get('retrieval_source') or '').strip()
+            if existing_retrieval in {'semantic_dense', 'structural_salience'} and incoming_retrieval:
+                collapsed_entries[collapse_key]['retrieval_source'] = incoming_retrieval
         else:
             collapsed_entries[collapse_key] = {
                 'node': node,
                 'local_neighbor': bool(payload.get('local_neighbor')),
+                'retrieval_source': str(payload.get('retrieval_source') or '').strip(),
             }
     entries = {
         str(payload['node'].get('id') or key): payload
@@ -870,7 +952,7 @@ def _build_graph_candidates(
 
     all_edges: list[dict[str, Any]] = []
     seen_edges: set[tuple[str, str, str]] = set()
-    for edge in list(subgraph.get('edges') or []) + list(local_graph.get('edges') or []):
+    for edge in list(graph_native.get('edges') or []) + list(local_graph.get('edges') or []):
         key = (str(edge.get('from') or ''), str(edge.get('type') or ''), str(edge.get('to') or ''))
         if not all(key) or key in seen_edges:
             continue
@@ -900,9 +982,12 @@ def _build_graph_candidates(
             and int(node.get('frequency') or 0) <= 1
         ):
             continue
+        retrieval_source = str(payload.get('retrieval_source') or '').strip()
         preview_lines = [
             f"{node.get('name')} [{node.get('type')}] importance={node.get('importance')} confidence={node.get('confidence')} frequency={node.get('frequency')}.",
         ]
+        if retrieval_source:
+            preview_lines.append(f"retrieval: {retrieval_source}")
         if str(node.get('translation_line') or '').strip():
             preview_lines.append(f"translation: {node.get('translation_line')}")
         if str(node.get('description') or '').strip():
@@ -910,7 +995,12 @@ def _build_graph_candidates(
         if facts:
             preview_lines.append(f"facts: {' | '.join(facts[:4])}")
         preview = '\n'.join(preview_lines).strip()
-        source = _context_source_for_node(node, local_neighbor=bool(payload.get('local_neighbor')))
+        source = _context_source_for_node(
+            node,
+            session_id=session_id,
+            local_neighbor=bool(payload.get('local_neighbor')),
+            retrieval_source=retrieval_source,
+        )
         candidates.append(
             ContextCandidate(
                 candidate_id=f'graph:{node_id}',
@@ -925,6 +1015,7 @@ def _build_graph_candidates(
                     'node_id': node_id,
                     'aliases': aliases,
                     'degree': degree_map.get(node_id, 0),
+                    'retrieval_source': retrieval_source,
                 },
             )
         )
@@ -946,7 +1037,7 @@ def _collect_candidates(
     clipped_question = _clip(question, _context_config()[1])
     current_entity = str((analysis.primary_entity if analysis is not None else '') or infer_current_entity(session_id) or '').strip()
     resolved = infer_persona_name(question, selected_name=selected_persona, current_entity=current_entity)
-    if resolved and not persona_exists(resolved):
+    if resolved and not persona_is_registered(resolved):
         resolved = ''
     rendered_situation = situation_summary(situation or {})
     query = ' '.join(
@@ -1021,7 +1112,13 @@ def _collect_candidates(
                 )
             )
     history_candidates = _build_history_candidates(session_id)
-    graph_candidates, graph_nodes, graph_edges = _build_graph_candidates(query=query, resolved_persona=resolved, store=store)
+    graph_candidates, graph_nodes, graph_edges = _build_graph_candidates(
+        query=query,
+        session_id=session_id,
+        resolved_persona=resolved,
+        current_entity=current_entity,
+        store=store,
+    )
     candidates = persona_candidates + history_candidates + graph_candidates
     return {
         'clipped_question': clipped_question,

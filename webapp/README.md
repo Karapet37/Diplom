@@ -1,94 +1,116 @@
-# Autonomous Graph React UI
+# Persona Graph Agent Web UI
 
-Graph-first frontend for the Autonomous Graph Workspace.
+Operator-facing frontend for the controller-first `Persona-Graph-Agent` runtime.
 
-Repository: `https://github.com/Karapet37/Diplom`
+## Purpose
 
-## New Overview Tools
+The web app is not a generic chatbot shell. It is an operator workspace for:
 
-- `User Semantic Graph`: update personal dimensions in graph
-  - fears, desires, goals, principles, opportunities
-  - abilities, access, knowledge, assets
-- `Personalization Studio`:
-  - response style, reasoning depth, risk tolerance, tone,
-  - default LLM roles (proposer/critic/judge),
-  - focus goals/domain focus/avoid topics/memory notes,
-  - localStorage persistence + auto-apply toggles for Daily/UserGraph/Debate actions.
-- `Sysinternals Autoruns Import`: paste Autoruns CSV/TSV export and bind startup/process telemetry into semantic graph
-- `Daily Mode`: diary -> recommendations + scores + graph binding
-- `Mini Coders / Advisors`: shows detected GGUF advisor roles and prompt catalog
-- `Verified Archive Chat`:
-  - chat reply is conversational for the user,
-  - archive conclusions are shown in a separate review editor as JSON,
-  - edited draft can be re-checked and applied.
-- `Graph Explainability UX`:
-  - reasoning path variants per selected node,
-  - dependency closure highlight on hover,
-  - edge reasoning panel,
-  - edge change timeline from stream events,
-  - animated live edge updates.
-- `Translator advisor` is strict GGUF role (no fallback to general model)
-- Overview now uses section pages (pagination) instead of one long vertical scroll
+- session management,
+- persona selection and inspection,
+- personality deletion and training-example curation,
+- file upload,
+- chat,
+- graph inspection and maintenance,
+- runtime diagnostics.
 
-## UI Languages
+The frontend is designed to expose route and memory behavior, not only final text replies.
 
-Current UI language order:
+## Main Surfaces
 
-1. Armenian (`hy`)
-2. Russian (`ru`)
-3. English (`en`)
-4. French (`fr`)
-5. Spanish (`es`)
-6. Portuguese (`pt`)
-7. Arabic (`ar`)
-8. Hindi (`hi`)
-9. Chinese (`zh`)
-10. Japanese (`ja`)
+- `Sessions` create, delete, and switch between runtime sessions.
+- `Chat` sends requests through `/api/cognitive/chat/respond` and shows safety, persona-selection, response-shaping, context-preview, and trace-inspection panels.
+- `Persona workspace` inspects validated personas, deletes personality-construction records, curates training examples, and exports JSONL.
+- `Files workspace` uploads supported documents into the active session.
+- `Graph workspace` searches the graph, inspects localized node views, creates/connects/merges/deletes nodes, reviews node state, and runs rethink preview/apply flows.
+- `Diagnostics` shows runtime metrics, recent traces, and graph-health summaries.
+- `Language shell` localizes the operator chrome in `en`, `ru`, `hy`, and `zh`.
 
-## Run
+## API Used by the UI
+
+Core runtime:
+
+- `GET /api/health`
+- `GET /api/cognitive/health`
+- `GET /api/cognitive/sessions`
+- `POST /api/cognitive/sessions`
+- `GET /api/cognitive/sessions/{session_id}`
+- `DELETE /api/cognitive/sessions/{session_id}`
+- `POST /api/cognitive/chat/respond`
+- `POST /api/cognitive/files/upload`
+- `POST /api/cognitive/rebuild`
+- `GET /api/cognitive/personalities`
+- `GET /api/cognitive/personalities/{name}`
+
+Graph workspace:
+
+- `GET /api/cognitive/graph`
+- `GET /api/cognitive/graph/subgraph`
+- `GET /api/cognitive/graph/nodes/{node_id}/view`
+- `POST /api/cognitive/graph/nodes`
+- `DELETE /api/cognitive/graph/nodes/{node_id}`
+- `POST /api/cognitive/graph/edges`
+- `DELETE /api/cognitive/graph/edges/{edge_id}`
+- `POST /api/cognitive/graph/nodes/merge`
+- `POST /api/cognitive/graph/nodes/{node_id}/state`
+- `POST /api/cognitive/graph/rethink`
+
+Diagnostics and learning surfaces:
+
+- `GET /api/cognitive/debug/metrics`
+- `GET /api/cognitive/debug/traces`
+- `GET /api/cognitive/debug/graph-health`
+- `DELETE /api/cognitive/personality-construction/personalities/{personality_id}`
+- `POST /api/cognitive/training-examples`
+- `GET /api/cognitive/training-examples`
+- `DELETE /api/cognitive/training-examples/{example_id}`
+- `GET /api/cognitive/training-examples/export/jsonl`
+- `POST /api/cognitive/safety/classify`
+
+The client API module also exposes `POST /api/cognitive/safety/examples` for future operator tooling, but the current UI only calls `safety/classify` automatically on message send.
+
+## Local Development
 
 ```bash
-cd webapp
+cd <project_root>/webapp
 npm install
 npm run dev
 ```
 
-Default API base is `/api` and Vite proxy forwards to `http://127.0.0.1:8008`.
-For production Docker+Nginx HTTPS, frontend should call:
-- `https://<your-domain>/api/...`
-- no direct backend port exposure is required.
+Default Vite API base is `/api`, proxied to the backend.
 
-Start backend in another terminal:
+Run the backend in another terminal:
 
 ```bash
-python3 start.py --web-api --host 127.0.0.1 --port 8008
+cd <project_root>
+.venv/bin/python start.py --profile development
 ```
 
-or simply:
+or API-only:
 
 ```bash
-python3 start.py
+.venv/bin/python start.py --profile development --api-only
 ```
 
 ## Build
 
 ```bash
+cd <project_root>/webapp
 npm run build
 ```
 
-Build output: `webapp/dist/`.
-If present, FastAPI serves it at `/`.
+Build output:
 
-## Backend Endpoints Used by UI
+- `webapp/dist/`
 
-- `POST /api/project/daily-mode`
-- `POST /api/project/user-graph/update`
-- `POST /api/project/llm/debate`
-- `POST /api/project/hallucination/report`
-- `POST /api/project/hallucination/check`
-- `POST /api/project/archive/chat`
-- `POST /api/project/archive/review`
-- `POST /api/project/autoruns/import`
-- `GET /api/project/model-advisors`
-- `POST /api/client/introspect`
-- `GET /api/graph/snapshot`
+When present, the combined backend can serve the built frontend at `/`.
+
+## Notes
+
+- The frontend follows the runtime’s controller-first design.
+- Lightweight turns, persona fast-path turns, persona specification, and graph-backed reasoning are handled by the backend route system, not by frontend heuristics.
+- UI strings and controls are aligned with the active operator workflow rather than the earlier experimental workspace layout.
+- Safety classification runs client-side in parallel with the chat request — it does not block the send flow.
+- The operator panel for chat shows per-message safety context alongside persona selection, context preview, response shaping, and trace inspection.
+- Graph explanations and rethink requests follow the currently selected UI language where the backend supports localization.
+- Dedicated widgets for `/notes` and planning-mode output are still not present in the frontend even though the backend exposes those APIs.

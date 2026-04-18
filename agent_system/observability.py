@@ -10,6 +10,11 @@ from time import perf_counter
 from typing import Any, Callable
 from uuid import uuid4
 
+from .duplicate_resolver import normalize_name
+from .models import TraceLearningPolicy
+
+_TRACE_POLICY_BATCH_CANDIDATES = (4, 8, 12, 16)
+
 
 def _utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
@@ -63,6 +68,10 @@ class RequestTrace:
         self.stages.append(StageTiming(name=name, duration_ms=duration_ms, meta=dict(meta or {})))
 
     def to_dict(self) -> dict[str, Any]:
+        stage_timings_ms = {
+            stage.name: round(float(stage.duration_ms), 3)
+            for stage in self.stages
+        }
         return {
             'request_id': self.request_id,
             'request_type': self.request_type,
@@ -80,6 +89,7 @@ class RequestTrace:
             'response_meta': dict(self.response_meta),
             'total_ms': round(float(self.total_ms), 3),
             'stages': [stage.to_dict() for stage in self.stages],
+            'stage_timings_ms': stage_timings_ms,
         }
 
 
@@ -234,6 +244,189 @@ class ObservabilityStore:
         if clean_session:
             rows = [row for row in rows if str(row.get('session_id') or '').strip() == clean_session]
         return rows[: max(int(limit or 20), 1)]
+
+    def learned_route_policy(
+        self,
+        *,
+        session_id: str = '',
+        selected_route: str = '',
+        max_batch_size: int = 16,
+    ) -> TraceLearningPolicy:
+        clean_route = str(selected_route or '').strip()
+        clean_session = str(session_id or '').strip()
+        if not clean_route:
+            return TraceLearningPolicy()
+        with self._lock:
+            rows = list(self._recent_traces)
+        matching = [
+            row for row in rows
+            if str(self._trace_selected_route(row) or '').strip() == clean_route
+        ]
+        if not matching:
+            return TraceLearningPolicy(selected_route=clean_route)
+
+        session_rows = [
+            row for row in matching
+            if clean_session and str(row.get('session_id') or '').strip() == clean_session
+        ]
+        global_rows = [
+            row for row in matching
+            if not clean_session or str(row.get('session_id') or '').strip() != clean_session
+        ]
+        available_rows = session_rows + global_rows
+        batch_size = self._select_trace_batch_size(available_rows, max_batch_size=max_batch_size)
+        sampled_rows = self._sample_trace_rows(session_rows, global_rows, batch_size=batch_size)
+        if not sampled_rows:
+            return TraceLearningPolicy(selected_route=clean_route)
+
+        signal_rows = [row for row in sampled_rows if self._trace_has_learning_signal(row)]
+        weighted_rows = [
+            *(row for row in sampled_rows if self._trace_has_learning_signal(row)),
+            *sampled_rows,
+        ]
+        truncation_hits = sum(1 for row in weighted_rows if self._trace_output_problem(row))
+        fallback_hits = sum(1 for row in weighted_rows if bool(row.get('fallback_used')))
+        route_mismatch_hits = sum(1 for row in weighted_rows if not bool(dict(row.get('response_meta') or {}).get('validation_ok', True)))
+        no_grounding_hits = sum(1 for row in weighted_rows if str(row.get('fallback_reason') or '').strip() == 'no_grounding')
+        repeated_intro_hits = sum(1 for row in weighted_rows if self._trace_reply_looks_intro_loop(row))
+        failure_density = round(len(signal_rows) / max(len(sampled_rows), 1), 3)
+
+        guidance_lines: list[str] = []
+        reason_codes: list[str] = []
+        output_budget_boost = 0
+
+        if truncation_hits:
+            guidance_lines.append(
+                'Recent similar traces were cut off. Answer directly, keep the persona introduction brief, and end on a complete sentence.'
+            )
+            reason_codes.append('trace_policy:truncation_cluster')
+            output_budget_boost = max(output_budget_boost, 160 if truncation_hits >= 3 else 96)
+        if repeated_intro_hits:
+            guidance_lines.append(
+                'Do not restart from the same self-introduction. Continue the scene and move to the concrete action quickly.'
+            )
+            reason_codes.append('trace_policy:persona_intro_loop')
+            output_budget_boost = max(output_budget_boost, 96)
+        if route_mismatch_hits or (clean_route == 'hypothetical_roleplay' and no_grounding_hits):
+            guidance_lines.append(
+                'Preserve the selected route strictly. Do not degrade into a generic limitation or clarification when the user is still inside the same scenario.'
+            )
+            reason_codes.append('trace_policy:route_drift')
+        if fallback_hits and clean_route in {'persona_graph_reasoning', 'hypothetical_roleplay'}:
+            guidance_lines.append(
+                'When certainty is limited, stay inside the persona or hypothetical frame instead of dropping into assistant-style hedging.'
+            )
+            reason_codes.append('trace_policy:persona_frame_preservation')
+
+        return TraceLearningPolicy(
+            selected_route=clean_route,
+            batch_size=batch_size,
+            sampled_trace_count=len(sampled_rows),
+            session_trace_count=len(session_rows),
+            global_trace_count=len(global_rows),
+            signal_trace_count=len(signal_rows),
+            failure_density=failure_density,
+            output_budget_boost=output_budget_boost,
+            route_guidance_lines=guidance_lines[:4],
+            reason_codes=reason_codes[:6],
+        )
+
+    def _trace_selected_route(self, row: dict[str, Any]) -> str:
+        response_meta = dict(row.get('response_meta') or {})
+        request_meta = dict(row.get('request_meta') or {})
+        return str(
+            response_meta.get('selected_route')
+            or request_meta.get('selected_route')
+            or ''
+        ).strip()
+
+    def _trace_output_problem(self, row: dict[str, Any]) -> bool:
+        response_meta = dict(row.get('response_meta') or {})
+        return bool(response_meta.get('output_truncated') or response_meta.get('output_budget_too_small'))
+
+    def _trace_reply_looks_intro_loop(self, row: dict[str, Any]) -> bool:
+        response_meta = dict(row.get('response_meta') or {})
+        request_meta = dict(row.get('request_meta') or {})
+        if not self._trace_output_problem(row):
+            return False
+        raw_text = str(request_meta.get('raw_text') or '').strip()
+        if not raw_text:
+            return False
+        lowered = normalize_name(raw_text)
+        return '...тупой' in lowered or 'как ты' in lowered or 'как будешь' in lowered
+
+    def _trace_has_learning_signal(self, row: dict[str, Any]) -> bool:
+        response_meta = dict(row.get('response_meta') or {})
+        if bool(row.get('fallback_used')):
+            return True
+        if not bool(response_meta.get('validation_ok', True)):
+            return True
+        if bool(response_meta.get('output_truncated') or response_meta.get('output_budget_too_small')):
+            return True
+        return False
+
+    def _select_trace_batch_size(self, rows: list[dict[str, Any]], *, max_batch_size: int) -> int:
+        if not rows:
+            return 0
+        capped_max = max(1, min(int(max_batch_size or 16), max(_TRACE_POLICY_BATCH_CANDIDATES)))
+        available = min(len(rows), capped_max)
+        signal_count = sum(1 for row in rows[:available] if self._trace_has_learning_signal(row))
+        failure_density = signal_count / max(available, 1)
+        if failure_density >= 0.5:
+            target = 4
+        elif failure_density >= 0.25:
+            target = 8
+        elif failure_density >= 0.12:
+            target = 12
+        else:
+            target = 16
+        target = min(target, capped_max, len(rows))
+        viable = [size for size in _TRACE_POLICY_BATCH_CANDIDATES if size <= target and size <= len(rows)]
+        return viable[-1] if viable else max(1, min(len(rows), target))
+
+    def _sample_trace_rows(
+        self,
+        session_rows: list[dict[str, Any]],
+        global_rows: list[dict[str, Any]],
+        *,
+        batch_size: int,
+    ) -> list[dict[str, Any]]:
+        if batch_size <= 0:
+            return []
+        session_signal_rows = [row for row in session_rows if self._trace_has_learning_signal(row)]
+        global_signal_rows = [row for row in global_rows if self._trace_has_learning_signal(row)]
+
+        sampled: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        def _append_rows(rows: list[dict[str, Any]]) -> None:
+            for row in rows:
+                trace_id = str(row.get('request_id') or '').strip()
+                if trace_id and trace_id in seen_ids:
+                    continue
+                if trace_id:
+                    seen_ids.add(trace_id)
+                sampled.append(row)
+                if len(sampled) >= batch_size:
+                    return
+
+        signal_budget = max(1, batch_size // 2)
+        interleaved_signals: list[dict[str, Any]] = []
+        for index in range(max(len(session_signal_rows), len(global_signal_rows))):
+            if index < len(session_signal_rows):
+                interleaved_signals.append(session_signal_rows[index])
+            if index < len(global_signal_rows):
+                interleaved_signals.append(global_signal_rows[index])
+        _append_rows(interleaved_signals[:signal_budget])
+
+        interleaved_all: list[dict[str, Any]] = []
+        for index in range(max(len(session_rows), len(global_rows))):
+            if index < len(session_rows):
+                interleaved_all.append(session_rows[index])
+            if index < len(global_rows):
+                interleaved_all.append(global_rows[index])
+        _append_rows(interleaved_all)
+        return sampled[:batch_size]
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:

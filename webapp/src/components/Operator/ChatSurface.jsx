@@ -7,6 +7,28 @@ function renderKeyValues(value) {
   return Object.entries(value);
 }
 
+function SafetyBadge({ result }) {
+  if (!result) return null;
+  const colors = {
+    safe:       'var(--ok)',
+    suggestive: 'var(--warn)',
+    explicit:   'var(--danger)',
+    illegal:    '#ff2244',
+  };
+  const color = colors[result.label] || 'var(--muted)';
+  return (
+    <span
+      className="safety-badge"
+      style={{ '--badge-color': color }}
+      title={`Safety: ${result.label} (${(result.confidence * 100).toFixed(0)}% conf) — ${result.action}`}
+    >
+      <span className="safety-badge-dot" />
+      {result.label}
+      {result.fast_path ? ' ⚡' : ''}
+    </span>
+  );
+}
+
 function TraceStageTable({ trace }) {
   if (!trace?.stages?.length) {
     return <p className="empty-inline">No trace stages loaded.</p>;
@@ -85,6 +107,7 @@ export function ChatSurface({
   onRun,
   lastChatResult,
   activeTrace,
+  safetyResult,
   t,
 }) {
   const selection = lastChatResult?.persona_selection || {};
@@ -99,6 +122,7 @@ export function ChatSurface({
         running={running}
         progress={progress}
         onRun={onRun}
+        safetyResult={safetyResult}
         t={t}
       />
       <aside className="workspace-panel glass-panel operator-inspector-panel">
@@ -109,6 +133,21 @@ export function ChatSurface({
           </div>
         </header>
         <div className="operator-stack">
+
+          {safetyResult ? (
+            <section className="operator-card-block safety-panel">
+              <h3>{t('chat_safety_label')}</h3>
+              <div className="safety-detail-row">
+                <SafetyBadge result={safetyResult} />
+                <span className="safety-action-tag">{safetyResult.action?.replace(/_/g, ' ')}</span>
+                <span className="safety-conf">{(safetyResult.confidence * 100).toFixed(0)}%</span>
+              </div>
+              {safetyResult.matched_features?.length ? (
+                <p className="safety-features">{safetyResult.matched_features.join(' · ')}</p>
+              ) : null}
+            </section>
+          ) : null}
+
           <section className="operator-card-block">
             <h3>{t('chat_persona_selection')}</h3>
             {lastChatResult ? (

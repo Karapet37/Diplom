@@ -5,7 +5,7 @@ from typing import Any
 from .duplicate_resolver import normalize_name
 from .models import ClassificationDecision, MessageAnalysis, PersonaSelectionExplanation
 from .models import HEAD_ENTITY_TYPES
-from .persona_engine import load_persona, spawn_head
+from .persona_engine import load_active_persona, spawn_head
 
 
 def prepare_heads(
@@ -18,7 +18,7 @@ def prepare_heads(
     decisions = list(classifications or [])
     selected_token = normalize_name(analysis.selected_head)
     if selected_token and all(normalize_name(item.entity_name) != selected_token for item in decisions):
-        existing = load_persona(analysis.selected_head)
+        existing = load_active_persona(analysis.selected_head)
         decisions.insert(
             0,
             ClassificationDecision(
@@ -32,12 +32,13 @@ def prepare_heads(
         )
     for decision in decisions:
         is_selected_entity = bool(selected_token and normalize_name(decision.entity_name) == selected_token)
+        existing_head = load_active_persona(decision.entity_name)
         profession_head_allowed = decision.entity_type == 'PROFESSION' and (
             is_selected_entity
             or len(str(decision.entity_name or '').split()) >= 2
-            or load_persona(decision.entity_name) is not None
+            or existing_head is not None
         )
-        allow_head = decision.entity_type in {'PERSON', 'FICTIONAL_CHARACTER'} or profession_head_allowed or is_selected_entity
+        allow_head = bool(existing_head is not None or (is_selected_entity and (decision.entity_type in {'PERSON', 'FICTIONAL_CHARACTER'} or profession_head_allowed)))
         node = (
             graph_store.upsert_entity(
                 name=decision.entity_name,
@@ -51,14 +52,19 @@ def prepare_heads(
             else graph_store.get_node(decision.entity_name)
         )
         head = (
-            spawn_head(
-                decision.entity_name,
-                entity_type=decision.entity_type,
-                aliases=list(node.get('aliases') or []),
-                source='chat',
+            existing_head
+            if existing_head is not None
+            else (
+                spawn_head(
+                    decision.entity_name,
+                    entity_type=decision.entity_type,
+                    aliases=list(node.get('aliases') or []),
+                    source='chat',
+                    register=False,
+                )
+                if allow_head
+                else None
             )
-            if allow_head
-            else None
         )
         prepared.append({'decision': decision, 'node': node, 'head': head})
     return prepared
@@ -107,7 +113,7 @@ def select_primary_head(
             )
             return enriched
     if analysis.primary_entity:
-        bundle = load_persona(analysis.primary_entity)
+        bundle = load_active_persona(analysis.primary_entity)
         if bundle:
             return {
                 'decision': None,

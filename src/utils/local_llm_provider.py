@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import importlib.metadata as importlib_metadata
 import os
 from pathlib import Path
 import re
+import struct
 import sys
 from typing import Any, Callable
 
@@ -16,6 +18,34 @@ except ImportError:
     Llama = None
 
 from threading import Lock
+
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_THINK_OPEN_RE  = re.compile(r"<think>.*$", re.DOTALL | re.IGNORECASE)
+_THINK_CLOSE_TAG = "</think>"
+
+
+def _strip_think_blocks(text: str) -> str:
+    """
+    Strip internal reasoning from thinking models.
+    Handles three formats:
+    1. <think>reasoning</think>answer  — full tags
+    2. reasoning</think>answer         — chat-template hides opening tag
+    3. <think>reasoning...             — truncated (no closing tag)
+    """
+    # Case 1: full <think>...</think> blocks
+    cleaned = _THINK_BLOCK_RE.sub("", text).strip()
+    # Case 2: chat template hides <think>, output is: reasoning\n</think>\n\nAnswer
+    if _THINK_CLOSE_TAG.lower() in cleaned.lower():
+        idx = cleaned.lower().rfind(_THINK_CLOSE_TAG.lower())
+        after = cleaned[idx + len(_THINK_CLOSE_TAG):].strip()
+        if after:
+            return after
+        cleaned = ""
+    # Case 3: truncated — strip everything from opening <think>
+    if not cleaned:
+        cleaned = _THINK_OPEN_RE.sub("", text).strip()
+    return cleaned
+
 
 from src.utils.prompt_budgeter import (
     MAX_REASONING_N_CTX,
@@ -39,6 +69,7 @@ _PATH_LLM_INSTANCE: dict[str, "Llama"] = {}
 _PATH_LLM_FN: dict[str, Callable[[str], str]] = {}
 _ROLE_LLM_FN: dict[str, Callable[[str], str]] = {}
 _ROLE_ERRORS_WARNED: set[str] = set()
+_GGUF_ARCH_CACHE: dict[str, str] = {}
 
 _LLM_LOCK = Lock()
 
@@ -156,6 +187,133 @@ def _warn(message: str) -> None:
     if silent in {"1", "true", "yes", "on"}:
         return
     print(message, file=sys.stderr)
+
+
+def _version_tuple(raw: str) -> tuple[int, ...]:
+    parts: list[int] = []
+    for token in re.findall(r"\d+", str(raw or "")):
+        try:
+            parts.append(int(token))
+        except Exception:
+            continue
+    return tuple(parts)
+
+
+def _llama_cpp_version() -> str:
+    try:
+        return str(importlib_metadata.version("llama-cpp-python") or "").strip()
+    except Exception:
+        return ""
+
+
+def _llama_cpp_version_tuple() -> tuple[int, ...]:
+    return _version_tuple(_llama_cpp_version())
+
+
+_GGUF_SCALAR_TYPE_SIZES: dict[int, int] = {
+    0: 1,   # uint8
+    1: 1,   # int8
+    2: 2,   # uint16
+    3: 2,   # int16
+    4: 4,   # uint32
+    5: 4,   # int32
+    6: 4,   # float32
+    7: 1,   # bool
+    10: 8,  # uint64
+    11: 8,  # int64
+    12: 8,  # float64
+}
+
+
+def _read_gguf_string(handle: Any) -> str:
+    size_raw = handle.read(8)
+    if len(size_raw) != 8:
+        raise ValueError("invalid gguf string length")
+    size = struct.unpack("<Q", size_raw)[0]
+    payload = handle.read(size)
+    if len(payload) != size:
+        raise ValueError("invalid gguf string payload")
+    return payload.decode("utf-8", errors="replace")
+
+
+def _skip_gguf_value(handle: Any, value_type: int) -> None:
+    if value_type == 8:  # string
+        _read_gguf_string(handle)
+        return
+    if value_type == 9:  # array
+        element_type_raw = handle.read(4)
+        count_raw = handle.read(8)
+        if len(element_type_raw) != 4 or len(count_raw) != 8:
+            raise ValueError("invalid gguf array header")
+        element_type = struct.unpack("<I", element_type_raw)[0]
+        count = struct.unpack("<Q", count_raw)[0]
+        for _ in range(count):
+            _skip_gguf_value(handle, element_type)
+        return
+    size = _GGUF_SCALAR_TYPE_SIZES.get(int(value_type))
+    if size is None:
+        raise ValueError(f"unsupported gguf value type: {value_type}")
+    payload = handle.read(size)
+    if len(payload) != size:
+        raise ValueError("invalid gguf scalar payload")
+
+
+def _read_gguf_architecture(model_path: str) -> str:
+    normalized_path = str(model_path or "").strip()
+    if not normalized_path:
+        return ""
+    cached = _GGUF_ARCH_CACHE.get(normalized_path)
+    if cached is not None:
+        return cached
+    architecture = ""
+    try:
+        with Path(normalized_path).open("rb") as handle:
+            if handle.read(4) != b"GGUF":
+                _GGUF_ARCH_CACHE[normalized_path] = ""
+                return ""
+            version_raw = handle.read(4)
+            if len(version_raw) != 4:
+                _GGUF_ARCH_CACHE[normalized_path] = ""
+                return ""
+            version = struct.unpack("<I", version_raw)[0]
+            if version not in {2, 3}:
+                _GGUF_ARCH_CACHE[normalized_path] = ""
+                return ""
+            tensor_count_raw = handle.read(8)
+            kv_count_raw = handle.read(8)
+            if len(tensor_count_raw) != 8 or len(kv_count_raw) != 8:
+                _GGUF_ARCH_CACHE[normalized_path] = ""
+                return ""
+            kv_count = struct.unpack("<Q", kv_count_raw)[0]
+            for _ in range(kv_count):
+                key = _read_gguf_string(handle)
+                value_type_raw = handle.read(4)
+                if len(value_type_raw) != 4:
+                    break
+                value_type = struct.unpack("<I", value_type_raw)[0]
+                if key == "general.architecture" and value_type == 8:
+                    architecture = _read_gguf_string(handle).strip()
+                    break
+                _skip_gguf_value(handle, value_type)
+    except Exception:
+        architecture = ""
+    _GGUF_ARCH_CACHE[normalized_path] = architecture
+    return architecture
+
+
+def _preflight_model_block_reason(model_path: str) -> str:
+    normalized_path = str(model_path or "").strip()
+    if not normalized_path:
+        return "empty_model_path"
+    architecture = _read_gguf_architecture(normalized_path)
+    llama_version = _llama_cpp_version_tuple()
+    if architecture == "qwen35" and llama_version and llama_version < (0, 3, 17):
+        version_text = _llama_cpp_version() or "unknown"
+        return (
+            f"GGUF architecture '{architecture}' is not supported by llama-cpp-python {version_text}. "
+            "Upgrade llama-cpp-python / llama.cpp to a build that supports qwen35."
+        )
+    return ""
 
 
 def _normalize_role(role: str) -> str:
@@ -468,7 +626,7 @@ def _resolve_n_ctx(role: str | None = None, explicit_n_ctx: int | None = None) -
 def _allowed_n_ctx_list_for_role(role: str | None) -> list[int]:
     role_key = _normalize_role(role or ROLE_GENERAL)
     if role_key == ROLE_ANALYST:
-        return [MIN_ROUTER_N_CTX, 1536, MAX_ROUTER_N_CTX]
+        return [MIN_ROUTER_N_CTX, 1536, MAX_ROUTER_N_CTX, 3072, 4096, MAX_REASONING_N_CTX]
     if role_key in {ROLE_GENERAL, ROLE_CREATIVE, ROLE_TRANSLATOR}:
         return [MIN_ROUTER_N_CTX, 1536, 2048, 3072, 4096, MAX_REASONING_N_CTX]
     return [MIN_REASONING_N_CTX, 3072, 4096, MAX_REASONING_N_CTX]
@@ -532,12 +690,18 @@ def _make_raw_llm_fn(llm: "Llama", *, max_tokens: int | None = None) -> Callable
     resolved_max_tokens = int(max_tokens if max_tokens is not None else int(os.getenv("LOCAL_GGUF_MAX_TOKENS", "2048")))
 
     def llm_fn(prompt: str) -> str:
+        metadata: dict[str, Any] = {
+            "finish_reason": "",
+            "completion_tokens": 0,
+            "prompt_eval_tokens": 0,
+            "total_tokens": 0,
+        }
         messages = _split_chat_prompt_messages(prompt)
         kwargs = {
             "max_tokens": resolved_max_tokens,
             "temperature": float(os.getenv("LOCAL_GGUF_TEMPERATURE", "0.15")),
             "top_p": float(os.getenv("LOCAL_GGUF_TOP_P", "0.9")),
-            "stop": ["<think>", "</think>", "\nUser question:"],
+            "stop": ["\nUser question:"],
         }
         if _prompt_prefers_json_output(prompt):
             try:
@@ -546,13 +710,34 @@ def _make_raw_llm_fn(llm: "Llama", *, max_tokens: int | None = None) -> Callable
                     response_format={"type": "json_object"},
                     **kwargs,
                 )
-                result_text = response["choices"][0]["message"]["content"]
-                return str(result_text or "")
+                choice = dict((response.get("choices") or [{}])[0] or {})
+                usage = dict(response.get("usage") or {})
+                metadata.update(
+                    {
+                        "finish_reason": str(choice.get("finish_reason") or "").strip(),
+                        "completion_tokens": int(usage.get("completion_tokens") or 0),
+                        "prompt_eval_tokens": int(usage.get("prompt_tokens") or 0),
+                        "total_tokens": int(usage.get("total_tokens") or 0),
+                    }
+                )
+                result_text = choice.get("message", {}).get("content")
+                setattr(llm_fn, "_last_infer_meta", dict(metadata))
+                return _strip_think_blocks(str(result_text or ""))
             except Exception:
                 pass
         try:
             out = llm.create_chat_completion(messages=messages, **kwargs)
-            result_text = out["choices"][0]["message"]["content"]
+            choice = dict((out.get("choices") or [{}])[0] or {})
+            usage = dict(out.get("usage") or {})
+            metadata.update(
+                {
+                    "finish_reason": str(choice.get("finish_reason") or "").strip(),
+                    "completion_tokens": int(usage.get("completion_tokens") or 0),
+                    "prompt_eval_tokens": int(usage.get("prompt_tokens") or 0),
+                    "total_tokens": int(usage.get("total_tokens") or 0),
+                }
+            )
+            result_text = choice.get("message", {}).get("content")
         except Exception as inner_exc:
             if len(messages) > 1 and 'system role not supported' in str(inner_exc).lower():
                 fallback_messages = [
@@ -563,15 +748,30 @@ def _make_raw_llm_fn(llm: "Llama", *, max_tokens: int | None = None) -> Callable
                 ]
                 try:
                     out = llm.create_chat_completion(messages=fallback_messages, **kwargs)
-                    result_text = out["choices"][0]["message"]["content"]
-                    return str(result_text or "")
+                    choice = dict((out.get("choices") or [{}])[0] or {})
+                    usage = dict(out.get("usage") or {})
+                    metadata.update(
+                        {
+                            "finish_reason": str(choice.get("finish_reason") or "").strip(),
+                            "completion_tokens": int(usage.get("completion_tokens") or 0),
+                            "prompt_eval_tokens": int(usage.get("prompt_tokens") or 0),
+                            "total_tokens": int(usage.get("total_tokens") or 0),
+                        }
+                    )
+                    result_text = choice.get("message", {}).get("content")
+                    setattr(llm_fn, "_last_infer_meta", dict(metadata))
+                    return _strip_think_blocks(str(result_text or ""))
                 except Exception as fallback_exc:
+                    setattr(llm_fn, "_last_infer_meta", dict(metadata))
                     raise RuntimeError(str(fallback_exc)) from fallback_exc
+            setattr(llm_fn, "_last_infer_meta", dict(metadata))
             raise RuntimeError(str(inner_exc)) from inner_exc
-        return str(result_text or "")
+        setattr(llm_fn, "_last_infer_meta", dict(metadata))
+        return _strip_think_blocks(str(result_text or ""))
 
     setattr(llm_fn, "_llm", llm)
     setattr(llm_fn, "_max_tokens", resolved_max_tokens)
+    setattr(llm_fn, "_last_infer_meta", {})
     return llm_fn
 
 
@@ -590,6 +790,16 @@ def _ensure_raw_llm_fn(
     with _LLM_LOCK:
         if cache_key in _PATH_LLM_FN:
             return _PATH_LLM_FN[cache_key]
+        preflight_block_reason = _preflight_model_block_reason(model_path)
+        if preflight_block_reason:
+            warned_key = f"incompatible:{role}:{model_path}"
+            if warned_key not in _ROLE_ERRORS_WARNED:
+                _warn(
+                    f"[local_llm_provider] WARN: skipped incompatible model '{model_path}' "
+                    f"for role '{role}': {preflight_block_reason}"
+                )
+                _ROLE_ERRORS_WARNED.add(warned_key)
+            return None
         try:
             llm = _build_llm_for_path(model_path, n_ctx=requested_n_ctx)
         except Exception as exc:
@@ -604,6 +814,39 @@ def _ensure_raw_llm_fn(
         _PATH_LLM_INSTANCE[cache_key] = llm
         _PATH_LLM_FN[cache_key] = raw_fn
         return raw_fn
+
+
+def _candidate_model_paths_for_role(role_key: str, role_map: dict[str, str]) -> list[str]:
+    candidates: list[str] = []
+
+    def _push(path: str) -> None:
+        token = str(path or "").strip()
+        if token and token not in candidates:
+            candidates.append(token)
+
+    _push(role_map.get(role_key, ""))
+    if role_key != ROLE_TRANSLATOR:
+        if role_key != ROLE_GENERAL:
+            _push(role_map.get(ROLE_GENERAL, ""))
+        if role_key != ROLE_ANALYST:
+            _push(role_map.get(ROLE_ANALYST, ""))
+        _push(role_map.get(ROLE_CREATIVE, ""))
+        _push(role_map.get(ROLE_PLANNER, ""))
+    return candidates
+
+
+def _select_usable_model_path(role_key: str, role_map: dict[str, str]) -> tuple[str | None, str]:
+    candidates = _candidate_model_paths_for_role(role_key, role_map)
+    if not candidates:
+        return None, ""
+    blocked_reason = ""
+    for candidate in candidates:
+        reason = _preflight_model_block_reason(candidate)
+        if not reason:
+            return candidate, blocked_reason
+        if not blocked_reason:
+            blocked_reason = reason
+    return None, blocked_reason
 
 
 def _make_budgeted_llm_fn(
@@ -637,11 +880,21 @@ def _make_budgeted_llm_fn(
                 f"[local_llm_provider] WARN: inference fallback used for role '{role}' "
                 f"after attempts={outcome.get('attempts')!r}"
             )
+        setattr(
+            llm_fn,
+            "_last_budget_meta",
+            {
+                "role": role,
+                "model_path": model_path,
+                **dict(outcome or {}),
+            },
+        )
         return str(outcome.get("text") or SAFE_ERROR_REPLY)
 
     setattr(llm_fn, "_model_path", model_path)
     setattr(llm_fn, "_n_ctx", n_ctx)
     setattr(llm_fn, "_max_tokens", max_tokens)
+    setattr(llm_fn, "_last_budget_meta", {})
     return llm_fn
 
 
@@ -662,12 +915,16 @@ def build_role_llm_fn(
         role_map = _resolve_model_role_paths()
         _ROLE_MODEL_MAP.clear()
         _ROLE_MODEL_MAP.update(role_map)
-        model_path = role_map.get(role_key)
-        if role_key != ROLE_TRANSLATOR and not model_path:
-            model_path = role_map.get(ROLE_GENERAL)
+        requested_model_path = role_map.get(role_key, "")
+        model_path, blocked_reason = _select_usable_model_path(role_key, role_map)
         if not model_path:
             if role_key not in _ROLE_ERRORS_WARNED:
-                if role_key == ROLE_TRANSLATOR:
+                if blocked_reason:
+                    _warn(
+                        f"[local_llm_provider] WARN: no compatible model available for role '{role_key}'. "
+                        f"{blocked_reason}"
+                    )
+                elif role_key == ROLE_TRANSLATOR:
                     _warn(
                         "[local_llm_provider] WARN: translator model is not configured. "
                         "Set LOCAL_TRANSLATOR_GGUF_MODEL or add translator GGUF to models/gguf."
@@ -676,6 +933,15 @@ def build_role_llm_fn(
                     _warn(f"[local_llm_provider] WARN: model for role '{role_key}' not found in models/gguf.")
                 _ROLE_ERRORS_WARNED.add(role_key)
             return None
+        if requested_model_path and model_path != requested_model_path:
+            warned_key = f"fallback_path:{role_key}:{requested_model_path}->{model_path}"
+            if warned_key not in _ROLE_ERRORS_WARNED:
+                _warn(
+                    f"[local_llm_provider] WARN: role '{role_key}' falling back from '{requested_model_path}' "
+                    f"to compatible model '{model_path}'."
+                )
+                _ROLE_ERRORS_WARNED.add(warned_key)
+            _ROLE_MODEL_MAP[role_key] = model_path
         if not Path(model_path).exists():
             warned_key = f"missing_path:{role_key}"
             if warned_key not in _ROLE_ERRORS_WARNED:
@@ -749,6 +1015,16 @@ def build_model_llm_fn(
 
     normalized_path = str(normalized)
     with _LLM_LOCK:
+        blocked_reason = _preflight_model_block_reason(normalized_path)
+        if blocked_reason:
+            warned_key = f"explicit_incompatible:{normalized_path}"
+            if warned_key not in _ROLE_ERRORS_WARNED:
+                _warn(
+                    f"[local_llm_provider] WARN: explicit model path is incompatible: {normalized_path}. "
+                    f"{blocked_reason}"
+                )
+                _ROLE_ERRORS_WARNED.add(warned_key)
+            return None
         resolved_n_ctx = _resolve_n_ctx(explicit_n_ctx=n_ctx)
         resolved_max_tokens = _resolve_max_tokens(max_tokens)
         cache_key = _llm_cache_key(normalized_path, n_ctx=resolved_n_ctx, max_tokens=resolved_max_tokens)
@@ -778,12 +1054,16 @@ def list_model_advisors() -> dict[str, Any]:
     advisors: list[dict[str, Any]] = []
     for role in ADVISOR_ROLES:
         path = role_map.get(role, "")
+        blocked_reason = _preflight_model_block_reason(path) if path else ""
         advisors.append(
             {
                 "role": role,
                 "model_path": path,
                 "available": bool(path),
                 "loaded": bool(path and _is_model_loaded(path)),
+                "architecture": _read_gguf_architecture(path) if path else "",
+                "compatible": not bool(blocked_reason),
+                "compatibility_note": blocked_reason,
             }
         )
     return {
@@ -808,11 +1088,18 @@ def prewarm_role_model(
     if role_key not in ADVISOR_ROLES:
         role_key = ROLE_GENERAL
     role_map = _resolve_model_role_paths()
-    model_path = role_map.get(role_key)
-    if role_key != ROLE_TRANSLATOR and not model_path:
-        model_path = role_map.get(ROLE_GENERAL)
+    requested_model_path = role_map.get(role_key, "")
+    model_path, _ = _select_usable_model_path(role_key, role_map)
     if not model_path or not Path(model_path).exists() or Llama is None:
         return False
+    if requested_model_path and model_path != requested_model_path:
+        warned_key = f"prewarm_fallback:{role_key}:{requested_model_path}->{model_path}"
+        if warned_key not in _ROLE_ERRORS_WARNED:
+            _warn(
+                f"[local_llm_provider] WARN: prewarm for role '{role_key}' is using fallback model '{model_path}' "
+                f"instead of incompatible '{requested_model_path}'."
+            )
+            _ROLE_ERRORS_WARNED.add(warned_key)
     resolved_n_ctx = _resolve_n_ctx(role_key, n_ctx)
     resolved_max_tokens = _resolve_max_tokens(max_tokens)
     raw_fn = _ensure_raw_llm_fn(

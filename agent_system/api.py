@@ -9,26 +9,96 @@ from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .chat_engine import generate_response
+from .chat_engine import forget_session_runtime_state, generate_response
 from .file_ingestion import ingest_file, rebuild_artifacts, store_uploaded_file
 from .graph_localizer import localized_node_view
 from .observability import get_observability_store
 from .graph_store import GraphStore
-from .history_store import create_session, list_sessions, parse_session
+from .history_store import create_session, delete_session, list_sessions, parse_session
 from .llm import prewarm_runtime_models_async
 from .mood_research import analyze_mood_research, load_mood_report
 from .reliability import RuntimeFailure, operator_messages_from_status, runtime_status_snapshot
 from .runtime_config import get_runtime_config
 from .node_rethinker import rethink_graph_nodes
 from .persona_engine import (
+    ensure_persona_registry_hygiene,
     explain_persona_graph,
     formalize_persona,
     list_persona_revisions,
     list_personas,
-    load_persona,
+    load_active_persona,
     restore_persona_revision,
 )
 from .memory_layers import list_persona_snapshots
+from .personality_schema import PersonalityObject
+from .personality_store import (
+    delete_personality,
+    get_or_create_personality,
+    list_biography_facts,
+    list_conflicts,
+    list_personalities,
+    list_provenance,
+    load_personality,
+    load_personality_for_persona,
+    save_personality,
+)
+from .personality_update_parser import (
+    build_direct_biography_update,
+    build_direct_profile_update,
+    parse_document_candidates,
+    parse_update_candidates,
+)
+from .personality_merge_engine import (
+    apply_update_candidates,
+    override_profile_field_entry,
+    resolve_conflict,
+)
+from .personality_summarizer import (
+    generate_compact_summary,
+    generate_operator_label,
+    update_hover_summary,
+)
+from .behavioral_action_engine import (
+    ActionSelectionResult,
+    CurrentStateModifier,
+    PersonalityBehaviorModel,
+    build_behavior_model,
+    select_action,
+    select_action_for_persona,
+)
+from .notes_store import (
+    clear_notes,
+    delete_note,
+    execute_note_command,
+    format_notes_for_context,
+    load_notes,
+    save_note,
+)
+from .planning_engine import (
+    build_planning_output,
+    classify_feedback,
+    detect_planning_intent,
+)
+from .situation_regulator import (
+    RegulatorState,
+    classify_event,
+    classify_event_multi,
+    run_regulator_pipeline,
+)
+from .importance_learner import (
+    build_importance_profile,
+    load_examples,
+    score_importance,
+    suggest_important_turns,
+)
+from .training_examples_store import (
+    add_example as add_training_example,
+    count_examples as count_training_examples,
+    delete_example as delete_training_example,
+    export_jsonl as export_training_jsonl,
+    get_example as get_training_example,
+    list_examples as list_training_examples,
+)
 
 
 class SessionRequest(BaseModel):
@@ -177,6 +247,14 @@ def create_router() -> APIRouter:
         if session is None:
             raise HTTPException(status_code=404, detail='Session not found')
         return session
+
+    @router.delete('/sessions/{session_id}')
+    def delete_session_endpoint(session_id: str) -> dict[str, Any]:
+        result = delete_session(session_id)
+        if not result.get('ok'):
+            raise HTTPException(status_code=404, detail='Session not found')
+        forget_session_runtime_state(session_id)
+        return result
 
     @router.post('/chat/respond')
     def chat_endpoint(request: ChatRequest) -> dict[str, Any]:
@@ -336,7 +414,7 @@ def create_router() -> APIRouter:
 
     @router.get('/personalities/{name}')
     def personality_endpoint(name: str) -> dict[str, Any]:
-        bundle = load_persona(name)
+        bundle = load_active_persona(name)
         if bundle is None:
             raise HTTPException(status_code=404, detail='Head not found')
         model = formalize_persona(bundle)
@@ -344,6 +422,9 @@ def create_router() -> APIRouter:
         mood_report = load_mood_report(persona_name=name) or analyze_mood_research(persona_name=name)
         return {
             'name': bundle.name,
+            'label': bundle.structured_persona.identity.label if bundle.structured_persona is not None else bundle.name,
+            'short_description': bundle.structured_persona.identity.short_description if bundle.structured_persona is not None else '',
+            'readiness': bundle.structured_persona.identity.readiness if bundle.structured_persona is not None else '',
             'entity_type': bundle.entity_type,
             'traits': bundle.traits,
             'relations': bundle.relations,
@@ -357,6 +438,7 @@ def create_router() -> APIRouter:
                 'R': model.R,
                 'M': model.M,
             },
+            'structured_persona': bundle.structured_persona.to_dict() if bundle.structured_persona is not None else {},
             'triad': {
                 'log_tuples': bundle.log_tuples,
                 'persona_form': bundle.persona_form,
@@ -381,14 +463,14 @@ def create_router() -> APIRouter:
 
     @router.get('/personalities/{name}/revisions')
     def personality_revisions_endpoint(name: str) -> dict[str, Any]:
-        bundle = load_persona(name)
+        bundle = load_active_persona(name)
         if bundle is None:
             raise HTTPException(status_code=404, detail='Head not found')
         return {'ok': True, 'revisions': list_persona_revisions(name)}
 
     @router.get('/personalities/{name}/snapshots')
     def personality_snapshots_endpoint(name: str, limit: int = 12) -> dict[str, Any]:
-        bundle = load_persona(name)
+        bundle = load_active_persona(name)
         if bundle is None:
             raise HTTPException(status_code=404, detail='Head not found')
         return {'ok': True, 'snapshots': list_persona_snapshots(name, limit=max(1, min(int(limit or 12), 64)))}
@@ -426,6 +508,619 @@ def create_router() -> APIRouter:
         )
         return {'ok': True, 'report': report.to_dict()}
 
+    # -----------------------------------------------------------------------
+    # Personality construction endpoints
+    # -----------------------------------------------------------------------
+
+    class PersonalityCreateRequest(BaseModel):
+        persona_name: str = ''
+        label: str = ''
+        source_texts: list[str] = Field(default_factory=list)
+
+    class PersonalityUpdateFromTextRequest(BaseModel):
+        personality_id: str = ''
+        persona_name: str = ''
+        text: str
+        source_channel: str = 'chat_user'
+        session_id: str = ''
+
+    class PersonalityUpdateFromDocRequest(BaseModel):
+        personality_id: str = ''
+        persona_name: str = ''
+        text: str
+        session_id: str = ''
+
+    class PersonalityDirectFieldUpdateRequest(BaseModel):
+        field_name: str
+        value: str
+        confidence: float = 0.90
+        source_channel: str = 'manual_edit'
+        session_id: str = ''
+        evidence_excerpt: str = ''
+
+    class PersonalityDirectBioUpdateRequest(BaseModel):
+        fact_type: str = 'factual_statement'
+        value: str
+        confidence: float = 0.90
+        source_channel: str = 'manual_edit'
+        session_id: str = ''
+        evidence_excerpt: str = ''
+
+    class PersonalityFieldOverrideRequest(BaseModel):
+        field_name: str
+        entry_id: str
+        new_value: str
+        confidence: float = 0.90
+        source_channel: str = 'manual_edit'
+        session_id: str = ''
+
+    class PersonalityConflictResolveRequest(BaseModel):
+        conflict_id: str
+        resolution: str
+        keep_entry_id: str = ''
+
+    class ActionScoreRequest(BaseModel):
+        persona_name: str = ''
+        personality_id: str = ''
+        route: str = 'persona_chat'
+        situation_type: str = 'neutral_statement'
+        pressure: float = 0.0
+        shame_active: bool = False
+        trust_level: float = 0.5
+
+    def _load_personality_or_404(personality_id: str = '', persona_name: str = '') -> PersonalityObject:
+        if personality_id:
+            p = load_personality(personality_id)
+        elif persona_name:
+            p = load_personality_for_persona(persona_name)
+        else:
+            p = None
+        if p is None:
+            raise HTTPException(status_code=404, detail='Personality not found')
+        return p
+
+    @router.get('/personality-construction/personalities')
+    def list_personalities_endpoint() -> dict[str, Any]:
+        return {'ok': True, 'personalities': list_personalities()}
+
+    @router.post('/personality-construction/personalities')
+    def create_personality_endpoint(request: PersonalityCreateRequest) -> dict[str, Any]:
+        personality = get_or_create_personality(
+            request.persona_name,
+            label=request.label,
+            source_texts=list(request.source_texts or []),
+        )
+        update_hover_summary(personality)
+        save_personality(personality)
+        return {'ok': True, 'personality': generate_compact_summary(personality)}
+
+    @router.get('/personality-construction/personalities/{personality_id}')
+    def get_personality_endpoint(personality_id: str) -> dict[str, Any]:
+        personality = _load_personality_or_404(personality_id=personality_id)
+        return {
+            'ok': True,
+            'personality': personality.to_dict(),
+            'summary': generate_compact_summary(personality),
+            'label': generate_operator_label(personality),
+        }
+
+    @router.delete('/personality-construction/personalities/{personality_id}')
+    def delete_personality_endpoint(personality_id: str) -> dict[str, Any]:
+        ok = delete_personality(personality_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail='Personality not found')
+        return {'ok': True}
+
+    @router.post('/personality-construction/personalities/{personality_id}/update-from-text')
+    def update_personality_from_text_endpoint(
+        personality_id: str, request: PersonalityUpdateFromTextRequest
+    ) -> dict[str, Any]:
+        personality = _load_personality_or_404(personality_id=personality_id)
+        candidates = parse_update_candidates(
+            request.text,
+            source_channel=request.source_channel,
+            session_id=request.session_id,
+        )
+        result = apply_update_candidates(personality, candidates)
+        update_hover_summary(personality)
+        save_personality(personality)
+        return {'ok': True, 'update_result': result.to_dict(), 'summary': generate_compact_summary(personality)}
+
+    @router.post('/personality-construction/personalities/{personality_id}/update-from-document')
+    def update_personality_from_doc_endpoint(
+        personality_id: str, request: PersonalityUpdateFromDocRequest
+    ) -> dict[str, Any]:
+        personality = _load_personality_or_404(personality_id=personality_id)
+        candidates = parse_document_candidates(request.text, session_id=request.session_id)
+        result = apply_update_candidates(personality, candidates)
+        update_hover_summary(personality)
+        save_personality(personality)
+        return {'ok': True, 'update_result': result.to_dict(), 'summary': generate_compact_summary(personality)}
+
+    @router.post('/personality-construction/personalities/{personality_id}/update-field')
+    def update_personality_field_endpoint(
+        personality_id: str, request: PersonalityDirectFieldUpdateRequest
+    ) -> dict[str, Any]:
+        personality = _load_personality_or_404(personality_id=personality_id)
+        candidate = build_direct_profile_update(
+            request.field_name,
+            request.value,
+            source_channel=request.source_channel,
+            session_id=request.session_id,
+            confidence=request.confidence,
+            evidence_excerpt=request.evidence_excerpt,
+        )
+        result = apply_update_candidates(personality, [candidate])
+        update_hover_summary(personality)
+        save_personality(personality)
+        return {'ok': True, 'update_result': result.to_dict()}
+
+    @router.post('/personality-construction/personalities/{personality_id}/update-biography')
+    def update_personality_biography_endpoint(
+        personality_id: str, request: PersonalityDirectBioUpdateRequest
+    ) -> dict[str, Any]:
+        personality = _load_personality_or_404(personality_id=personality_id)
+        candidate = build_direct_biography_update(
+            request.fact_type,
+            request.value,
+            source_channel=request.source_channel,
+            session_id=request.session_id,
+            confidence=request.confidence,
+            evidence_excerpt=request.evidence_excerpt,
+        )
+        result = apply_update_candidates(personality, [candidate])
+        update_hover_summary(personality)
+        save_personality(personality)
+        return {'ok': True, 'update_result': result.to_dict()}
+
+    @router.post('/personality-construction/personalities/{personality_id}/override-entry')
+    def override_personality_entry_endpoint(
+        personality_id: str, request: PersonalityFieldOverrideRequest
+    ) -> dict[str, Any]:
+        personality = _load_personality_or_404(personality_id=personality_id)
+        ok = override_profile_field_entry(
+            personality,
+            request.field_name,
+            request.entry_id,
+            request.new_value,
+            source_channel=request.source_channel,
+            session_id=request.session_id,
+            confidence=request.confidence,
+        )
+        if not ok:
+            raise HTTPException(status_code=404, detail='Entry not found')
+        update_hover_summary(personality)
+        save_personality(personality)
+        return {'ok': True}
+
+    @router.get('/personality-construction/personalities/{personality_id}/biography')
+    def personality_biography_endpoint(personality_id: str, fact_type: str = '') -> dict[str, Any]:
+        facts = list_biography_facts(personality_id, fact_type=fact_type)
+        return {'ok': True, 'facts': facts}
+
+    @router.get('/personality-construction/personalities/{personality_id}/provenance')
+    def personality_provenance_endpoint(personality_id: str) -> dict[str, Any]:
+        return {'ok': True, 'provenance': list_provenance(personality_id)}
+
+    @router.get('/personality-construction/personalities/{personality_id}/conflicts')
+    def personality_conflicts_endpoint(personality_id: str) -> dict[str, Any]:
+        return {'ok': True, 'conflicts': list_conflicts(personality_id)}
+
+    @router.post('/personality-construction/personalities/{personality_id}/resolve-conflict')
+    def personality_resolve_conflict_endpoint(
+        personality_id: str, request: PersonalityConflictResolveRequest
+    ) -> dict[str, Any]:
+        personality = _load_personality_or_404(personality_id=personality_id)
+        ok = resolve_conflict(
+            personality,
+            request.conflict_id,
+            request.resolution,
+            keep_entry_id=request.keep_entry_id,
+        )
+        if not ok:
+            raise HTTPException(status_code=404, detail='Conflict not found')
+        save_personality(personality)
+        return {'ok': True}
+
+    # -----------------------------------------------------------------------
+    # Behavioral action scoring endpoint
+    # -----------------------------------------------------------------------
+
+    @router.post('/personality-construction/score-actions')
+    def score_actions_endpoint(request: ActionScoreRequest) -> dict[str, Any]:
+        """
+        Score behavioral actions for a persona given current context.
+
+        Returns the selected action and full scoring breakdown — letting the
+        operator see exactly why the system chose a particular behavior.
+        """
+        personality = _load_personality_or_404(
+            personality_id=request.personality_id,
+            persona_name=request.persona_name,
+        )
+        modifiers: list[CurrentStateModifier] = []
+        if request.pressure > 0.0:
+            from .behavioral_action_engine import pressure_modifier
+            modifiers.append(pressure_modifier(request.pressure))
+        if request.shame_active:
+            from .behavioral_action_engine import shame_activation_modifier
+            modifiers.append(shame_activation_modifier())
+        if request.trust_level != 0.5:
+            from .behavioral_action_engine import trust_modifier
+            modifiers.append(trust_modifier(request.trust_level))
+
+        result = select_action_for_persona(
+            personality,
+            request.route,
+            situation_type=request.situation_type,
+            current_state_modifiers=modifiers,
+        )
+        return {'ok': True, 'action_selection': result.to_dict()}
+
+    @router.get('/personality-construction/personalities/{personality_id}/behavior-model')
+    def personality_behavior_model_endpoint(personality_id: str) -> dict[str, Any]:
+        """Inspect the behavioral model derived from a personality."""
+        personality = _load_personality_or_404(personality_id=personality_id)
+        model = build_behavior_model(personality)
+        return {'ok': True, 'behavior_model': model.to_dict()}
+
+    # -----------------------------------------------------------------------
+    # Notes API — user-controlled memory layer
+    # -----------------------------------------------------------------------
+
+    @router.get('/sessions/{session_id}/notes')
+    def get_notes_endpoint(session_id: str) -> dict[str, Any]:
+        """List all saved notes for a session."""
+        notes = load_notes(session_id)
+        return {
+            'ok': True,
+            'session_id': session_id,
+            'notes': notes,
+            'count': len(notes),
+        }
+
+    class SaveNoteRequest(BaseModel):
+        text: str
+        source: str = 'manual'
+
+    @router.post('/sessions/{session_id}/notes')
+    def save_note_endpoint(session_id: str, body: SaveNoteRequest) -> dict[str, Any]:
+        """Save a new note for a session."""
+        note = save_note(session_id, body.text, source=body.source)
+        if not note:
+            raise HTTPException(status_code=400, detail='Note text is required.')
+        return {'ok': True, 'note': note}
+
+    @router.delete('/sessions/{session_id}/notes/{note_ref}')
+    def delete_note_endpoint(session_id: str, note_ref: str) -> dict[str, Any]:
+        """Delete a note by note_id or 1-based index."""
+        deleted = delete_note(session_id, note_ref)
+        return {'ok': deleted, 'session_id': session_id, 'deleted': deleted}
+
+    @router.delete('/sessions/{session_id}/notes')
+    def clear_notes_endpoint(session_id: str) -> dict[str, Any]:
+        """Delete all notes for a session."""
+        count = clear_notes(session_id)
+        return {'ok': True, 'session_id': session_id, 'deleted_count': count}
+
+    @router.get('/sessions/{session_id}/notes/context')
+    def notes_context_endpoint(session_id: str, max_notes: int = 20) -> dict[str, Any]:
+        """Get saved notes formatted for context injection."""
+        context = format_notes_for_context(session_id, max_notes=max_notes)
+        return {'ok': True, 'session_id': session_id, 'context': context}
+
+    # -----------------------------------------------------------------------
+    # Planning API — planning mode output
+    # -----------------------------------------------------------------------
+
+    class PlanningRequest(BaseModel):
+        session_id: str
+        message: str
+        personality_name: str = ''
+        language: str = 'en'
+        recent_feedback: list[str] = Field(default_factory=list)
+
+    @router.post('/planning/analyze')
+    def planning_analyze_endpoint(body: PlanningRequest) -> dict[str, Any]:
+        """
+        Build a planning output for a message.
+        Returns structured planning data (what_matters, forces, steps, follow-up).
+        Does NOT call the LLM — returns raw structure only.
+        """
+        output = build_planning_output(
+            message=body.message,
+            session_id=body.session_id,
+            personality_name=body.personality_name,
+            recent_feedback=list(body.recent_feedback or []),
+            language=body.language,
+        )
+        return {'ok': True, 'planning': output.to_dict()}
+
+    @router.post('/planning/classify-feedback')
+    def classify_feedback_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+        """Classify a user message as feedback on a previous step."""
+        message = str(body.get('message') or '')
+        feedback_class = classify_feedback(message)
+        return {'ok': True, 'message': message, 'feedback_class': feedback_class}
+
+    # -----------------------------------------------------------------------
+    # Situation Regulator API — event/regulator/action pipeline
+    # -----------------------------------------------------------------------
+
+    class RegulatorRequest(BaseModel):
+        message: str
+        personality_name: str = ''
+        overload_level: float = 0.0
+        feedback_class: str = 'neutral'
+
+    @router.post('/regulator/analyze')
+    def regulator_analyze_endpoint(body: RegulatorRequest) -> dict[str, Any]:
+        """
+        Run the event → regulator → action pipeline on a message.
+        Returns event classification, regulator state, and selected action.
+        """
+        pressure_response: list[str] = []
+        vulnerabilities: list[str] = []
+        defense_mechanisms: list[str] = []
+        if body.personality_name:
+            personality = load_personality_for_persona(body.personality_name)
+            if personality is not None:
+                pressure_response = [
+                    e.value for e in personality.profile.get_field('pressure_response')
+                    if not e.is_temporary
+                ][:5]
+                vulnerabilities = [
+                    e.value for e in personality.profile.get_field('vulnerabilities')
+                    if not e.is_temporary
+                ][:5]
+                defense_mechanisms = [
+                    e.value for e in personality.profile.get_field('defense_mechanisms')
+                    if not e.is_temporary
+                ][:5]
+        output = run_regulator_pipeline(
+            message=body.message,
+            overload_level=body.overload_level,
+            feedback_class=body.feedback_class,
+            personality_pressure_response=pressure_response,
+            personality_vulnerabilities=vulnerabilities,
+            personality_defense_mechanisms=defense_mechanisms,
+        )
+        return {'ok': True, 'regulator': output.to_dict()}
+
+    @router.post('/regulator/classify-event')
+    def classify_event_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+        """Classify the primary event type from a message."""
+        message = str(body.get('message') or '')
+        primary = classify_event(message)
+        multi = classify_event_multi(message)
+        return {'ok': True, 'message': message, 'event_type': primary, 'event_multi': multi}
+
+    # -----------------------------------------------------------------------
+    # Importance Learner API
+    # -----------------------------------------------------------------------
+
+    @router.get('/sessions/{session_id}/importance-profile')
+    def importance_profile_endpoint(session_id: str) -> dict[str, Any]:
+        """Get the importance profile for a session (what the user tends to save)."""
+        profile = build_importance_profile(session_id)
+        return {'ok': True, 'session_id': session_id, 'importance_profile': profile}
+
+    @router.post('/sessions/{session_id}/importance/score')
+    def score_importance_endpoint(session_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Score the likely importance of a text snippet."""
+        text = str(body.get('text') or '')
+        score = score_importance(text)
+        return {'ok': True, 'text': text[:200], 'score': score}
+
+    @router.post('/sessions/{session_id}/importance/suggest')
+    def suggest_important_endpoint(session_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """
+        Given a list of recent turn texts, suggest which ones are most worth saving.
+        """
+        turns = [str(t) for t in list(body.get('turns') or []) if t]
+        threshold = float(body.get('threshold') or 0.45)
+        top_n = int(body.get('top_n') or 3)
+        suggestions = suggest_important_turns(turns, threshold=threshold, top_n=top_n)
+        return {'ok': True, 'suggestions': suggestions}
+
+    # -----------------------------------------------------------------------
+    # Training Examples API — fine-tuning dataset curation
+    # -----------------------------------------------------------------------
+
+    class TrainingExampleCreateRequest(BaseModel):
+        input_text: str
+        correct_output: str
+        session_id: str = ''
+        persona_name: str = ''
+        notes: str = ''
+        tags: list[str] = Field(default_factory=list)
+
+    @router.post('/training-examples')
+    def create_training_example_endpoint(body: TrainingExampleCreateRequest) -> dict[str, Any]:
+        """
+        Save a (input, correct_output) pair as a training example.
+
+        Use this to curate preferred responses for fine-tuning.
+        """
+        try:
+            example = add_training_example(
+                input_text=body.input_text,
+                correct_output=body.correct_output,
+                session_id=body.session_id,
+                persona_name=body.persona_name,
+                notes=body.notes,
+                tags=list(body.tags or []),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {'ok': True, 'example': example}
+
+    @router.get('/training-examples')
+    def list_training_examples_endpoint(
+        session_id: str = '',
+        persona_name: str = '',
+    ) -> dict[str, Any]:
+        """List training examples, optionally filtered by session or persona."""
+        examples = list_training_examples(session_id=session_id, persona_name=persona_name)
+        return {
+            'ok': True,
+            'examples': examples,
+            'count': len(examples),
+        }
+
+    @router.get('/training-examples/{example_id}')
+    def get_training_example_endpoint(example_id: str) -> dict[str, Any]:
+        """Get a single training example by ID."""
+        example = get_training_example(example_id)
+        if example is None:
+            raise HTTPException(status_code=404, detail='Training example not found')
+        return {'ok': True, 'example': example}
+
+    @router.delete('/training-examples/{example_id}')
+    def delete_training_example_endpoint(example_id: str) -> dict[str, Any]:
+        """Delete a training example by ID."""
+        deleted = delete_training_example(example_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail='Training example not found')
+        return {'ok': True, 'deleted': True}
+
+    @router.get('/training-examples/export/jsonl')
+    def export_training_examples_endpoint(
+        session_id: str = '',
+        persona_name: str = '',
+        fmt: str = 'openai',
+    ) -> dict[str, Any]:
+        """
+        Export training examples as JSONL string.
+
+        fmt: 'openai' (messages format) or 'simple' (prompt/completion format).
+        Returns the JSONL content and example count.
+        """
+        if fmt not in ('openai', 'simple'):
+            raise HTTPException(status_code=400, detail="fmt must be 'openai' or 'simple'")
+        content, count = export_training_jsonl(
+            session_id=session_id,
+            persona_name=persona_name,
+            fmt=fmt,
+        )
+        return {'ok': True, 'jsonl': content, 'count': count, 'fmt': fmt}
+
+    # ---------------------------------------------------------------------------
+    # Safety classifier
+    # ---------------------------------------------------------------------------
+
+    class SafetyClassifyRequest(BaseModel):
+        text: str
+        language: str = 'en'
+        k: int = 7
+
+    class SafetyExampleAddRequest(BaseModel):
+        text: str
+        label: str
+        notes: str = ''
+
+    @router.post('/safety/classify')
+    def safety_classify_endpoint(body: SafetyClassifyRequest) -> dict[str, Any]:
+        """
+        Classify a message using the deterministic KNN safety classifier.
+        Returns label (safe/suggestive/explicit/illegal), confidence, action,
+        matched features, and top-3 nearest neighbors.
+        """
+        from .safety_classifier import classify as safety_classify
+        result = safety_classify(str(body.text or ''), k=max(1, min(20, body.k)))
+        return {
+            'ok': True,
+            'label': result.label,
+            'confidence': result.confidence,
+            'action': result.action,
+            'matched_features': result.matched_features,
+            'top_neighbors': result.top_neighbors,
+            'fast_path': result.fast_path,
+        }
+
+    @router.post('/safety/examples')
+    def safety_add_example_endpoint(body: SafetyExampleAddRequest) -> dict[str, Any]:
+        """Add a labelled example to the safety classifier's runtime database."""
+        from .safety_classifier import add_example as safety_add_example
+        try:
+            safety_add_example(
+                text=str(body.text or ''),
+                label=str(body.label or ''),
+                notes=str(body.notes or ''),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {'ok': True}
+
+    # ---------------------------------------------------------------------------
+    # Cognitive genome endpoints
+    # ---------------------------------------------------------------------------
+
+    class GenomeFeedbackRequest(BaseModel):
+        session_id:    str
+        turn_id:       str
+        feedback_type: str   # too_cold / too_warm / underestimated_fear / etc.
+        intensity:     float = 0.7
+        feedback:      float = -1.0   # +1 success -1 failure
+
+    class GenomeCalibrateRequest(BaseModel):
+        persona_id: str = ''
+
+    @router.get('/genome/{persona_id}')
+    def genome_get_endpoint(persona_id: str) -> dict[str, Any]:
+        """Return current genome params for a persona."""
+        from .genome_store import GenomeStore
+        cfg = get_runtime_config()
+        store = GenomeStore(Path(cfg.memory_root))
+        genome = store.load_genome(str(persona_id or '').strip() or 'default')
+        return {'ok': True, 'persona_id': genome.persona_id, 'version': genome.version,
+                'params': {p.name: {'value': round(p.value, 4), 'prior': round(p.prior, 4),
+                                    'stability': p.stability, 'updates': p.updates}
+                           for p in genome.all_params()}}
+
+    @router.post('/genome/feedback')
+    def genome_feedback_endpoint(body: GenomeFeedbackRequest) -> dict[str, Any]:
+        """Apply explicit feedback to genome and update training store."""
+        import numpy as _np
+        from .genome_store import GenomeStore
+        from .training_store import TrainingStore
+        from .perceptron_trainer import apply_explicit_feedback
+        cfg = get_runtime_config()
+        store = GenomeStore(Path(cfg.memory_root))
+        genome = store.load_genome('default')
+        updated = apply_explicit_feedback(
+            str(body.feedback_type or ''),
+            float(_np.clip(body.intensity, 0.0, 1.0)),
+            genome,
+        )
+        store.save_genome(genome)
+        ts = TrainingStore(Path(cfg.memory_root) / 'training_tuples.jsonl')
+        ts.apply_feedback(str(body.turn_id or ''), float(body.feedback), str(body.feedback_type or ''))
+        return {'ok': True, 'updated_params': updated, 'genome_version': genome.version}
+
+    @router.post('/genome/calibrate')
+    def genome_calibrate_endpoint(body: GenomeCalibrateRequest) -> dict[str, Any]:
+        """Run offline perceptron calibration on stored training data."""
+        from .genome_store import GenomeStore
+        from .training_store import TrainingStore
+        from .perceptron_trainer import run_batch_calibration
+        cfg = get_runtime_config()
+        gs = GenomeStore(Path(cfg.memory_root))
+        rt = gs.load_runtime()
+        ts = TrainingStore(Path(cfg.memory_root) / 'training_tuples.jsonl')
+        persona_ids = gs.list_genomes() or ['default']
+        genome_map = {pid: gs.load_genome(pid) for pid in persona_ids}
+        result = run_batch_calibration(rt, ts, genome_map)
+        gs.save_runtime(rt)
+        return {'ok': True, 'result': result}
+
+    @router.get('/genome/training-stats')
+    def genome_training_stats_endpoint() -> dict[str, Any]:
+        from .training_store import TrainingStore
+        cfg = get_runtime_config()
+        ts = TrainingStore(Path(cfg.memory_root) / 'training_tuples.jsonl')
+        return {'ok': True, 'total_tuples': ts.count()}
+
     return router
 
 
@@ -451,6 +1146,7 @@ def create_app() -> FastAPI:
 
     @app.on_event('startup')
     async def _startup_prewarm() -> None:
+        ensure_persona_registry_hygiene()
         prewarm_runtime_models_async()
 
     @app.get('/api/health')
