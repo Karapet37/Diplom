@@ -4,11 +4,32 @@ Python client for the project’s optional integration-layer surface.
 
 This package is auxiliary. The canonical runtime remains the controller-first `agent_system/` backend started through `start.py`.
 
+## What It Is For
+
+Use this SDK when another Python process needs to call the optional integration-layer wrapper around the project.
+
+It is not the main operator API for:
+
+- `/api/cognitive/chat/respond`
+- annotation workspace and message-vector corrections
+- graph operator actions in the web UI
+
+Those canonical runtime surfaces are exposed directly by the backend REST API, not through this SDK.
+
 ## Install
 
 ```bash
 pip install ./packages/python-sdk
 ```
+
+## Modes
+
+- `IntegrationLayerClient.from_http(...)`
+  - talks to `/api/integration/layer/manifest` and `/api/integration/layer/invoke`
+- `IntegrationLayerClient.from_workspace(...)`
+  - binds directly to a Python workspace object that already exposes integration-layer handlers
+- `IntegrationLayerClient(...)`
+  - can be constructed manually with manifest/invoke callables for tests or embedded tools
 
 ## HTTP Client Example
 
@@ -66,16 +87,16 @@ manifest = client.manifest()
 
 ## Helper Methods
 
-- `manifest()` fetches the integration-layer manifest.
-- `invoke()` sends a raw payload to the integration-layer invoke surface.
-- `invoke_action()` wraps a named action with `input` and `options`.
-- `respond()` calls `wrapper.respond`.
-- `archive_chat()` calls `archive.chat`.
-- `update_user_graph()` calls `user_graph.update`.
-- `ingest_personal_tree()` calls `personal_tree.ingest`.
+- `manifest()` fetches the integration-layer manifest
+- `invoke()` sends a raw payload to the invoke surface
+- `invoke_action()` wraps a named action with `input` and `options`
+- `respond()` calls `wrapper.respond`
+- `archive_chat()` calls `archive.chat`
+- `update_user_graph()` calls `user_graph.update`
+- `ingest_personal_tree()` calls `personal_tree.ingest`
 
 ## Notes
 
-- This SDK is not required to run the main persona-graph agent.
-- Use it only when you need to call the integration-layer surface from another Python process or tool.
-- HTTP mode targets `/api/integration/layer/manifest` and `/api/integration/layer/invoke`.
+- This SDK is optional and not required to run the main persona-graph runtime.
+- If you need the current chat, session, annotation, or training-example APIs, call the main backend REST endpoints directly.
+- `manifest()` and `invoke()` normalize `host` and `app_id`, so callers can pass human-readable values and let the client sanitize them.

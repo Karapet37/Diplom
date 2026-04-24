@@ -42,6 +42,19 @@ export function getCognitiveSession(sessionId) {
   return request(`/api/cognitive/sessions/${encodeURIComponent(sessionId)}`);
 }
 
+export function getSessionAnnotationWorkspace(sessionId, windowSize = 4) {
+  const params = new URLSearchParams();
+  params.set('window_size', String(windowSize));
+  return request(`/api/cognitive/sessions/${encodeURIComponent(sessionId)}/annotation-workspace?${params.toString()}`);
+}
+
+export function saveSessionMessageAnnotation(sessionId, payload = {}) {
+  return request(`/api/cognitive/sessions/${encodeURIComponent(sessionId)}/annotations`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function deleteCognitiveSession(sessionId) {
   return request(`/api/cognitive/sessions/${encodeURIComponent(sessionId)}`, {
     method: 'DELETE',

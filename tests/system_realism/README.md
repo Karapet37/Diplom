@@ -1,10 +1,10 @@
 # System Realism Harness
 
-This subsystem launches the real runtime, seeds personas, drives live API requests, and evaluates whether the system behaves like the controller-first architecture it claims to implement.
+This subsystem launches the real runtime, seeds personas, drives live API requests, and checks whether the running system behaves like the controller-first architecture described in the project docs.
 
 ## What It Checks
 
-The realism harness is aimed at behavioral correctness, not only endpoint reachability.
+The realism harness is aimed at behavioral correctness under a live subprocess, not only endpoint reachability.
 
 Main checks include:
 
@@ -20,7 +20,14 @@ Main checks include:
 - latency and timeout behavior
 - runtime logs and report generation
 
-This harness complements, rather than replaces, the denser unit coverage in `tests/agent_system/` for planning mode, notes, behavior regulation, personality construction, observability, and training-example storage.
+This harness complements the denser unit coverage in `tests/agent_system/`, where the project also verifies:
+
+- message annotation and correction storage
+- context-matrix construction
+- raw-text preservation in chat history
+- cognitive pipeline calibration
+- safety classification
+- local model normalization
 
 ## Why It Exists
 
@@ -31,7 +38,7 @@ This harness helps verify that:
 - request routing is correct,
 - persona behavior remains stable,
 - memory layers are used in the right order,
-- the real app still behaves correctly under live conditions.
+- the live app still behaves correctly under real startup conditions.
 
 ## Run
 
@@ -59,6 +66,15 @@ Direct runner:
 .venv/bin/python -m tests.system_realism --profile local-demo --request-timeout 120 --tag manual
 ```
 
+Useful runner flags:
+
+- `--suite baseline|core|advanced|full`
+- `--mutation-subset smoke|all`
+- `--strict`
+- `--json`
+- `--memory-root <path>`
+- `--output-root <path>`
+
 ## Suites
 
 Available suites:
@@ -68,7 +84,7 @@ Available suites:
 - `advanced`
 - `full`
 
-The lighter path is useful for frequent local regression checks. The heavier path is better when validating long-running persona and graph behavior under real subprocess conditions.
+The lighter suites are useful for frequent local regression checks. The heavier suites are better when validating startup, persona continuity, and graph behavior under real subprocess conditions.
 
 ## Reports
 
@@ -87,5 +103,5 @@ Default output root:
 
 - The harness uses the real project entrypoint instead of a fake in-process mock.
 - It is intended to catch route drift, persona drift, and live-runtime regressions that unit tests may miss.
-- It is strongest for startup, subprocess orchestration, reporting, and end-to-end realism signals; planning/note/regulator correctness is covered more exhaustively in the unit suite.
+- Message-vector annotation and context-correction logic are currently covered more heavily in the unit suite than in the realism harness.
 - In restricted sandboxes that disallow opening TCP sockets, runtime-launcher tests can fail with `PermissionError` during free-port allocation even when the harness code is otherwise correct.

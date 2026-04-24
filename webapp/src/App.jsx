@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { flushSync } from 'react-dom';
 import {
   connectCognitiveGraphNodes,
   createCognitiveSession,
@@ -18,6 +19,7 @@ import {
   getCognitivePersonality,
   getCognitiveGraphSubgraph,
   getCognitiveSession,
+  getSessionAnnotationWorkspace,
   getHealth,
   listCognitivePersonalities,
   listCognitiveSessions,
@@ -27,6 +29,7 @@ import {
   reviewCognitiveGraphNode,
   rethinkCognitiveGraphNodes,
   respondCognitiveChat,
+  saveSessionMessageAnnotation,
   uploadCognitiveFiles,
   classifySafety,
 } from './api';
@@ -42,6 +45,40 @@ import { createTranslator, LANGUAGE_OPTIONS } from './lib/i18n';
 import { normalizeRethinkPreview } from './lib/operatorFormatters';
 
 const LANGUAGE_STORAGE_KEY = 'workspace_ui_language_mvp';
+
+function currentUtcStamp() {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+function buildOptimisticThreadMessage(text) {
+  const rawText = String(text || '');
+  const timestamp = currentUtcStamp();
+  const messageId = `pending-user-${timestamp}-${Math.random().toString(36).slice(2, 8)}`;
+  return {
+    id: messageId,
+    message_id: messageId,
+    role: 'user',
+    raw_text: rawText,
+    display_text: rawText,
+    analysis_text: rawText.trim(),
+    message: rawText,
+    timestamp,
+    persona_name: '',
+    pending: true,
+  };
+}
+
+function resolvePersonalityRecord(personalities, value) {
+  const normalizedValue = String(value || '').trim().toLowerCase();
+  if (!normalizedValue) {
+    return null;
+  }
+  return personalities.find((item) => [
+    item?.name,
+    item?.label,
+    item?.profile?.name,
+  ].some((candidate) => String(candidate || '').trim().toLowerCase() === normalizedValue)) || null;
+}
 
 function buildLoopSets(edges) {
   const pairCounts = new Set();
@@ -111,6 +148,8 @@ export default function App() {
   const [chatRunning, setChatRunning] = useState(false);
   const [chatProgress, setChatProgress] = useState('');
   const [lastChatResult, setLastChatResult] = useState(null);
+  const [optimisticMessages, setOptimisticMessages] = useState([]);
+  const [composerResetToken, setComposerResetToken] = useState(0);
   const [safetyResult, setSafetyResult] = useState(null);
   const [activeTrace, setActiveTrace] = useState(null);
   const [diagnostics, setDiagnostics] = useState({ metrics: null, traces: [], graphHealth: null });
@@ -118,11 +157,14 @@ export default function App() {
 
   const [personalities, setPersonalities] = useState([]);
   const [selectedPersonality, setSelectedPersonality] = useState('');
+  const [userPersonaName, setUserPersonaName] = useState('');
   const [personaDetail, setPersonaDetail] = useState(null);
   const [personaDetailLoading, setPersonaDetailLoading] = useState(false);
   const [deletingPersonalityId, setDeletingPersonalityId] = useState('');
   const [trainingExamples, setTrainingExamples] = useState([]);
   const [trainingExamplesLoading, setTrainingExamplesLoading] = useState(false);
+  const [trainingMode, setTrainingMode] = useState(false);
+  const [annotationWorkspace, setAnnotationWorkspace] = useState(null);
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [lastUploadResult, setLastUploadResult] = useState(null);
 
@@ -225,12 +267,24 @@ export default function App() {
     setBranchWindows((current) => current.filter((item) => item.id !== branchId));
   }
 
-  async function handleCreateSession() {
+  async function handleCreateSession(options = {}) {
+    const preserveOptimisticMessages = Boolean(options?.preserveOptimisticMessages);
     const result = await createCognitiveSession({ title: t('sidebar_new_session') });
     const session = result.session;
     setSessions((current) => [session, ...current.filter((item) => item.session_id !== session.session_id)]);
     setActiveSession(session);
     setActiveSessionId(session.session_id);
+    setAnnotationWorkspace({
+      session_id: session.session_id,
+      session_title: session.title || '',
+      registry: [],
+      messages: [],
+      message_count: 0,
+      window_size: 4,
+    });
+    if (!preserveOptimisticMessages) {
+      setOptimisticMessages([]);
+    }
     return session;
   }
 
@@ -250,6 +304,8 @@ export default function App() {
       if (activeSessionId === cleanSessionId) {
         setActiveSession(null);
         setActiveSessionId('');
+        setAnnotationWorkspace(null);
+        setOptimisticMessages([]);
         setLastChatResult(null);
         setLastUploadResult(null);
         setActiveTrace(null);
@@ -267,10 +323,31 @@ export default function App() {
   }
 
   async function loadSession(sessionId) {
-    const session = await getCognitiveSession(sessionId);
+    const [session, annotationResult] = await Promise.all([
+      getCognitiveSession(sessionId),
+      getSessionAnnotationWorkspace(sessionId).catch(() => ({ workspace: null })),
+    ]);
+    const sessionPersonaName = [...(session?.messages || [])]
+      .reverse()
+      .find((item) => item?.role !== 'user' && String(item?.persona_name || '').trim())?.persona_name || '';
     setActiveSession(session);
     setActiveSessionId(session.session_id);
+    setAnnotationWorkspace(annotationResult?.workspace || null);
+    setOptimisticMessages([]);
+    if (String(sessionPersonaName || '').trim()) {
+      await handleSelectPersonality(sessionPersonaName);
+    }
     return session;
+  }
+
+  async function loadAnnotationWorkspace(sessionId) {
+    if (!sessionId) {
+      setAnnotationWorkspace(null);
+      return null;
+    }
+    const result = await getSessionAnnotationWorkspace(sessionId);
+    setAnnotationWorkspace(result.workspace || null);
+    return result.workspace || null;
   }
 
   async function loadGraph(query, limit = graphSubgraphLimit) {
@@ -342,11 +419,50 @@ export default function App() {
     }
   }
 
+  async function handleSelectPersonality(name) {
+    const cleanName = String(name || '').trim();
+    const matchedPersonality = resolvePersonalityRecord(personalities, cleanName);
+    const resolvedName = matchedPersonality?.name || cleanName;
+    setSelectedPersonality(resolvedName);
+    if (!resolvedName) {
+      setPersonaDetail(null);
+      setTrainingExamples([]);
+      return;
+    }
+    await Promise.all([
+      loadPersonaDetail(resolvedName),
+      loadTrainingExamples(resolvedName).catch(() => []),
+    ]);
+  }
+
   async function handleAddTrainingExample(payload) {
     try {
       const result = await createTrainingExample(payload);
       setTrainingExamples((prev) => [result.example, ...prev]);
       return result.example;
+    } catch (err) {
+      setError(err.message || String(err));
+      return null;
+    }
+  }
+
+  async function handleSaveChatCorrection({ userInput, originalReply, correctedReply, label }) {
+    return handleAddTrainingExample({
+      input_text: userInput || '',
+      correct_output: correctedReply,
+      session_id: activeSessionId || '',
+      persona_name: selectedPersonality || '',
+      notes: originalReply ? `original: ${originalReply.slice(0, 200)}` : '',
+      tags: ['chat_correction', label || ''].filter(Boolean),
+    });
+  }
+
+  async function handleSaveMessageAnnotation(payload) {
+    if (!activeSessionId) return null;
+    try {
+      const result = await saveSessionMessageAnnotation(activeSessionId, payload);
+      setAnnotationWorkspace(result.workspace || null);
+      return result.annotation || null;
     } catch (err) {
       setError(err.message || String(err));
       return null;
@@ -586,43 +702,57 @@ export default function App() {
   }
 
   async function handleRunChat() {
-    const message = chatInput.trim();
-    if (!message || chatRunning) return;
+    const rawMessage = chatInput;
+    const analysisMessage = rawMessage.trim();
+    if (!analysisMessage || chatRunning) return;
+    const optimisticUserMessage = buildOptimisticThreadMessage(rawMessage);
     setChatRunning(true);
     setChatProgress(t('chat_running'));
     setError('');
     setSafetyResult(null);
+    flushSync(() => {
+      setChatInput('');
+      setOptimisticMessages([optimisticUserMessage]);
+      setComposerResetToken((current) => current + 1);
+    });
     try {
-      void classifySafety(message, uiLanguage).then((res) => setSafetyResult(res)).catch(() => {});
-      const sessionId = activeSessionId || (await handleCreateSession()).session_id;
+      void classifySafety(analysisMessage, uiLanguage).then((res) => setSafetyResult(res)).catch(() => {});
+      const sessionId = activeSessionId || (await handleCreateSession({ preserveOptimisticMessages: true })).session_id;
       const result = await respondCognitiveChat({
-        message,
+        message: rawMessage,
         session_id: sessionId,
         language: uiLanguage,
+        selected_persona: selectedPersonality,
         personality_name: selectedPersonality,
+        user_persona_name: userPersonaName || '',
       });
       setLastChatResult(result);
       setGraphContentLanguage(result?.response_language || result?.analysis?.user_state?.language || uiLanguage);
-      setChatInput('');
+      setOptimisticMessages([]);
       if (result.session) {
         setActiveSession(result.session);
         setActiveSessionId(result.session.session_id);
         setSessions((current) => [result.session, ...current.filter((item) => item.session_id !== result.session.session_id)]);
+        await loadAnnotationWorkspace(result.session.session_id);
       } else {
         await loadSession(sessionId);
       }
-      const followupQuery = result.current_entity || selectedPersonality || message;
+      const followupQuery = result.current_entity || selectedPersonality || analysisMessage;
       await loadGraph(followupQuery);
       if (result.trace_id) {
         await loadDiagnostics(sessionId, result.trace_id);
       }
       if (result.persona_name) {
         const personaDisplayName = result.persona_selection?.persona_name || result.persona_name;
-        setSelectedPersonality(personaDisplayName);
-        await loadPersonaDetail(personaDisplayName);
+        const isSystemName = /^(generate_persona|generate|create_persona|new_persona|unnamed|unknown|default|assistant)$/i.test(personaDisplayName);
+        if (!isSystemName) {
+          await handleSelectPersonality(personaDisplayName);
+        }
       }
       setWorkspace('chat');
     } catch (runError) {
+      setOptimisticMessages([]);
+      setChatInput(rawMessage);
       setError(runError.message || String(runError));
     } finally {
       setChatRunning(false);
@@ -784,7 +914,12 @@ export default function App() {
   const pendingActionLabel = pendingGraphAction
     ? `${t(pendingGraphAction.type === 'connect' ? 'graph_pending_connect_from' : 'graph_pending_merge_from')} ${nodeTitleById(pendingGraphAction.anchorNodeId)}`
     : '';
-  const selectedPersonalitySummary = personalities.find((item) => String(item.name || '') === String(selectedPersonality || '')) || null;
+  const selectedPersonalitySummary = resolvePersonalityRecord(personalities, selectedPersonality);
+  const selectedPersonalityDisplayName = selectedPersonalitySummary?.label
+    || selectedPersonalitySummary?.profile?.name
+    || selectedPersonalitySummary?.name
+    || selectedPersonality
+    || '';
   const previewResults = graphRethinkPreview?.results || [];
   const selectedPreview = selection?.kind === 'node'
     ? previewResults.find((item) => String(item.nodeId) === String(selection.id))
@@ -795,14 +930,23 @@ export default function App() {
       return (
         <ChatSurface
           session={activeSession}
+          annotationWorkspace={annotationWorkspace}
+          optimisticMessages={optimisticMessages}
           value={chatInput}
           onChange={setChatInput}
           running={chatRunning}
           progress={chatProgress}
+          composerResetToken={composerResetToken}
           onRun={() => void handleRunChat()}
           lastChatResult={lastChatResult}
           activeTrace={activeTrace}
           safetyResult={safetyResult}
+          trainingMode={trainingMode}
+          onSaveAnnotation={handleSaveMessageAnnotation}
+          selectedPersonality={selectedPersonalityDisplayName}
+          personas={personalities}
+          userPersonaName={userPersonaName}
+          onUserPersonaChange={setUserPersonaName}
           t={t}
         />
       );
@@ -813,9 +957,7 @@ export default function App() {
           personalities={personalities}
           selectedPersonality={selectedPersonality}
           onSelectPersonality={(name) => {
-            setSelectedPersonality(name);
-            void loadPersonaDetail(name).catch((detailError) => setError(detailError.message || String(detailError)));
-            void loadTrainingExamples(name).catch(() => {});
+            void handleSelectPersonality(name).catch((detailError) => setError(detailError.message || String(detailError)));
           }}
           personaDetail={personaDetail}
           loading={personaDetailLoading}
@@ -917,6 +1059,8 @@ export default function App() {
         onLanguageChange={setUiLanguage}
         onRefresh={refreshAll}
         refreshing={refreshing}
+        trainingMode={trainingMode}
+        onTrainingModeChange={setTrainingMode}
         t={t}
       />
       <div className="or-layout">
@@ -932,7 +1076,7 @@ export default function App() {
           personalities={personalities}
           selectedPersonality={selectedPersonality}
           selectedPersonalitySummary={selectedPersonalitySummary}
-          onSelectPersonality={setSelectedPersonality}
+          onSelectPersonality={(name) => void handleSelectPersonality(name)}
           onUploadFiles={(files) => void handleUploadFiles(files)}
           uploadingFiles={uploadingFiles}
           graphQuery={graphQuery}

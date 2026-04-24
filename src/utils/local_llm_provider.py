@@ -24,13 +24,20 @@ _THINK_OPEN_RE  = re.compile(r"<think>.*$", re.DOTALL | re.IGNORECASE)
 _THINK_CLOSE_TAG = "</think>"
 
 
+_THINKING_PROCESS_RE = re.compile(
+    r'^(thinking process:|process of thinking:|размышление:|ход мыслей:)',
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
 def _strip_think_blocks(text: str) -> str:
     """
     Strip internal reasoning from thinking models.
-    Handles three formats:
+    Handles:
     1. <think>reasoning</think>answer  — full tags
     2. reasoning</think>answer         — chat-template hides opening tag
     3. <think>reasoning...             — truncated (no closing tag)
+    4. "Thinking Process:\n..." header without tags — model narrates reasoning
     """
     # Case 1: full <think>...</think> blocks
     cleaned = _THINK_BLOCK_RE.sub("", text).strip()
@@ -44,6 +51,22 @@ def _strip_think_blocks(text: str) -> str:
     # Case 3: truncated — strip everything from opening <think>
     if not cleaned:
         cleaned = _THINK_OPEN_RE.sub("", text).strip()
+    # Case 4: model wrote "Thinking Process: ..." header — find first non-header line
+    if cleaned and _THINKING_PROCESS_RE.search(cleaned):
+        lines = cleaned.splitlines()
+        in_header = False
+        result_lines: list[str] = []
+        for line in lines:
+            if _THINKING_PROCESS_RE.match(line.strip()):
+                in_header = True
+                continue
+            if in_header and not line.strip():
+                continue
+            in_header = False
+            result_lines.append(line)
+        candidate = "\n".join(result_lines).strip()
+        if candidate:
+            cleaned = candidate
     return cleaned
 
 
@@ -1046,6 +1069,40 @@ def build_model_llm_fn(
 
         _ROLE_LLM_FN[cache_key] = fn
         return fn
+
+
+def get_role_llm_instance(role: str = ROLE_GENERAL) -> "Llama | None":
+    """Return the raw Llama instance for *role*, loading it if necessary.
+
+    Used by qwen_fast_respond() to call create_completion() directly.
+    Returns None if the model is unavailable or llama_cpp is not installed.
+    """
+    fn = build_role_llm_fn(role)
+    if fn is None:
+        return None
+    model_path = getattr(fn, "_model_path", None)
+    if not model_path:
+        return None
+    prefix = f"{model_path}::"
+    with _LLM_LOCK:
+        for key, instance in _PATH_LLM_INSTANCE.items():
+            if key == model_path or key.startswith(prefix):
+                return instance
+    # Instance not yet loaded — force-initialize it now (lazy model load
+    # only fires when llm_fn is called; we trigger it here explicitly).
+    n_ctx = int(getattr(fn, "_n_ctx", None) or 2048)
+    max_tokens = int(getattr(fn, "_max_tokens", None) or 320)
+    _ensure_raw_llm_fn(
+        model_path=model_path,
+        role=_normalize_role(role),
+        requested_n_ctx=n_ctx,
+        requested_max_tokens=max_tokens,
+    )
+    with _LLM_LOCK:
+        for key, instance in _PATH_LLM_INSTANCE.items():
+            if key == model_path or key.startswith(prefix):
+                return instance
+    return None
 
 
 def list_model_advisors() -> dict[str, Any]:

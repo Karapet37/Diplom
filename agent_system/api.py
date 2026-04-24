@@ -16,11 +16,13 @@ from .observability import get_observability_store
 from .graph_store import GraphStore
 from .history_store import create_session, delete_session, list_sessions, parse_session
 from .llm import prewarm_runtime_models_async
+from .message_annotation_store import build_annotation_workspace, save_message_annotation
 from .mood_research import analyze_mood_research, load_mood_report
 from .reliability import RuntimeFailure, operator_messages_from_status, runtime_status_snapshot
 from .runtime_config import get_runtime_config
 from .node_rethinker import rethink_graph_nodes
 from .persona_engine import (
+    delete_persona_head,
     ensure_persona_registry_hygiene,
     explain_persona_graph,
     formalize_persona,
@@ -113,6 +115,7 @@ class ChatRequest(BaseModel):
     personality_name: str = ''
     explicit_context: str = ''
     language: str = 'en'
+    user_persona_name: str = ''
 
 
 class UploadRequest(BaseModel):
@@ -165,6 +168,42 @@ class GraphRethinkRequest(BaseModel):
 
 class GraphRestoreRequest(BaseModel):
     snapshot_path: str = ''
+
+
+class SafetyClassifyRequest(BaseModel):
+    text: str
+    language: str = 'en'
+    k: int = 7
+
+
+class SafetyExampleAddRequest(BaseModel):
+    text: str
+    label: str
+    notes: str = ''
+
+
+class TrainingExampleCreateRequest(BaseModel):
+    input_text: str
+    correct_output: str
+    session_id: str = ''
+    persona_name: str = ''
+    notes: str = ''
+    tags: list[str] = Field(default_factory=list)
+
+
+class MessageAnnotationCreateRequest(BaseModel):
+    message_id: str
+    role: str
+    raw_text: str = ''
+    analysis_text: str = ''
+    display_text: str = ''
+    timestamp: str = ''
+    persona_name: str = ''
+    coordinates: dict[str, Any] = Field(default_factory=dict)
+    context_window: list[str] = Field(default_factory=list)
+    context_matrix: list[dict[str, Any]] = Field(default_factory=list)
+    transition_interpretation: dict[str, Any] = Field(default_factory=dict)
+    notes: str = ''
 
 
 def _frontend_index_candidates() -> tuple[Path, Path, Path]:
@@ -248,6 +287,42 @@ def create_router() -> APIRouter:
             raise HTTPException(status_code=404, detail='Session not found')
         return session
 
+    @router.get('/sessions/{session_id}/annotation-workspace')
+    def session_annotation_workspace_endpoint(session_id: str, window_size: int = 4) -> dict[str, Any]:
+        session = parse_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail='Session not found')
+        workspace = build_annotation_workspace(session_id, window_size=max(1, min(int(window_size or 4), 12)))
+        return {'ok': True, 'workspace': workspace}
+
+    @router.post('/sessions/{session_id}/annotations')
+    def save_message_annotation_endpoint(session_id: str, body: MessageAnnotationCreateRequest) -> dict[str, Any]:
+        session = parse_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail='Session not found')
+        try:
+            annotation = save_message_annotation(
+                session_id=session_id,
+                message_payload={
+                    'message_id': body.message_id,
+                    'role': body.role,
+                    'raw_text': body.raw_text,
+                    'analysis_text': body.analysis_text,
+                    'display_text': body.display_text,
+                    'timestamp': body.timestamp,
+                    'persona_name': body.persona_name,
+                },
+                coordinates=body.coordinates,
+                context_window=list(body.context_window or []),
+                context_matrix=list(body.context_matrix or []),
+                transition_interpretation=dict(body.transition_interpretation or {}),
+                notes=body.notes,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        workspace = build_annotation_workspace(session_id, window_size=max(len(body.context_window or []), 4))
+        return {'ok': True, 'annotation': annotation, 'workspace': workspace}
+
     @router.delete('/sessions/{session_id}')
     def delete_session_endpoint(session_id: str) -> dict[str, Any]:
         result = delete_session(session_id)
@@ -265,6 +340,7 @@ def create_router() -> APIRouter:
             selected_persona=selected_persona,
             explicit_context=request.explicit_context,
             language=request.language,
+            user_persona_name=str(request.user_persona_name or '').strip(),
         )
 
     @router.post('/files/upload')
@@ -570,7 +646,8 @@ def create_router() -> APIRouter:
 
     def _load_personality_or_404(personality_id: str = '', persona_name: str = '') -> PersonalityObject:
         if personality_id:
-            p = load_personality(personality_id)
+            # Try direct ID lookup first, then treat the value as a persona name (index lookup)
+            p = load_personality(personality_id) or load_personality_for_persona(personality_id)
         elif persona_name:
             p = load_personality_for_persona(persona_name)
         else:
@@ -606,7 +683,10 @@ def create_router() -> APIRouter:
 
     @router.delete('/personality-construction/personalities/{personality_id}')
     def delete_personality_endpoint(personality_id: str) -> dict[str, Any]:
+        # Try PersonalityObject store first (biography/traits system)
         ok = delete_personality(personality_id)
+        # Also try persona head store (runtime heads system) — this is where most personas live
+        ok = delete_persona_head(personality_id) or ok
         if not ok:
             raise HTTPException(status_code=404, detail='Personality not found')
         return {'ok': True}
@@ -927,14 +1007,6 @@ def create_router() -> APIRouter:
     # Training Examples API — fine-tuning dataset curation
     # -----------------------------------------------------------------------
 
-    class TrainingExampleCreateRequest(BaseModel):
-        input_text: str
-        correct_output: str
-        session_id: str = ''
-        persona_name: str = ''
-        notes: str = ''
-        tags: list[str] = Field(default_factory=list)
-
     @router.post('/training-examples')
     def create_training_example_endpoint(body: TrainingExampleCreateRequest) -> dict[str, Any]:
         """
@@ -953,6 +1025,36 @@ def create_router() -> APIRouter:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # Train per-module response evaluators (P1-P49) when a correction is saved
+        if body.persona_name and body.input_text and body.correct_output:
+            try:
+                original = ''
+                for note in (body.notes or '').splitlines():
+                    if note.startswith('original:'):
+                        original = note[len('original:'):].strip()
+                        break
+                # Run input analysis to get module signals, then train response evaluator
+                from agent_system.cognitive_modules_v2 import get_persona_response_evaluator
+                from agent_system.cognitive_modules_v2 import CognitiveRuntimeV2 as CognitiveModuleSystem
+                cms = CognitiveModuleSystem()
+                signals, _ = cms.forward(body.input_text)
+                get_persona_response_evaluator().record_correction(
+                    persona_name=body.persona_name,
+                    signals=signals,
+                    user_input=body.input_text,
+                    original_reply=original,
+                    corrected_reply=body.correct_output,
+                )
+                # Also update the monolithic fallback classifier
+                from agent_system.response_coherence_classifier import get_coherence_checker
+                get_coherence_checker().record_correction(
+                    persona_name=body.persona_name,
+                    user_input=body.input_text,
+                    original_reply=original,
+                    corrected_reply=body.correct_output,
+                )
+            except Exception:
+                pass
         return {'ok': True, 'example': example}
 
     @router.get('/training-examples')
@@ -1008,16 +1110,6 @@ def create_router() -> APIRouter:
     # ---------------------------------------------------------------------------
     # Safety classifier
     # ---------------------------------------------------------------------------
-
-    class SafetyClassifyRequest(BaseModel):
-        text: str
-        language: str = 'en'
-        k: int = 7
-
-    class SafetyExampleAddRequest(BaseModel):
-        text: str
-        label: str
-        notes: str = ''
 
     @router.post('/safety/classify')
     def safety_classify_endpoint(body: SafetyClassifyRequest) -> dict[str, Any]:

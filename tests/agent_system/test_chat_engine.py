@@ -4,7 +4,8 @@ import json
 
 import agent_system.chat_engine as chat_engine_module
 from agent_system.chat_engine import generate_response
-from agent_system.history_store import parse_session
+from agent_system.history_store import append_turn, create_session, parse_session
+from agent_system.message_annotation_store import build_annotation_workspace, save_message_annotation
 from agent_system.persona_engine import load_persona, materialize_persona
 
 
@@ -88,6 +89,71 @@ def test_chat_engine_prefers_detected_message_language_for_visible_reply(tmp_pat
     assert result['analysis']['user_state']['language'] == 'ru'
     assert result['response_language'] == 'ru'
     assert result['assistant_reply'] == 'Я Дракула.'
+
+
+def test_chat_engine_injects_message_vector_runtime_guidance_into_prompt(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+    monkeypatch.setattr('agent_system.chat_engine._schedule_background_extraction', lambda session_id, personality_name='': None)
+    monkeypatch.setattr('agent_system.chat_engine.translate_text', lambda text, **kwargs: text)
+    class FailingGenomeStore:
+        def __init__(self, *args, **kwargs) -> None:
+            raise RuntimeError('skip cognitive runtime for this test')
+
+    monkeypatch.setattr('agent_system.chat_engine.GenomeStore', FailingGenomeStore)
+
+    materialize_persona(
+        'Катерина',
+        {
+            'entity_type': 'PERSON',
+            'traits': ['sharp', 'guarded'],
+            'knowledge': 'Катерина держит дистанцию и не любит липкий флирт.',
+        },
+        explicit=True,
+    )
+    create_session('vector_runtime_prompt', 'Vector Runtime Prompt')
+    append_turn('vector_runtime_prompt', 'Ну молодец, конечно.', 'Я это запомнил.')
+    workspace = build_annotation_workspace('vector_runtime_prompt')
+    last_assistant = workspace['messages'][-1]
+    save_message_annotation(
+        session_id='vector_runtime_prompt',
+        message_payload=last_assistant,
+        coordinates={
+            'P24': {'main': 'false_praise', 'extra': ['sarcasm']},
+            'P35': {'main': 'escalation', 'extra': []},
+            'P49': {'main': 'toward_escalation', 'extra': []},
+        },
+        context_window=last_assistant['context_window'],
+        context_matrix=last_assistant['context_matrix'],
+        transition_interpretation={
+            'from': ['sharpening'],
+            'to': ['false_praise', 'toward_escalation'],
+            'type': 'masking',
+        },
+        notes='Runtime prompt guidance test.',
+    )
+
+    captured: dict[str, str] = {}
+
+    def fake_build_chat_prompt(**kwargs):  # type: ignore[no-untyped-def]
+        captured['route_guidance_block'] = str(kwargs.get('route_guidance_block') or '')
+        return 'prompt'
+
+    monkeypatch.setattr('agent_system.chat_engine.build_chat_prompt', fake_build_chat_prompt)
+    monkeypatch.setattr('agent_system.chat_engine.generate_chat_reply', lambda **kwargs: 'Короткий ответ по делу.')
+
+    result = generate_response(
+        message='Why did you answer like that?',
+        session_id='vector_runtime_prompt',
+        selected_persona='Катерина',
+        language='en',
+    )
+
+    vector_runtime = result['context_preview']['message_vector_runtime']
+    assert '[P-COORDINATE LAYER]' in captured['route_guidance_block']
+    assert 'Context matrix:' in captured['route_guidance_block']
+    assert vector_runtime['context_matrix'][-1]['vector']['P35']['main'] == 'escalation'
+    assert vector_runtime['transition_interpretation']['type'] in {'masking', 'escalation'}
+    assert result['behavior_trace']['message_vector_runtime']['current_vector']
 
 
 def test_chat_engine_uses_internal_translation_for_context_routing(tmp_path, monkeypatch) -> None:

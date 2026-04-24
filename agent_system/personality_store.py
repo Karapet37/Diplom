@@ -204,12 +204,15 @@ def list_personalities() -> list[dict[str, Any]]:
 def delete_personality(personality_id: str) -> bool:
     """Delete a personality from disk and remove from index. Returns True if found."""
     with _STORE_LOCK:
-        path = _personality_path(str(personality_id or ''))
+        clean_id = str(personality_id or '').strip()
+        index = _load_index()
+        # Resolve persona_name → personality_id if the caller passed a name
+        resolved_id = index.get(clean_id, clean_id)
+        path = _personality_path(resolved_id)
         if not path.exists():
             return False
         path.unlink(missing_ok=True)
-        index = _load_index()
-        keys_to_remove = [k for k, v in index.items() if v == personality_id]
+        keys_to_remove = [k for k, v in index.items() if v == resolved_id]
         for k in keys_to_remove:
             index.pop(k, None)
         _save_index(index)

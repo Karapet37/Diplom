@@ -22,6 +22,20 @@ VISIBLE_REPLY_LEAK_MARKERS = (
     '<think>',
     '</think>',
     'system note',
+    'analyze the request',
+    '**analyze the request',
+    'analysis of the situation',
+    '# анализ ситуации',
+    'ключевая проблема',
+    'safety/policy',
+    'constraint:',
+    'output format:',
+    'what i can say',
+    'what i cannot',
+    'что я могу сказать',
+    'что я не могу',
+    'внешний ответ персонажа',
+    'outer response',
     'the user has instructed me',
     'i must adhere strictly',
     'identity lock',
@@ -30,6 +44,8 @@ VISIBLE_REPLY_LEAK_MARKERS = (
     'respond in english',
     'persona head:',
     'user question:',
+    'review notes',
+    'issues identified',
 )
 _MODEL_CALL_LOCK = Lock()
 _MODEL_META_LOCK = Lock()
@@ -38,6 +54,18 @@ _PREWARM_STARTED = False
 _THINK_BLOCK_RE = re.compile(r'<think>.*?</think>', flags=re.IGNORECASE | re.DOTALL)
 _THINK_PREFIX_RE = re.compile(r'^\s*<think>.*?(?:</think>|$)', flags=re.IGNORECASE | re.DOTALL)
 _CODE_FENCE_RE = re.compile(r'^```[a-zA-Z0-9_-]*\s*|\s*```$', flags=re.MULTILINE)
+_LABELED_VISIBLE_REPLY_RE = re.compile(
+    r'(?:внешний ответ персонажа|ответ персонажа|outer response(?: of the persona)?|corrected line|исправленный вариант реплики)\s*[:：]\s*(.+)',
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_HEADED_VISIBLE_REPLY_RE = re.compile(
+    r'^\s*#+\s*answer\b\s*(.+?)(?=\n\s*(?:---|\*\*?\s*review notes?:|\*\*?\s*issues identified:|review notes?:|issues identified:)|$)',
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_LABELED_VISIBLE_REPLY_STOP_RE = re.compile(
+    r'\n\s*(?:[#>*-]+\s*)?(?:внутренняя мысль|inner thought|safety/policy|constraint|output format|what i can say|what i cannot|что я могу сказать|что я не могу|review notes?|issues identified|role:|task:)\b',
+    flags=re.IGNORECASE,
+)
 _LAST_MODEL_CALL_META: dict[str, dict[str, Any]] = {}
 
 
@@ -304,6 +332,36 @@ def _strip_leading_leak_lines(text: str) -> str:
     return '\n'.join(kept).strip()
 
 
+def _extract_labeled_visible_reply(text: str) -> str:
+    raw = str(text or '').strip()
+    if not raw:
+        return ''
+    match = _LABELED_VISIBLE_REPLY_RE.search(raw)
+    candidate = str(match.group(1) or '').strip() if match else ''
+    if not candidate:
+        headed = _HEADED_VISIBLE_REPLY_RE.search(raw)
+        candidate = str(headed.group(1) or '').strip() if headed else ''
+    if not candidate:
+        return ''
+    stop = _LABELED_VISIBLE_REPLY_STOP_RE.search(candidate)
+    if stop:
+        candidate = candidate[:stop.start()].strip()
+    candidate = re.sub(r'\s*\([^()\n]{1,180}\)\s*$', '', candidate).strip()
+    candidate = re.sub(r'^[\-\*\d\.\)\s]+', '', candidate).strip()
+    return candidate
+
+
+def _looks_like_visible_reply_candidate(paragraph: str) -> bool:
+    lowered = str(paragraph or '').strip().lower()
+    if not lowered:
+        return False
+    if any(marker in lowered for marker in VISIBLE_REPLY_LEAK_MARKERS):
+        return False
+    if lowered.startswith(('role:', 'task:', 'constraint:', 'output format:', 'safety/policy:')):
+        return False
+    return bool(re.search(r'[.!?…]|[А-ЯЁа-яё]{3,}|[A-Za-z]{3,}', paragraph))
+
+
 def _sanitize_visible_reply(text: str) -> str:
     raw = str(text or '').strip()
     if not raw:
@@ -312,6 +370,9 @@ def _sanitize_visible_reply(text: str) -> str:
     cleaned = _THINK_PREFIX_RE.sub(' ', cleaned)
     cleaned = _CODE_FENCE_RE.sub('', cleaned)
     cleaned = cleaned.replace('\r', '\n')
+    labeled = _extract_labeled_visible_reply(cleaned)
+    if labeled:
+        cleaned = labeled
     cleaned = _strip_leading_leak_lines(cleaned)
     paragraphs = [part.strip() for part in re.split(r'\n\s*\n', cleaned) if part.strip()]
     filtered: list[str] = []
@@ -322,6 +383,10 @@ def _sanitize_visible_reply(text: str) -> str:
         if lowered.startswith('⚠️') and 'system' in lowered:
             continue
         filtered.append(paragraph)
+    if filtered and any(any(marker in paragraph.lower() for marker in VISIBLE_REPLY_LEAK_MARKERS) for paragraph in paragraphs[:2]):
+        for paragraph in reversed(filtered):
+            if _looks_like_visible_reply_candidate(paragraph):
+                return paragraph.strip()
     normalized = '\n\n'.join(filtered).strip()
     normalized = re.sub(r'\n{3,}', '\n\n', normalized)
     normalized = re.sub(r'[ \t]{2,}', ' ', normalized)

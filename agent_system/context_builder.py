@@ -1431,6 +1431,20 @@ def build_context(
     section_limit = max(max_context_tokens - _estimate_tokens(collected['clipped_question']) - prompt_overhead_tokens, 0)
     sections, section_tokens = _fit_section_budget(packed_sections, token_limit=section_limit)
     estimated = section_tokens + _estimate_tokens(collected['clipped_question']) + prompt_overhead_tokens
+    recent_turns: list[dict[str, str]] = []
+    parsed_session = parse_session(session_id) or {}
+    for item in list(parsed_session.get('messages') or [])[-8:]:
+        role = str(item.get('role') or '').strip()
+        content = str(item.get('display_text') or item.get('raw_text') or item.get('message') or '').strip()
+        if role and content:
+            recent_turns.append(
+                {
+                    'role': role,
+                    'content': content,
+                    'persona_name': str(item.get('persona_name') or '').strip(),
+                    'timestamp': str(item.get('timestamp') or '').strip(),
+                }
+            )
 
     payload = ContextPayload(
         persona_name=collected['resolved_persona'],
@@ -1467,6 +1481,7 @@ def build_context(
     )
     response = payload.to_dict()
     response['situation'] = collected['rendered_situation']
+    response['recent_dialogue_turns'] = recent_turns
     return response
 
 

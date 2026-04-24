@@ -28,6 +28,7 @@ from .llm import (
     reset_last_model_call_meta,
     translate_text,
 )
+from .message_annotation_store import build_runtime_message_vector_payload
 from .mood_research import build_mood_snapshot, load_mood_report, record_mood_snapshot, schedule_mood_research_refresh
 from .models import (
     BackgroundRebuildDecision,
@@ -290,8 +291,8 @@ def _write_concept_graph_from_message(message: str, *, graph_store: GraphStore, 
         side_effects.add_graph_write('chat:concept_graph_extraction')
 
 
-def _write_session_history(session_id: str, user_message: str, assistant_reply: str, *, side_effects: ChatSideEffects) -> None:
-    history_path = append_turn(session_id, user_message, assistant_reply)
+def _write_session_history(session_id: str, user_message: str, assistant_reply: str, *, side_effects: ChatSideEffects, persona_name: str = '') -> None:
+    history_path = append_turn(session_id, user_message, assistant_reply, persona_name=persona_name)
     side_effects.history_write_path = str(history_path)
 
 
@@ -521,6 +522,28 @@ def _session_has_previous_assistant_turn(session_id: str) -> bool:
     return any(str(item.get('role') or '').strip() == 'assistant' for item in list(parsed.get('messages') or []))
 
 
+
+def _append_persona_examples(persona_name: str, persona_block: str, max_examples: int = 3) -> str:
+    """Append few-shot examples from user corrections — the ML signal for persona behavior."""
+    try:
+        examples = _list_training_examples(persona_name=persona_name)
+        if not examples:
+            return persona_block
+        shots = []
+        for ex in reversed(examples[-max_examples * 2:]):
+            inp = str(ex.get('input_text') or '').strip()
+            out = str(ex.get('correct_output') or '').strip()
+            if inp and out:
+                shots.append(f'User: {inp}\n{persona_name}: {out}')
+            if len(shots) >= max_examples:
+                break
+        if not shots:
+            return persona_block
+        return persona_block + '\n\nExamples of correct responses:\n' + '\n\n'.join(shots)
+    except Exception:
+        return persona_block
+
+
 def _simple_context_payload(
     *,
     session_id: str,
@@ -529,6 +552,20 @@ def _simple_context_payload(
     selected_persona: str = '',
 ) -> dict[str, Any]:
     recent = recent_dialogue(session_id) if route.requires_history else ''
+    recent_turns: list[dict[str, str]] = []
+    parsed = parse_session(session_id) or {}
+    for item in list(parsed.get('messages') or [])[-8:]:
+        role = str(item.get('role') or '').strip()
+        content = str(item.get('display_text') or item.get('raw_text') or item.get('message') or '').strip()
+        if role and content:
+            recent_turns.append(
+                {
+                    'role': role,
+                    'content': content,
+                    'persona_name': str(item.get('persona_name') or '').strip(),
+                    'timestamp': str(item.get('timestamp') or '').strip(),
+                }
+            )
     persona_name = str(selected_persona or '').strip()
     persona_block = ''
     if route.requires_persona and persona_name:
@@ -566,8 +603,11 @@ def _simple_context_payload(
             if bundle.traits:
                 lines.append(f"Traits: {', '.join(bundle.traits[:6])}.")
             if bundle.knowledge:
-                lines.append(f"Knowledge: {bundle.knowledge[:220]}")
+                lines.append(f"Knowledge: {bundle.knowledge[:700]}")
         persona_block = '\n'.join(line for line in lines if str(line).strip()).strip()
+        # Inject few-shot training examples — user corrections become in-context examples
+        if persona_name and persona_block:
+            persona_block = _append_persona_examples(persona_name, persona_block)
     estimated_tokens = max((len(recent) + len(persona_block)) // 4, 0)
     return {
         'persona_name': persona_name,
@@ -575,6 +615,7 @@ def _simple_context_payload(
         'persona_block': persona_block,
         'graph_context': '',
         'recent_dialogue': recent,
+        'recent_dialogue_turns': recent_turns,
         'estimated_tokens': estimated_tokens,
         'context_debug': {
             'source_counts': {
@@ -586,6 +627,24 @@ def _simple_context_payload(
             'selected_route': route.selected_route,
         },
     }
+
+
+def _recent_exchange_pairs(turns: list[dict[str, Any]], *, pair_limit: int = 3) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    pending_user = ''
+    for turn in list(turns or []):
+        role = str(turn.get('role') or '').strip()
+        content = str(turn.get('content') or '').strip()
+        if not role or not content:
+            continue
+        if role == 'user':
+            pending_user = content
+            continue
+        if role == 'assistant' and pending_user:
+            pairs.append((pending_user, content))
+            pending_user = ''
+    limit = max(int(pair_limit or 0), 0)
+    return pairs[-limit:] if limit else pairs
 
 
 def _route_aware_fallback_decision(
@@ -659,6 +718,89 @@ def _load_route_memory(session_id: str) -> RouteMemory:
     )
 
 
+_SYSTEM_PERSONA_NAMES_ROUTE = frozenset({
+    'generate_persona', 'generate', 'create_persona', 'new_persona',
+    'unnamed', 'unknown', 'default', 'assistant', 'persona',
+})
+_VECTOR_GUIDANCE_INTERPRETERS = (
+    'P1', 'P4', 'P8', 'P11', 'P13', 'P16', 'P18', 'P20', 'P24', 'P29',
+    'P30', 'P34', 'P35', 'P36', 'P38', 'P39', 'P40', 'P41', 'P48', 'P49',
+)
+_VECTOR_GUIDANCE_HIDDEN = frozenset({
+    'absent', 'neutral', 'unclear', 'continuation', 'defined', 'direct',
+    'literal', 'statement', 'non_answer', 'independent',
+    'opening_new_direction', 'calm',
+})
+
+
+def _is_system_persona_name(name: str) -> bool:
+    n = str(name or '').strip().lower()
+    return not n or n in _SYSTEM_PERSONA_NAMES_ROUTE or n.startswith('generate_')
+
+
+def _format_vector_choice(choice: dict[str, Any] | None) -> str:
+    item = dict(choice or {})
+    main = str(item.get('main') or '').strip()
+    if not main or main in _VECTOR_GUIDANCE_HIDDEN:
+        return ''
+    extras = [
+        str(extra or '').strip()
+        for extra in list(item.get('extra') or [])[:2]
+        if str(extra or '').strip() and str(extra or '').strip() != main
+    ]
+    return f'{main} (+{", ".join(extras)})' if extras else main
+
+
+def _summarize_vector_labels(vector: dict[str, Any] | None, *, limit: int = 6) -> list[str]:
+    labels: list[str] = []
+    payload = dict(vector or {})
+    for interpreter_id in _VECTOR_GUIDANCE_INTERPRETERS:
+        choice = _format_vector_choice(payload.get(interpreter_id))
+        if choice:
+            labels.append(f'{interpreter_id}={choice}')
+        if len(labels) >= max(int(limit or 0), 0):
+            break
+    return labels
+
+
+def _render_message_vector_guidance(payload: dict[str, Any] | None) -> str:
+    data = dict(payload or {})
+    current_labels = _summarize_vector_labels(data.get('current_vector'), limit=8)
+    context_bits: list[str] = []
+    for item in list(data.get('context_matrix') or [])[-2:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get('role') or '').strip() or 'unknown'
+        persona = str(item.get('persona_name') or '').strip()
+        role_label = f'{role}[{persona}]' if persona else role
+        labels = _summarize_vector_labels(item.get('vector'), limit=4)
+        if labels:
+            context_bits.append(f'{role_label}: {", ".join(labels)}')
+    transition = dict(data.get('transition_interpretation') or {})
+    flow = [str(item).strip() for item in list(data.get('history_flow') or []) if str(item).strip()]
+    lines = ['[P-COORDINATE LAYER]', 'Use the learned P1..P49 vector layer as behavioral guidance. Do not mention the labels explicitly.']
+    if current_labels:
+        lines.append('Current user vector: ' + '; '.join(current_labels) + '.')
+    if context_bits:
+        lines.append('Context matrix: ' + ' | '.join(context_bits) + '.')
+    if flow:
+        lines.append('History flow: ' + ' -> '.join(flow[:6]) + '.')
+    if transition:
+        from_labels = [str(item).strip() for item in list(transition.get('from') or []) if str(item).strip()]
+        to_labels = [str(item).strip() for item in list(transition.get('to') or []) if str(item).strip()]
+        transition_type = str(transition.get('type') or '').strip()
+        transition_parts: list[str] = []
+        if from_labels:
+            transition_parts.append('from ' + ', '.join(from_labels[:4]))
+        if to_labels:
+            transition_parts.append('to ' + ', '.join(to_labels[:4]))
+        if transition_type:
+            transition_parts.append(f'type={transition_type}')
+        if transition_parts:
+            lines.append('Transition: ' + '; '.join(transition_parts) + '.')
+    return '\n'.join(line for line in lines if str(line).strip())
+
+
 def _save_route_memory(
     session_id: str,
     *,
@@ -667,6 +809,9 @@ def _save_route_memory(
     persona_name: str,
     current_entity: str,
 ) -> str:
+    clean_persona = str(persona_name or '').strip()
+    if _is_system_persona_name(clean_persona):
+        clean_persona = ''
     path = save_session_route_state(
         session_id,
         {
@@ -674,7 +819,7 @@ def _save_route_memory(
             'request_type': route.request_type,
             'interaction_mode': route.interaction_mode,
             'response_style': route.response_style,
-            'persona_name': str(persona_name or '').strip(),
+            'persona_name': clean_persona,
             'current_entity': str(current_entity or '').strip(),
             'persona_style_traits': list(preprocessing.persona_style_traits),
             'speech_style_hints': list(preprocessing.speech_style_hints),
@@ -925,15 +1070,15 @@ def _model_budget_trace_meta(model_budget: dict[str, Any]) -> dict[str, Any]:
 def _route_output_budget(route: RouteDecision, *, repair: bool = False) -> int:
     selected = str(route.selected_route or '').strip()
     if selected == 'persona_graph_reasoning':
-        return 768 if repair else 512
+        return 896 if repair else 640
     if selected == 'persona_chat_fast_path':
-        return 320 if repair else 192
+        return 512 if repair else 320
     if selected == 'persona_dialogue_analysis':
         return 896 if repair else 640
     if selected in {'hypothetical_roleplay', 'project_document_analysis'}:
         return 640 if repair else 448
     if selected == 'meta_previous_answer':
-        return 576 if repair else 384
+        return 704 if repair else 512
     if selected == 'factual_answer':
         return 512 if repair else 320
     return 448 if repair else 256
@@ -993,16 +1138,15 @@ def _style_guard_fallback_reply(route: RouteDecision, *, language: str) -> str:
     return "Um...\nI do not want to spell it out.\nI would step back."
 
 
-def _lightweight_persona_fallback_reply(*, language: str, persona_name: str = '') -> str:
-    target = normalize_language_code(language, fallback='en')
-    clean_name = str(persona_name or '').strip()
-    if target == 'ru':
-        if clean_name:
-            return f'Привет.\nЯ {clean_name}.'
-        return 'Привет.\nЭто я.'
-    if clean_name:
-        return f'Hi.\nI am {clean_name}.'
-    return 'Hi.\nIt is me.'
+def _resolve_explicit_persona_name(*candidates: Any) -> str:
+    for candidate in candidates:
+        clean_candidate = str(candidate or '').strip()
+        if not clean_candidate:
+            continue
+        normalized = normalize_personality_name(clean_candidate)
+        if normalized and not _is_system_persona_name(normalized):
+            return normalized
+    return ''
 
 
 def _apply_trace_learning_to_guidance(route_guidance: str, trace_learning: TraceLearningPolicy) -> str:
@@ -1028,10 +1172,10 @@ def _route_output_budget_with_learning(route: RouteDecision, trace_learning: Tra
 def _style_guard_output_budget(route: RouteDecision, trace_learning: TraceLearningPolicy) -> int:
     base = _route_output_budget_with_learning(route, trace_learning, repair=False)
     if route.selected_route == 'persona_graph_reasoning':
-        return min(base, 192)
+        return min(base, 320)
     if route.selected_route == 'hypothetical_roleplay':
-        return min(base, 160)
-    return min(base, 192)
+        return min(base, 288)
+    return min(base, 320)
 
 
 def _operator_messages_from_model_budget(model_budget: dict[str, Any]) -> list[str]:
@@ -1270,7 +1414,8 @@ def _record_importance_learning(
 
 
 def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
-    clean_message = str(request.message or '').strip()
+    raw_message = '' if request.message is None else str(request.message)
+    clean_message = raw_message.strip()
     session = create_session(request.session_id or '')
     clean_session_id = str(session.get('session_id') or request.session_id or '')
 
@@ -1286,7 +1431,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
         if _note_cmd.get('cmd') == 'save':
             _record_importance_learning(clean_session_id, str(_note_cmd.get('text') or ''), was_saved=True)
         # Persist the command and reply in session history (important for context continuity)
-        append_turn(clean_session_id, clean_message, _reply_nc)
+        append_turn(clean_session_id, raw_message, _reply_nc)
         return _make_note_command_result(
             reply=_reply_nc,
             session_id=clean_session_id,
@@ -1304,7 +1449,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
         session_id=clean_session_id,
         request_meta={
             'language': request.language,
-            'message_chars': len(clean_message),
+            'message_chars': len(raw_message),
             'selected_persona': str(request.selected_persona or '').strip(),
         },
     )
@@ -1315,7 +1460,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             lambda: build_request_envelope(
                 request_id=trace.request_id,
                 session_id=clean_session_id,
-                raw_text=clean_message,
+                raw_text=raw_message,
             ),
             meta_builder=lambda item: {
                 'request_id': item.request_id,
@@ -1498,7 +1643,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             if _planning_trace.get('is_crisis'):
                 _crisis_reply = str(_planning_trace.get('crisis_response') or '')
                 if _crisis_reply:
-                    append_turn(clean_session_id, clean_message, _crisis_reply)
+                    append_turn(clean_session_id, raw_message, _crisis_reply)
                     return _make_note_command_result(
                         reply=_crisis_reply,
                         session_id=clean_session_id,
@@ -1525,7 +1670,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 route_guidance = (route_guidance + '\n\n' + _safety_instruction).strip()
         except SafetyBlockError:
             _block_reply = get_block_response(_safety_language)
-            append_turn(clean_session_id, clean_message, _block_reply)
+            append_turn(clean_session_id, raw_message, _block_reply)
             return _make_note_command_result(
                 reply=_block_reply,
                 session_id=clean_session_id,
@@ -1773,7 +1918,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 trace,
                 'storage_writes',
                 lambda: (
-                    _write_session_history(clean_session_id, clean_message, assistant_reply, side_effects=side_effects),
+                    _write_session_history(clean_session_id, raw_message, assistant_reply, side_effects=side_effects, persona_name=str(persona_action.get('persona_name') or current_entity_for_state or '').strip()),
                     setattr(
                         side_effects,
                         'route_state_path',
@@ -1859,15 +2004,13 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 persona_action=dict(persona_action),
             )
         if not capability_plan.use_heavy_persona_pipeline:
-            simple_selected_persona = ''
-            if route.requires_persona:
-                simple_selected_persona = str(
-                    request.selected_persona
-                    or analysis.selected_head
-                    or analysis.session_persona
-                    or route_memory.previous_persona_name
-                    or ''
-                ).strip()
+            simple_selected_persona = _resolve_explicit_persona_name(
+                effective_selected_persona,
+                request.selected_persona,
+                analysis.selected_head,
+                analysis.session_persona,
+                route_memory.previous_persona_name,
+            )
             built = observability.time_stage(
                 trace,
                 'context_building',
@@ -1895,12 +2038,32 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                     'source_counts': dict(dict(payload.get('context_debug') or {}).get('source_counts') or {}),
                 },
             )
+            message_vector_runtime_payload = observability.time_stage(
+                trace,
+                'message_vector_runtime',
+                lambda: build_runtime_message_vector_payload(
+                    clean_session_id,
+                    message_text=clean_message,
+                    role='user',
+                    persona_name=str(built.get('persona_name') or simple_selected_persona or '').strip(),
+                ),
+                meta_builder=lambda payload: {
+                    'context_window': len(list(payload.get('context_window') or [])),
+                    'history_flow': list(payload.get('history_flow') or []),
+                    'transition_type': str(dict(payload.get('transition_interpretation') or {}).get('type') or ''),
+                },
+            )
+            built['message_vector_runtime'] = dict(message_vector_runtime_payload)
+            vector_guidance = _render_message_vector_guidance(message_vector_runtime_payload)
+            if vector_guidance:
+                route_guidance = (route_guidance + '\n\n' + vector_guidance).strip()
             context_sources_used = [
                 source
                 for source, enabled in (
                     ('session_history', bool(str(built.get('recent_dialogue') or '').strip())),
                     ('knowledge_graph', bool(str(built.get('graph_context') or '').strip())),
                     ('persona_graph', bool(str(built.get('persona_block') or '').strip())),
+                    ('message_vector_runtime', bool(dict(built.get('message_vector_runtime') or {}))),
                 )
                 if enabled
             ]
@@ -1924,7 +2087,9 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                     recent_exchange=str(built.get('recent_dialogue') or '')[:600],
                 )
             else:
+                _speech_plan = None
                 # ── LEGACY STAGED PROMPT PATH (no cognitive output) ──────────
+                _mvr = dict(built.get('message_vector_runtime') or {})
                 prompt = _call_build_chat_prompt_compat(
                     question=clean_message,
                     internal_question=reasoning_message,
@@ -1935,6 +2100,9 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                     semantic_focus=dict(dict(built.get('context_debug') or {}).get('semantic_focus') or {}),
                     route_guidance_block=route_guidance,
                     answer_perspective=_answer_perspective_for_route(route),
+                    user_persona_name=str(request.user_persona_name or '').strip(),
+                    context_matrix=list(_mvr.get('context_matrix') or []),
+                    current_vector=dict(_mvr.get('current_vector') or {}),
                 )
             logical_context = _logical_context_snapshot(built)
             simple_persona_selected = bool(simple_selected_persona)
@@ -1969,31 +2137,66 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 status = runtime_status_snapshot()
                 if str(dict(status or {}).get('mode') or '') == 'degraded':
                     if route.selected_route in {'lightweight_conversation', 'persona_chat_fast_path'} and simple_persona_selected:
-                        reply = deterministic or _lightweight_persona_fallback_reply(
-                            language=response_language,
-                            persona_name=str(built.get('persona_name') or simple_selected_persona or '').strip(),
-                        )
+                        reply = deterministic or fallback_chat_reply(language=response_language, persona_selected=simple_persona_selected)
                     else:
                         reply = deterministic or fallback_chat_reply(language=response_language, persona_selected=simple_persona_selected)
                     return reply, True, 'dependency_unavailable', status, None
                 generation_state['invoked'] = True
-                reply = _call_generate_chat_reply_compat(
-                    prompt=prompt,
-                    language=response_language,
-                    persona_selected=simple_persona_selected,
-                    allow_builtin_fallback=False,
-                    max_tokens_override=_route_output_budget_with_learning(route, trace_learning),
-                    role_override=simple_chat_role,
-                )
+                # ── FAST PATH: model-aware raw completion (no chat API) ──────
+                # Qwen3.x: pre-filled <think> skips reasoning (1.5–4s).
+                # Mistral/LLaMA-family: direct [INST] prompt, no thinking tokens.
+                # Falls through to legacy generate_chat_reply if unavailable.
+                reply = ''
+                if _speech_plan is not None:
+                    try:
+                        from src.utils.local_llm_provider import get_role_llm_instance
+                        from .speech_planner import (
+                            mistral_fast_respond as _mfr,
+                            qwen_fast_respond as _qfr,
+                        )
+                        _llm_instance = get_role_llm_instance(simple_chat_role)
+                        if _llm_instance is None:
+                            _llm_instance = get_role_llm_instance('general')
+                        if _llm_instance is not None:
+                            _hist = _recent_exchange_pairs(
+                                list(list(built.get('recent_dialogue_turns') or []) or []),
+                                pair_limit=3,
+                            ) if built.get('recent_dialogue_turns') else []
+                            _model_path = str(getattr(_llm_instance, 'model_path', '') or '').lower()
+                            _is_qwen = 'qwen' in _model_path or 'nanbeige' in _model_path
+                            if _is_qwen:
+                                reply = _qfr(
+                                    _speech_plan,
+                                    clean_message,
+                                    _llm_instance,
+                                    persona_system=str(built.get('persona_block') or '')[:300],
+                                    history=_hist or None,
+                                )
+                            else:
+                                reply = _mfr(
+                                    _speech_plan,
+                                    clean_message,
+                                    _llm_instance,
+                                    persona_system=str(built.get('persona_block') or '')[:300],
+                                    history=_hist or None,
+                                )
+                    except Exception:
+                        reply = ''
+                if not str(reply or '').strip():
+                    reply = _call_generate_chat_reply_compat(
+                        prompt=prompt,
+                        language=response_language,
+                        persona_selected=simple_persona_selected,
+                        allow_builtin_fallback=False,
+                        max_tokens_override=_route_output_budget_with_learning(route, trace_learning),
+                        role_override=simple_chat_role,
+                    )
                 used_fallback = not str(reply or '').strip()
                 fallback_reason = ''
                 if used_fallback:
                     fallback_reason = 'model_fallback'
                     if route.selected_route in {'lightweight_conversation', 'persona_chat_fast_path'} and simple_persona_selected:
-                        reply = deterministic or _lightweight_persona_fallback_reply(
-                            language=response_language,
-                            persona_name=str(built.get('persona_name') or simple_selected_persona or '').strip(),
-                        )
+                        reply = deterministic or fallback_chat_reply(language=response_language, persona_selected=simple_persona_selected)
                     else:
                         reply = deterministic or fallback_chat_reply(language=response_language, persona_selected=simple_persona_selected)
                 return reply, used_fallback, fallback_reason, {}, None
@@ -2076,6 +2279,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                             semantic_focus=dict(dict(built.get('context_debug') or {}).get('semantic_focus') or {}),
                             route_guidance_block=_repair_route_guidance(route_guidance),
                             answer_perspective=_answer_perspective_for_route(route),
+                            user_persona_name=str(request.user_persona_name or '').strip(),
                         )
                     reset_last_model_call_meta('chat')
                     repaired_reply = _call_generate_chat_reply_compat(
@@ -2102,6 +2306,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                             semantic_focus=dict(dict(built.get('context_debug') or {}).get('semantic_focus') or {}),
                             route_guidance_block=_style_guard_route_guidance(route_guidance, route),
                             answer_perspective=_answer_perspective_for_route(route),
+                            user_persona_name=str(request.user_persona_name or '').strip(),
                         )
                     reset_last_model_call_meta('chat')
                     repaired_reply = _call_generate_chat_reply_compat(
@@ -2235,11 +2440,16 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 *_operator_messages_from_model_budget(model_budget),
                 *operator_messages,
             ]
+            if dict(built.get('message_vector_runtime') or {}):
+                operator_messages = [
+                    'The reply was shaped with the P1..P49 message vector layer built from the corrected context matrix.',
+                    *operator_messages,
+                ]
             repair_status = observability.time_stage(
                 trace,
                 'storage_writes',
                 lambda: (
-                    _write_session_history(clean_session_id, clean_message, assistant_reply, side_effects=side_effects),
+                    _write_session_history(clean_session_id, raw_message, assistant_reply, side_effects=side_effects, persona_name=str(built.get('persona_name') or simple_selected_persona or '').strip()),
                     setattr(
                         side_effects,
                         'route_state_path',
@@ -2328,6 +2538,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                     'context_sources_used': list(context_sources_used),
                     'fallback_strategy': {},
                     'chat_orchestration': dict(chat_orchestration),
+                    'message_vector_runtime': dict(built.get('message_vector_runtime') or {}),
                 },
                 context_preview={
                     'estimated_tokens': int(built.get('estimated_tokens') or 0),
@@ -2338,6 +2549,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                     'model_budget': dict(model_budget),
                     'trace_learning': trace_learning.to_dict(),
                     'chat_orchestration': dict(chat_orchestration),
+                    'message_vector_runtime': dict(built.get('message_vector_runtime') or {}),
                     'source_counts': dict(dict(built.get('context_debug') or {}).get('source_counts') or {}),
                     'selected_items': list(dict(built.get('context_debug') or {}).get('selected_items') or []),
                 },
@@ -2378,13 +2590,23 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             lambda: [DEFAULT_CLASSIFIER.classify(feature_row) for feature_row in features],
             meta_builder=lambda rows: {'classified_entities': len(rows)},
         )
+        explicit_primary_name = _resolve_explicit_persona_name(
+            effective_selected_persona,
+            request.selected_persona,
+            analysis.selected_head,
+            analysis.session_persona,
+            route_memory.previous_persona_name,
+        )
 
         def _resolve_heads() -> tuple[list[dict[str, Any]], dict[str, Any] | None, str]:
             prepared_heads = prepare_heads(analysis=analysis, classifications=classifications, graph_store=graph_store)
             primary = select_primary_head(analysis=analysis, prepared_heads=prepared_heads)
             primary_name = ''
             if primary and primary.get('head') is not None:
-                primary_name = normalize_personality_name(primary['head'].name)
+                candidate = normalize_personality_name(primary['head'].name)
+                primary_name = '' if _is_system_persona_name(candidate) else candidate
+            if not primary_name and explicit_primary_name:
+                primary_name = explicit_primary_name
             return prepared_heads, primary, primary_name
 
         prepared_heads, primary, primary_name = observability.time_stage(
@@ -2520,6 +2742,25 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 'packed_candidate_counts': dict(dict(dict(payload.get('context_debug') or {}).get('stages') or {}).get('pack_context') or {}),
             },
         )
+        message_vector_runtime_payload = observability.time_stage(
+            trace,
+            'message_vector_runtime',
+            lambda: build_runtime_message_vector_payload(
+                clean_session_id,
+                message_text=clean_message,
+                role='user',
+                persona_name=str(built.get('persona_name') or primary_name or '').strip(),
+            ),
+            meta_builder=lambda payload: {
+                'context_window': len(list(payload.get('context_window') or [])),
+                'history_flow': list(payload.get('history_flow') or []),
+                'transition_type': str(dict(payload.get('transition_interpretation') or {}).get('type') or ''),
+            },
+        )
+        built['message_vector_runtime'] = dict(message_vector_runtime_payload)
+        vector_guidance = _render_message_vector_guidance(message_vector_runtime_payload)
+        if vector_guidance:
+            route_guidance = (route_guidance + '\n\n' + vector_guidance).strip()
         working_context = observability.time_stage(
             trace,
             'working_context_construction',
@@ -2634,6 +2875,9 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 semantic_focus=dict(semantic_focus or dict(dict(built.get('context_debug') or {}).get('semantic_focus') or {})),
                 route_guidance_block=route_guidance,
                 answer_perspective='persona',
+                user_persona_name=str(request.user_persona_name or '').strip(),
+                context_matrix=list(dict(built.get('message_vector_runtime') or {}).get('context_matrix') or []),
+                current_vector=dict(dict(built.get('message_vector_runtime') or {}).get('current_vector') or {}),
             )
         logical_context = _logical_context_snapshot(built)
         heavy_chat_role = str(chat_orchestration.get('primary_role') or _chat_role_for_request(persona_selected=bool(primary_name))).strip() or _chat_role_for_request(persona_selected=bool(primary_name))
@@ -2792,6 +3036,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 ('session_history', bool(str(built.get('recent_dialogue') or '').strip())),
                 ('knowledge_graph', bool(str(built.get('graph_context') or '').strip())),
                 ('persona_graph', bool(str(built.get('persona_block') or '').strip())),
+                ('message_vector_runtime', bool(dict(built.get('message_vector_runtime') or {}))),
             )
             if enabled
         ]
@@ -2859,6 +3104,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                     )
                 ),
                 answer_perspective='persona',
+                user_persona_name=str(request.user_persona_name or '').strip(),
             )
             reset_last_model_call_meta('chat')
             repaired_reply = _call_generate_chat_reply_compat(
@@ -2994,7 +3240,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             trace,
             'storage_writes',
             lambda: (
-                _write_session_history(clean_session_id, clean_message, assistant_reply, side_effects=side_effects),
+                _write_session_history(clean_session_id, raw_message, assistant_reply, side_effects=side_effects, persona_name=primary_name),
                 _record_persona_reaction(primary_name, analysis.situation, assistant_reply, side_effects=side_effects),
                 _capture_persona_dossier_update(
                     primary_name,
@@ -3117,6 +3363,11 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             *operator_messages,
             f"The current interaction role was selected as '{social_role.role}' based on persona structure, mood signals, and situation context.",
         ]
+        if dict(built.get('message_vector_runtime') or {}):
+            operator_messages = [
+                'The reply was shaped with the P1..P49 message vector layer built from the corrected context matrix.',
+                *operator_messages,
+            ]
         return ChatTurnResult(
             assistant_reply=assistant_reply,
             response_language=response_language,
@@ -3182,6 +3433,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 'trace_learning': trace_learning.to_dict(),
                 'chat_orchestration': dict(chat_orchestration),
                 'fallback_strategy': fallback_decision.to_dict() if fallback_decision is not None else {},
+                'message_vector_runtime': dict(built.get('message_vector_runtime') or {}),
             },
             context_preview={
                 'estimated_tokens': int(built.get('estimated_tokens') or 0),
@@ -3200,6 +3452,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 'response_plan': response_plan.to_dict(),
                 'chat_orchestration': dict(chat_orchestration),
                 'fallback_strategy': fallback_decision.to_dict() if fallback_decision is not None else {},
+                'message_vector_runtime': dict(built.get('message_vector_runtime') or {}),
                 'source_counts': dict(dict(built.get('context_debug') or {}).get('source_counts') or {}),
                 'selected_items': list(dict(built.get('context_debug') or {}).get('selected_items') or []),
             },
@@ -3227,6 +3480,7 @@ def generate_response(
     selected_persona: str = '',
     explicit_context: str = '',
     language: str = 'en',
+    user_persona_name: str = '',
 ) -> dict[str, Any]:
     result = run_chat_turn(
         ChatTurnRequest(
@@ -3235,6 +3489,7 @@ def generate_response(
             selected_persona=selected_persona,
             explicit_context=explicit_context,
             language=language,
+            user_persona_name=user_persona_name,
         )
     )
     return result.to_dict(include_side_effects=get_runtime_config().features.include_side_effects_in_response)

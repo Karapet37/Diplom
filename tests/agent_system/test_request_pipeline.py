@@ -400,6 +400,58 @@ def test_request_pipeline_validation_requires_dialogue_review_structure() -> Non
     assert validation.repair_strategy == 'regenerate_meta'
 
 
+def test_request_pipeline_validation_rejects_generation_scaffold_leak() -> None:
+    route = RouteDecision(
+        selected_route='persona_graph_reasoning',
+        detected_language='ru',
+        intent_type='question',
+        interaction_mode='persona_dialogue',
+        requires_llm=True,
+        validation_mode='persona_consistency',
+    )
+
+    validation = validate_response(
+        route=route,
+        reply='# Анализ ситуации\n**Ключевая проблема:** контекст неясен.\n\n**Внешний ответ персонажа:** Ладно, скажу проще.',
+        fallback_triggered=False,
+        fallback_reason_code='',
+        history_used=True,
+        graph_used=True,
+        persona_used=True,
+        history_available=True,
+    )
+
+    assert validation.ok is False
+    assert validation.mismatch_reason == 'reply_leaked_generation_scaffold'
+    assert validation.repair_strategy == 'regenerate_style_guard'
+
+
+def test_request_pipeline_validation_rejects_review_notes_scaffold_leak() -> None:
+    route = RouteDecision(
+        selected_route='persona_chat_fast_path',
+        detected_language='hy',
+        intent_type='question',
+        interaction_mode='persona_dialogue',
+        requires_llm=True,
+        validation_mode='persona_consistency',
+    )
+
+    validation = validate_response(
+        route=route,
+        reply='# Answer\nԲարև։\n\n**Review Notes:**\n- draft is in Armenian.\n**Issues Identified:**\n- persona inconsistency.',
+        fallback_triggered=False,
+        fallback_reason_code='',
+        history_used=True,
+        graph_used=False,
+        persona_used=True,
+        history_available=True,
+    )
+
+    assert validation.ok is False
+    assert validation.mismatch_reason == 'reply_leaked_generation_scaffold'
+    assert validation.repair_strategy == 'regenerate_style_guard'
+
+
 def test_request_pipeline_validation_detects_output_budget_truncation() -> None:
     route = RouteDecision(
         selected_route='persona_graph_reasoning',

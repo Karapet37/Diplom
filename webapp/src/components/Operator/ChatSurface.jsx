@@ -2,9 +2,37 @@ import React from 'react';
 
 import { ChatGraphPanel } from '../Chat/ChatGraphPanel';
 
+const VECTOR_HIDDEN_DEFAULTS = new Set([
+  'absent',
+  'neutral',
+  'unclear',
+  'continuation',
+  'defined',
+  'direct',
+  'literal',
+  'statement',
+  'non_answer',
+  'independent',
+  'opening_new_direction',
+  'calm',
+]);
+
 function renderKeyValues(value) {
   if (!value || typeof value !== 'object') return [];
   return Object.entries(value);
+}
+
+function summarizeRuntimeVector(vector) {
+  if (!vector || typeof vector !== 'object') return [];
+  const labels = [];
+  for (const [interpreterId, choice] of Object.entries(vector)) {
+    const main = String(choice?.main || '').trim();
+    if (!main || VECTOR_HIDDEN_DEFAULTS.has(main)) continue;
+    const extras = Array.isArray(choice?.extra) ? choice.extra.filter((item) => item && item !== main).slice(0, 2) : [];
+    labels.push(`${interpreterId}=${main}${extras.length ? ` (+${extras.join(', ')})` : ''}`);
+    if (labels.length >= 8) break;
+  }
+  return labels;
 }
 
 function SafetyBadge({ result }) {
@@ -57,12 +85,16 @@ function TraceStageTable({ trace }) {
   );
 }
 
-function ContextPreview({ preview }) {
+function ContextPreview({ preview, t }) {
   if (!preview) {
     return <p className="empty-inline">No context preview yet.</p>;
   }
   const selectedItems = Array.isArray(preview.selected_items) ? preview.selected_items : [];
   const sourceCounts = preview.source_counts || {};
+  const vectorRuntime = preview.message_vector_runtime || {};
+  const vectorLabels = summarizeRuntimeVector(vectorRuntime.current_vector);
+  const flow = Array.isArray(vectorRuntime.history_flow) ? vectorRuntime.history_flow.filter(Boolean) : [];
+  const transition = vectorRuntime.transition_interpretation || {};
   return (
     <div className="operator-stack">
       <div className="operator-kv-grid">
@@ -75,6 +107,22 @@ function ContextPreview({ preview }) {
         <div className="operator-card-block">
           <strong>Graph context</strong>
           <pre className="operator-pre">{String(preview.graph_context).trim()}</pre>
+        </div>
+      ) : null}
+      {(vectorLabels.length || flow.length || transition.type) ? (
+        <div className="operator-card-block">
+          <strong>P1..P49 runtime</strong>
+          {vectorLabels.length ? <p>{vectorLabels.join(' | ')}</p> : null}
+          {flow.length ? <p><strong>{t('annotation_history_flow')}</strong> {flow.join(' → ')}</p> : null}
+          {transition.type ? (
+            <p>
+              <strong>{t('annotation_transition')}</strong>
+              {' '}
+              {transition.type}
+              {Array.isArray(transition.from) && transition.from.length ? ` | from: ${transition.from.join(', ')}` : ''}
+              {Array.isArray(transition.to) && transition.to.length ? ` | to: ${transition.to.join(', ')}` : ''}
+            </p>
+          ) : null}
         </div>
       ) : null}
       <div className="operator-card-block">
@@ -100,29 +148,53 @@ function ContextPreview({ preview }) {
 
 export function ChatSurface({
   session,
+  annotationWorkspace,
+  optimisticMessages,
   value,
   onChange,
   running,
   progress,
+  composerResetToken,
   onRun,
   lastChatResult,
   activeTrace,
   safetyResult,
+  trainingMode,
+  onSaveAnnotation,
+  selectedPersonality,
+  personas,
+  userPersonaName,
+  onUserPersonaChange,
   t,
 }) {
   const selection = lastChatResult?.persona_selection || {};
   const response = lastChatResult?.persona_response || {};
   const analysis = lastChatResult?.analysis || {};
+  const activePersonaName = [
+    selectedPersonality,
+    selection.persona_name,
+    response.persona_name,
+    lastChatResult?.persona_name,
+  ].map((value) => String(value || '').trim()).find(Boolean) || '';
   return (
     <div className="operator-surface-grid chat-surface-grid">
       <ChatGraphPanel
         session={session}
+        annotationWorkspace={annotationWorkspace}
+        optimisticMessages={optimisticMessages}
         value={value}
         onChange={onChange}
         running={running}
         progress={progress}
+        composerResetToken={composerResetToken}
         onRun={onRun}
         safetyResult={safetyResult}
+        trainingMode={trainingMode}
+        onSaveAnnotation={onSaveAnnotation}
+        activePersonaName={activePersonaName}
+        personas={personas}
+        userPersonaName={userPersonaName}
+        onUserPersonaChange={onUserPersonaChange}
         t={t}
       />
       <aside className="workspace-panel glass-panel operator-inspector-panel">
@@ -152,7 +224,7 @@ export function ChatSurface({
             <h3>{t('chat_persona_selection')}</h3>
             {lastChatResult ? (
               <ul className="dense-list">
-                <li><strong>persona</strong> {selection.persona_name || '—'}</li>
+                <li><strong>persona</strong> {selection.persona_name || activePersonaName || '—'}</li>
                 <li><strong>source</strong> {selection.source || '—'}</li>
                 <li><strong>reason</strong> {selection.reason || '—'}</li>
                 {Array.isArray(selection.evidence) && selection.evidence.length ? (
@@ -184,7 +256,7 @@ export function ChatSurface({
 
           <section className="operator-card-block">
             <h3>{t('chat_context_preview')}</h3>
-            <ContextPreview preview={lastChatResult?.context_preview} />
+            <ContextPreview preview={lastChatResult?.context_preview} t={t} />
           </section>
 
           <section className="operator-card-block">

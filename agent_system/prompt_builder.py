@@ -11,6 +11,95 @@ from .semantic_routing import infer_semantic_focus, render_semantic_focus_guidan
 
 _PROMPTS_DIR = Path(__file__).resolve().parent / 'prompts'
 
+_HIDDEN_VECTOR_DEFAULTS = frozenset({
+    'absent', 'neutral', 'unclear', 'continuation', 'defined', 'direct',
+    'literal', 'statement', 'non_answer', 'independent', 'opening_new_direction', 'calm',
+})
+
+
+def _clip_context_matrix_by_p51(
+    context_matrix: list[dict[str, Any]],
+    current_vector: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Use P51 from the current vector to determine how much of the context_matrix
+    is relevant:
+      - full_window      → use all provided entries
+      - since_topic_shift → find the last hard shift and keep only from there
+      - last_turn_only   → keep only the last entry
+      - anchor_only      → empty (anchor-based context handled elsewhere)
+    """
+    if not context_matrix:
+        return context_matrix
+    p51_main = str(((current_vector or {}).get('P51') or {}).get('main') or 'full_window').strip()
+    if p51_main == 'full_window':
+        return context_matrix
+    if p51_main == 'last_turn_only':
+        return context_matrix[-1:]
+    if p51_main == 'anchor_only':
+        return []
+    if p51_main == 'since_topic_shift':
+        # find the most recent entry where P50 = hard_shift or soft_shift
+        for i in range(len(context_matrix) - 1, -1, -1):
+            p50 = str((dict(context_matrix[i].get('vector') or {}).get('P50') or {}).get('main') or '')
+            if p50 in ('hard_shift', 'soft_shift'):
+                return context_matrix[i:]
+        return context_matrix  # no shift found, return full window
+    return context_matrix
+
+
+def render_context_matrix_block(
+    context_matrix: list[dict[str, Any]],
+    *,
+    max_turns: int = 4,
+    language: str = 'en',
+    current_vector: dict[str, Any] | None = None,
+) -> str:
+    """
+    Convert context_matrix (list of recent messages with P-vectors) into a
+    human-readable block for the LLM prompt.
+
+    Uses P51 to clip context to the relevant window before rendering.
+    Each entry in context_matrix is: {message_id, role, display_text, vector}
+    where vector = {P_id: {main: str, extra: [str]}, ...}
+    """
+    if not context_matrix:
+        return ''
+    clipped = _clip_context_matrix_by_p51(context_matrix, current_vector=current_vector)
+    if not clipped:
+        return ''
+    is_ru = str(language or '').strip().lower() in ('ru', 'russian')
+    lines: list[str] = []
+    header = '[ИСТОРИЯ ИНТЕРПРЕТАЦИЙ]' if is_ru else '[INTERPRETATION HISTORY]'
+    note = (
+        'Интерпретации предыдущих реплик по P-модулям (контекстная матрица):'
+        if is_ru
+        else 'P-module interpretations of the recent dialogue turns (context matrix):'
+    )
+    lines.append(header)
+    lines.append(note)
+    window = list(clipped)[-max_turns:]
+    for offset, entry in enumerate(window):
+        role = str(entry.get('role') or '').strip()
+        vector = dict(entry.get('vector') or {})
+        text_snippet = str(entry.get('display_text') or '').strip()[:60]
+        turn_idx = -(len(window) - offset)  # e.g. -3, -2, -1
+        role_label = 'пользователь' if is_ru and role == 'user' else ('ассистент' if is_ru else role)
+        labels: list[str] = []
+        for _pid, coord in sorted(vector.items()):
+            if not isinstance(coord, dict):
+                continue
+            main = str(coord.get('main') or '').strip()
+            extra = [str(e).strip() for e in list(coord.get('extra') or []) if str(e).strip()]
+            if not main or main in _HIDDEN_VECTOR_DEFAULTS:
+                continue
+            cell = main + (f' + {", ".join(extra)}' if extra else '')
+            labels.append(cell)
+        label_str = ' | '.join(labels[:6]) if labels else '—'
+        snippet_part = f' «{text_snippet}»' if text_snippet else ''
+        lines.append(f'  t{turn_idx:+d} ({role_label}){snippet_part}: {label_str}')
+    return '\n'.join(lines)
+
 
 @lru_cache(maxsize=32)
 def load_prompt_stage(name: str) -> str:
@@ -70,25 +159,25 @@ def _section_budget(answer_perspective: str, section: str) -> tuple[int, int, bo
         budgets = {
             'persona_block': (360, 6, False),
             'graph_context': (180, 4, False),
-            'recent_dialogue': (220, 6, False),
+            'recent_dialogue': (360, 8, False),
             'reviewed_context_block': (180, 4, False),
-            'route_guidance_block': (120, 4, False),
+            'route_guidance_block': (180, 6, False),
             'question': (180, 3, True),
         }
     elif persona_mode:
         budgets = {
             'persona_block': (420, 7, False),
             'graph_context': (180, 4, False),
-            'recent_dialogue': (150, 5, False),
+            'recent_dialogue': (360, 8, False),
             'reviewed_context_block': (180, 4, False),
-            'route_guidance_block': (120, 5, False),
+            'route_guidance_block': (220, 7, False),
             'social_role_block': (72, 2, True),
             'mood_research_block': (48, 1, True),
             'question': (180, 3, True),
         }
     else:
         budgets = {
-            'route_guidance_block': (100, 4, False),
+            'route_guidance_block': (180, 6, False),
             'question': (180, 3, True),
             'state_transition_block': (72, 2, True),
             'procedure_block': (96, 3, True),
@@ -98,7 +187,7 @@ def _section_budget(answer_perspective: str, section: str) -> tuple[int, int, bo
             'social_role_block': (56, 2, True),
             'mood_research_block': (36, 1, True),
             'graph_context': (180, 4, False),
-            'recent_dialogue': (120, 4, False),
+            'recent_dialogue': (220, 6, False),
         }
     return budgets.get(section, (120, 4, False))
 
@@ -129,6 +218,9 @@ def _persona_activation_prompt(
     social_role_block: str,
     mood_research_block: str,
     language: str,
+    user_persona_name: str = '',
+    context_matrix: list[dict[str, Any]] | None = None,
+    current_vector: dict[str, Any] | None = None,
 ) -> str:
     normalized_language = normalize_language_code(language, fallback='en')
     is_russian = normalized_language == 'ru'
@@ -140,9 +232,16 @@ def _persona_activation_prompt(
     social_role_block = _compact_block(social_role_block, max_tokens_equivalent=_section_budget('persona', 'social_role_block')[0], max_lines=_section_budget('persona', 'social_role_block')[1], collapse_to_sentences=True)
     mood_research_block = _compact_block(mood_research_block, max_tokens_equivalent=_section_budget('persona', 'mood_research_block')[0], max_lines=_section_budget('persona', 'mood_research_block')[1], collapse_to_sentences=True)
     question = _compact_block(str(question or '').strip(), max_tokens_equivalent=_section_budget('persona', 'question')[0], max_lines=_section_budget('persona', 'question')[1], collapse_to_sentences=True)
+    _lang_instruction = f"Respond in {language_label(normalized_language)}."
+    if is_russian:
+        _lang_instruction = "Respond in Russian. СТРОГО ОТВЕЧАЙ ПО-РУССКИ."
+    elif normalized_language == 'hy':
+        _lang_instruction = "Respond in Armenian. Պատասխանիր հայերեն։"
+    elif normalized_language == 'zh':
+        _lang_instruction = "Respond in Chinese. 请用中文回答。"
     blocks: list[str] = [
         _staged_prompt_header('final_generator'),
-        f"Respond in {language_label(normalized_language)}.",
+        _lang_instruction,
     ]
     if is_russian:
         blocks.extend(
@@ -172,13 +271,21 @@ def _persona_activation_prompt(
         blocks.extend(
             [
                 '[RESPONSE FORMAT]',
-                '1. внешний ответ персонажа',
-                '2. короткая внутренняя мысль в скобках',
-                'Внутренняя мысль должна быть короткой, живой и без анализа.',
-                '[USER INPUT]',
-                question,
+                'Верни только внешнюю реплику персонажа обычным plain text.',
+                'Не добавляй внутреннюю мысль, скобки, заголовки, списки, markdown или пояснения.',
             ]
         )
+        _ctx_matrix_block_ru = render_context_matrix_block(list(context_matrix or []), language='ru', current_vector=dict(current_vector or {}))
+        if _ctx_matrix_block_ru:
+            blocks.append(_ctx_matrix_block_ru)
+        _clean_user_persona = str(user_persona_name or '').strip()
+        if _clean_user_persona:
+            blocks.extend([
+                '[СОБЕСЕДНИК]',
+                f'Собеседник, с которым ты говоришь, — это {_clean_user_persona}.',
+                'Учитывай это при ответе: твоё отношение, тон и манера должны соответствовать тому, кто именно с тобой говорит.',
+            ])
+        blocks.extend(['[USER INPUT]', question])
         if reviewed_context_block:
             blocks.extend(['[REVIEWED CONTEXT]', reviewed_context_block])
         if graph_context:
@@ -215,13 +322,21 @@ def _persona_activation_prompt(
     blocks.extend(
         [
             '[RESPONSE FORMAT]',
-            '1. the outer in-character reply',
-            '2. one short inner thought in parentheses',
-            'The inner thought must stay brief and non-analytical.',
-            '[USER INPUT]',
-            question,
+            'Return only the in-character visible reply as plain text.',
+            'Do not add inner thoughts, brackets, headings, bullet lists, markdown, or explanations.',
         ]
     )
+    _ctx_matrix_block_en = render_context_matrix_block(list(context_matrix or []), language='en', current_vector=dict(current_vector or {}))
+    if _ctx_matrix_block_en:
+        blocks.append(_ctx_matrix_block_en)
+    _clean_user_persona_en = str(user_persona_name or '').strip()
+    if _clean_user_persona_en:
+        blocks.extend([
+            '[INTERLOCUTOR]',
+            f'The person speaking to you is {_clean_user_persona_en}.',
+            'Factor this into your response: your attitude, tone, and manner should reflect who is actually speaking to you.',
+        ])
+    blocks.extend(['[USER INPUT]', question])
     if reviewed_context_block:
         blocks.extend(['[REVIEWED CONTEXT]', reviewed_context_block])
     if graph_context:
@@ -253,9 +368,16 @@ def _persona_dialogue_analysis_prompt(
     reviewed_context_block = _compact_block(reviewed_context_block, max_tokens_equivalent=_section_budget('persona_review', 'reviewed_context_block')[0], max_lines=_section_budget('persona_review', 'reviewed_context_block')[1])
     route_guidance_block = _compact_block(route_guidance_block, max_tokens_equivalent=_section_budget('persona_review', 'route_guidance_block')[0], max_lines=_section_budget('persona_review', 'route_guidance_block')[1])
     question = _compact_block(str(question or '').strip(), max_tokens_equivalent=_section_budget('persona_review', 'question')[0], max_lines=_section_budget('persona_review', 'question')[1], collapse_to_sentences=True)
+    _lang_instruction2 = f"Respond in {language_label(normalized_language)}."
+    if is_russian:
+        _lang_instruction2 = "Respond in Russian. СТРОГО ОТВЕЧАЙ ПО-РУССКИ."
+    elif normalized_language == 'hy':
+        _lang_instruction2 = "Respond in Armenian. Պատասխանիր հայերեն։"
+    elif normalized_language == 'zh':
+        _lang_instruction2 = "Respond in Chinese. 请用中文回答。"
     blocks: list[str] = [
         _staged_prompt_header('final_generator'),
-        f"Respond in {language_label(normalized_language)}.",
+        _lang_instruction2,
     ]
     if is_russian:
         blocks.extend(
@@ -351,6 +473,9 @@ def build_chat_prompt(
     semantic_focus: dict[str, Any] | None = None,
     route_guidance_block: str = '',
     answer_perspective: str = 'assistant',
+    user_persona_name: str = '',
+    context_matrix: list[dict[str, Any]] | None = None,
+    current_vector: dict[str, Any] | None = None,
 ) -> str:
     reply_language = language_label(normalize_language_code(language, fallback='en'))
     effective_focus = dict(semantic_focus or infer_semantic_focus(question=str(internal_question or question or '')))
@@ -367,6 +492,9 @@ def build_chat_prompt(
             social_role_block=social_role_block,
             mood_research_block=mood_research_block,
             language=language,
+            user_persona_name=user_persona_name,
+            context_matrix=context_matrix,
+            current_vector=current_vector,
         )
     if dialogue_review_mode:
         return _persona_dialogue_analysis_prompt(
@@ -389,9 +517,17 @@ def build_chat_prompt(
     mood_research_block = _compact_block(mood_research_block, max_tokens_equivalent=_section_budget('assistant', 'mood_research_block')[0], max_lines=_section_budget('assistant', 'mood_research_block')[1], collapse_to_sentences=True)
     graph_context = _compact_block(graph_context, max_tokens_equivalent=_section_budget('assistant', 'graph_context')[0], max_lines=_section_budget('assistant', 'graph_context')[1])
     recent_dialogue = _compact_block(recent_dialogue, max_tokens_equivalent=_section_budget('assistant', 'recent_dialogue')[0], max_lines=_section_budget('assistant', 'recent_dialogue')[1])
+    _norm_lang = normalize_language_code(language, fallback='en')
+    _lang_instr = f'Respond in {reply_language}.'
+    if _norm_lang == 'ru':
+        _lang_instr = 'Respond in Russian. СТРОГО ОТВЕЧАЙ ПО-РУССКИ.'
+    elif _norm_lang == 'hy':
+        _lang_instr = 'Respond in Armenian. Պատասխանիր հայերեն։'
+    elif _norm_lang == 'zh':
+        _lang_instr = 'Respond in Chinese. 请用中文回答。'
     blocks = [
         _staged_prompt_header('final_generator'),
-        f'Respond in {reply_language}.',
+        _lang_instr,
         'Generate the final reply from the reviewed current context, not from the raw user message alone.',
         (
             'Answer as the persona in first person, not as an assistant or helpdesk.'
@@ -415,6 +551,9 @@ def build_chat_prompt(
     if route_guidance_block:
         blocks.extend(['Route guidance:', route_guidance_block])
     blocks.extend(render_semantic_focus_guidance(effective_focus))
+    _clean_user_persona_asst = str(user_persona_name or '').strip()
+    if _clean_user_persona_asst:
+        blocks.extend([f'The user is speaking as: {_clean_user_persona_asst}.'])
     blocks.extend(['User question:', question])
     if state_transition_block:
         blocks.extend(['State transition:', state_transition_block])

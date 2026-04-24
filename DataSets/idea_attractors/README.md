@@ -1,42 +1,69 @@
 # Idea Attractors Dataset
 
-This folder contains a seed dataset of short sayings, parables, fables, slogans, thought-stoppers, and false or harmful rallying ideas that people use to coordinate, moralize, simplify complexity, or form group identity.
+This folder contains a seed dataset of short sayings, parables, fables, slogans, thought-stoppers, and harmful rallying ideas that people use to coordinate, moralize, simplify complexity, or form group identity.
 
 It is intentionally mixed. Some records capture durable folk wisdom, some capture movement language, and some capture manipulative or conspiratorial phrases included for analysis rather than endorsement.
 
 ## Files
 
-- `idea_attractors_seed.jsonl`: curated JSONL corpus with one record per line.
+- `idea_attractors_seed.jsonl`
+  - curated JSONL corpus with one record per line
+
+## Used By
+
+- `agent_system/dataset_layer.py`
+  - maps `quality_label` values from this corpus into offline targets for the cognitive pipeline
+- `tests/agent_system/test_cognitive_pipeline_attractors.py`
+  - uses the seed file as a real-behavior regression fixture for wise, misleading, mobilizing, and harmful content
+- `scripts/train_pipeline.py`
+  - can include these tuples when building offline train/test sets for `P1` and `P6`
+
+The dataset is for evaluation, calibration, and training support. It is not a source of direct chat responses.
 
 ## Schema
 
 Each JSONL record has these fields:
 
-- `id`: stable record identifier.
-- `text`: exact short phrase, title, or belief claim.
-- `form`: one of `proverb`, `parable`, `fable`, `slogan`, `catchphrase`, or `belief_claim`.
-- `cluster`: broad family such as `folk_wisdom`, `religious_story`, `classical_fable`, `movement_politics`, `thought_stopper`, or `conspiracy`.
-- `source_mode`: either `exact_phrase` or `title_plus_curated_summary`.
-- `quality_label`: rough interpretive label.
-- `crowd_pull`: list of mechanisms that help the item spread or gather people.
-- `summary`: short explanation of the idea or the role it plays.
-- `source_name`: source page or source collection used for curation.
-- `source_url`: source link for provenance.
+- `id`
+  - stable record identifier
+- `text`
+  - exact short phrase, title, or belief claim
+- `form`
+  - one of `proverb`, `parable`, `fable`, `slogan`, `catchphrase`, or `belief_claim`
+- `cluster`
+  - broad family such as `folk_wisdom`, `religious_story`, `classical_fable`, `movement_politics`, `thought_stopper`, or `conspiracy`
+- `source_mode`
+  - either `exact_phrase` or `title_plus_curated_summary`
+- `quality_label`
+  - rough interpretive label
+- `crowd_pull`
+  - list of mechanisms that help the item spread or gather people
+- `summary`
+  - short explanation of the idea or the role it plays
+- `source_name`
+  - source page or source collection used for curation
+- `source_url`
+  - source link for provenance
 
 ## Quality Labels
 
-- `wise`: durable practical or moral guidance.
-- `mixed`: partially useful but highly context-dependent.
-- `mobilizing`: mainly a rallying frame for collective action or identity.
-- `misleading`: catchy language that tends to oversimplify or shut down thought.
-- `false_or_harmful`: factually false, dehumanizing, conspiratorial, or dangerous.
+- `wise`
+  - durable practical or moral guidance
+- `mixed`
+  - partially useful but highly context-dependent
+- `mobilizing`
+  - mainly a rallying frame for collective action or identity
+- `misleading`
+  - catchy language that tends to oversimplify or shut down thought
+- `false_or_harmful`
+  - factually false, dehumanizing, conspiratorial, or dangerous
 
 ## Notes
 
 - Exact wording is preserved only for short phrases, titles, slogans, and other brief expressions.
 - Longer stories are represented by title plus a curated summary rather than full text.
-- Harmful items are included to support analysis of group formation, propaganda, and social contagion.
-- This is a seed corpus, not an exhaustive catalog of all such expressions.
+- Harmful items are included to support analysis of propaganda, social contagion, and manipulative group formation.
+- This is a seed corpus, not an exhaustive catalog.
 
 ## Source Set
 

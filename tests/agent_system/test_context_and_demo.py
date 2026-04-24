@@ -240,7 +240,8 @@ def test_build_chat_prompt_persona_mode_uses_role_activation_scaffold() -> None:
     assert '[PERSONA]' in prompt
     assert '[RESPONSE FORMAT]' in prompt
     assert '[USER INPUT]' in prompt
-    assert 'короткая внутренняя мысль в скобках' in prompt
+    assert 'Верни только внешнюю реплику персонажа обычным plain text.' in prompt
+    assert 'короткая внутренняя мысль в скобках' not in prompt
     assert '[KNOWLEDGE GRAPH]' in prompt
     assert '[RECENT DIALOGUE]' in prompt
 

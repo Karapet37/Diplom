@@ -211,11 +211,19 @@ _REJECT_EXACT = {
     'unity',
     'game engine',
     'engine',
+    'generate_persona',
+    'generate',
+    'create_persona',
+    'new_persona',
+    'unnamed',
+    'default',
+    'assistant',
 }
 _REJECT_SUBSTRINGS = (
     'ты пита',
     'unity:',
     '/мой коммент/',
+    'generate_',
 )
 _PERSONA_CREATION_PREFIXES = (
     'create persona',
@@ -1656,6 +1664,25 @@ def _save_index(names: list[str]) -> None:
     write_json(personality_index_path(), {'heads': ordered})
 
 
+def delete_persona_head(name: str) -> bool:
+    """
+    Permanently delete a persona head and remove it from the index.
+    Returns True if the head existed and was deleted, False if not found.
+    """
+    clean = normalize_personality_name(str(name or '').strip())
+    if not clean or _is_system_persona(clean):
+        return False
+    head_path = _head_dir(clean)
+    found = head_path.exists() or clean in _load_index()
+    if not found:
+        return False
+    if head_path.exists():
+        shutil.rmtree(head_path, ignore_errors=True)
+    index = _load_index()
+    _save_index([n for n in index if n != clean])
+    return True
+
+
 def ensure_persona_registry_hygiene() -> dict[str, Any]:
     with _REGISTRY_LOCK:
         original_index = list(_load_index())
@@ -1701,6 +1728,8 @@ def persona_is_registered(name: str) -> bool:
 
 
 def _ensure_head_files(name: str, *, entity_type: str = 'CONCEPT', aliases: list[str] | None = None, source: str = 'system') -> None:
+    if _is_system_persona(name):
+        return
     head_dir = _head_dir(name)
     head_dir.mkdir(parents=True, exist_ok=True)
     slug = normalize_personality_name(name)
@@ -1829,7 +1858,7 @@ def load_persona(name: str) -> HeadBundle | None:
             traits=_normalize_string_list(list(baseline_payload.get('traits') or baseline.traits), limit=_memory_limits().persona_trait_limit),
             aliases=merge_aliases(list(baseline_payload.get('aliases') or baseline.aliases)),
             relations=_validate_relations(list(baseline_payload.get('relations') or baseline.relations)),
-            knowledge=str(baseline_payload.get('knowledge') or baseline.knowledge).strip()[: _memory_limits().persona_knowledge_char_limit],
+            knowledge=str(knowledge or baseline_payload.get('knowledge') or baseline.knowledge).strip()[: _memory_limits().persona_knowledge_char_limit],
             revision=int(baseline_payload.get('revision') or baseline.revision or 1),
             updated_at=str(baseline_payload.get('updated_at') or baseline.updated_at),
             source=str(baseline_payload.get('source') or baseline.source),
@@ -1945,10 +1974,23 @@ def load_persona_graph(name: str) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {'nodes': [], 'edges': []}
 
 
+_SYSTEM_PERSONA_NAMES = frozenset({
+    'generate_persona', 'generate', 'persona', 'default', 'assistant',
+    'create_persona', 'new_persona', 'unnamed', 'unknown',
+})
+
+
+def _is_system_persona(name: str) -> bool:
+    n = str(name or '').strip().lower()
+    return n in _SYSTEM_PERSONA_NAMES or n.startswith('generate_') or not n
+
+
 def list_personas() -> list[dict[str, Any]]:
     ensure_persona_registry_hygiene()
     rows: list[dict[str, Any]] = []
     for name in _load_index():
+        if _is_system_persona(name):
+            continue
         bundle = load_persona(name)
         if bundle is None:
             continue

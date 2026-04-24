@@ -100,6 +100,35 @@ def test_normalize_text_reply_strips_reasoning_blocks_and_control_leaks() -> Non
     assert normalize_text_reply(raw) == "I am Aram Petrosyan, and I still keep my father's steel watch."
 
 
+def test_normalize_text_reply_extracts_visible_reply_from_analysis_scaffold() -> None:
+    raw = """
+1. **Analyze the Request:**
+* **Role:** Final Generator stage.
+* **Safety/Policy:** The user is making a sexually explicit/NSFW statement.
+
+# Ответ
+**Внешний ответ персонажа:** Не занята. Но корону тебе за такой заход не выдам.
+(мысленно: ну хоть не скучно)
+"""
+
+    assert normalize_text_reply(raw) == "Не занята. Но корону тебе за такой заход не выдам."
+
+
+def test_normalize_text_reply_extracts_answer_before_review_notes() -> None:
+    raw = """
+# Answer
+Բարև։ Առանց նավի էլ ես մնում եմ Ջեք, պարզապես ծովի հոտը քիչ է։
+
+---
+**Review Notes:**
+- The draft is in Armenian.
+**Issues Identified:**
+- Persona inconsistency.
+"""
+
+    assert normalize_text_reply(raw) == "Բարև։ Առանց նավի էլ ես մնում եմ Ջեք, պարզապես ծովի հոտը քիչ է։"
+
+
 def test_mode_defaults_use_reserved_output_budgets(monkeypatch) -> None:
     monkeypatch.delenv('LOCAL_GGUF_N_CTX', raising=False)
     monkeypatch.delenv('LOCAL_GGUF_MAX_TOKENS', raising=False)

@@ -201,27 +201,36 @@ def append_session_archive(session_id: str, *, title: str, messages: list[dict[s
     payload = load_session_archive(session_id)
     seen = {
         (
+            str(item.get('message_id') or '').strip(),
             str(item.get('timestamp') or '').strip(),
             str(item.get('role') or '').strip(),
-            str(item.get('message') or '').strip(),
+            str(item.get('raw_text') or item.get('display_text') or item.get('message') or ''),
         )
         for item in list(payload.get('archived_messages') or [])
         if isinstance(item, dict)
     }
     for item in messages:
+        raw_text = str(item.get('raw_text') or item.get('display_text') or item.get('message') or '')
+        display_text = str(item.get('display_text') or raw_text)
         key = (
+            str(item.get('message_id') or '').strip(),
             str(item.get('timestamp') or '').strip(),
             str(item.get('role') or '').strip(),
-            str(item.get('message') or '').strip(),
+            raw_text,
         )
-        if not key[1] or not key[2] or key in seen:
+        if not key[2] or not key[3] or key in seen:
             continue
         seen.add(key)
         payload['archived_messages'].append(
             {
-                'timestamp': key[0],
-                'role': key[1],
-                'message': key[2],
+                'message_id': key[0],
+                'timestamp': key[1],
+                'role': key[2],
+                'message': display_text,
+                'raw_text': raw_text,
+                'analysis_text': str(item.get('analysis_text') or display_text),
+                'display_text': display_text,
+                'persona_name': str(item.get('persona_name') or '').strip(),
             }
         )
     payload['title'] = str(title or payload.get('title') or '').strip()

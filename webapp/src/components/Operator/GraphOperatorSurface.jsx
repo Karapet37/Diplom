@@ -105,14 +105,25 @@ export function GraphOperatorSurface({
             />
             <span>{t('graph_rethink_mode')}</span>
           </label>
+          {graphReflectionMode && (
+            <span className="graph-rethink-active-warning">{t('graph_rethink_active_mode_warning')}</span>
+          )}
           <div className="graph-rethink-actions">
             <button type="button" onClick={onGraphRethinkPreview} disabled={graphPreviewing || graphReflecting}>
               {graphPreviewing ? t('graph_rethink_previewing') : t('graph_rethink_preview')}
             </button>
-            <button type="button" onClick={onGraphRethink} disabled={graphReflecting}>
+            <button
+              type="button"
+              onClick={onGraphRethink}
+              disabled={graphReflecting || !graphRethinkPreview}
+              title={!graphRethinkPreview ? t('graph_rethink_needs_preview') : undefined}
+            >
               {graphReflecting ? t('graph_rethinking') : t('graph_rethink_apply')}
             </button>
           </div>
+          {!graphRethinkPreview && !graphPreviewing && (
+            <span className="graph-rethink-hint-inline">{t('graph_rethink_needs_preview')}</span>
+          )}
         </div>
 
         <div className="graph-editor-panel glass-panel">

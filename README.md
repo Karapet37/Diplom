@@ -1,10 +1,20 @@
 # Agent Project
 
-Controller-first `Persona-Graph-Agent` runtime with structured persona memory, file-first graph storage, cognitive behavioral pipeline, and bounded local-LLM prompting.
+Controller-first `Persona-Graph-Agent` runtime with persona memory, graph-backed context, a deterministic cognitive pipeline, and an operator-facing annotation layer for message-vector correction.
 
-## Core Idea
+## What This System Is
 
-The project does not follow a direct `message -> answer` path.
+This project is not a thin `message -> LLM -> answer` wrapper.
+
+The current system combines:
+
+- controller-driven request interpretation and route selection,
+- graph and history-backed persona runtime,
+- deterministic `P1–P6` cognitive behavior pipeline for heavy persona turns,
+- trainable message-vector interpretation with `main + extra` coordinates,
+- operator-side correction capture through the web UI,
+- local GGUF model orchestration with visible degradation handling,
+- validation, repair, persistence, and trace logging.
 
 Canonical flow:
 
@@ -13,567 +23,276 @@ request
 -> controller interpretation
 -> route selection
 -> capability plan
--> cognitive pipeline (P1–P6)
--> bounded context assembly
--> state transition / response shaping
+-> cognitive pipeline
+-> context assembly
+-> response shaping
 -> generation
 -> validation
 -> repair
 -> persistence
 ```
 
-The `LLM` is not treated as the system itself. It is used only inside a deterministic runtime that decides:
+The `LLM` is used inside a bounded runtime. It does not decide the whole system behavior by itself.
 
-- what kind of request this is,
-- which route should handle it,
-- what emotional/behavioral state the persona is in,
-- which memory layers are needed,
-- how much context may be packed,
-- how the answer is validated,
-- when regeneration or fallback is allowed.
+## Runtime Overview
 
-## Active Backend
+```
+run_chat_turn()
+  -> request envelope
+  -> controller_runtime
+  -> route decision + capability plan
+  -> simple path OR persona path
+  -> runtime pre-flight status check
+  -> generation or deterministic fallback
+  -> validation / repair
+  -> history + trace persistence
+```
+
+Main high-level branches:
+
+- `simple path`: lightweight conversation, factual turns, and direct bounded prompting
+- `persona path`: persona selection, cognitive runtime, state-transition shaping, and structured verbalization
+
+## Core Backend Modules
 
 The canonical backend lives in `agent_system/`.
 
-Core runtime modules:
+Primary orchestration and routing:
 
 - `agent_system/chat_engine.py`
 - `agent_system/controller_runtime.py`
 - `agent_system/request_pipeline.py`
-- `agent_system/cognitive_pipeline.py`
-- `agent_system/cognitive_authority.py`
-- `agent_system/genome.py`
-- `agent_system/genome_store.py`
-- `agent_system/speech_planner.py`
-- `agent_system/state_transition_runtime.py`
+- `agent_system/context_builder.py`
+- `agent_system/prompt_builder.py`
+- `agent_system/llm.py`
+- `agent_system/api.py`
+
+Persona, graph, and persistence:
+
 - `agent_system/head_caller.py`
 - `agent_system/persona_engine.py`
 - `agent_system/graph_store.py`
-- `agent_system/context_builder.py`
 - `agent_system/history_store.py`
-- `agent_system/reliability.py`
-- `agent_system/node_rethinker.py`
-- `agent_system/behavioral_action_engine.py`
-- `agent_system/behavioral_fallback.py`
-- `agent_system/clarification_engine.py`
-- `agent_system/llm.py`
-- `agent_system/prompt_builder.py`
-- `agent_system/observability.py`
-- `agent_system/safety_classifier.py`
-- `agent_system/localization_engine.py`
-- `agent_system/social_roles.py`
-- `agent_system/mood_research.py`
-- `agent_system/situation_engine.py`
-- `agent_system/situation_regulator.py`
-- `agent_system/planning_engine.py`
-- `agent_system/notes_store.py`
-- `agent_system/importance_learner.py`
-- `agent_system/file_ingestion.py`
-- `agent_system/personality_schema.py`
 - `agent_system/personality_store.py`
-- `agent_system/training_examples_store.py`
-- `agent_system/api.py`
+- `agent_system/memory_layers.py`
+- `agent_system/node_rethinker.py`
+- `agent_system/reliability.py`
+
+Cognitive and behavioral runtime:
+
+- `agent_system/cognitive_pipeline.py`
+- `agent_system/cognitive_authority.py`
+- `agent_system/speech_planner.py`
+- `agent_system/state_transition_runtime.py`
+- `agent_system/behavioral_fallback.py`
+- `agent_system/safety_classifier.py`
+
+Message-vector and correction layer:
+
+- `agent_system/message_vector_registry.py`
+- `agent_system/message_vector_runtime.py`
+- `agent_system/message_annotation_store.py`
+- `agent_system/dataset_layer.py`
+- `agent_system/cognitive_modules_v2.py`
+- `agent_system/response_coherence_classifier.py`
 
 ## Cognitive Pipeline
 
-The runtime includes a deterministic 6-stage cognitive pipeline that runs on every turn inside the heavy persona path.
+Heavy persona turns run through a deterministic six-stage cognitive runtime:
 
-**P1 — EventEncoder**: Encodes the incoming text into an event probability vector and intensity signal. Event types: `neutral`, `threat`, `reward`, `overload`, `shame_trigger`, `loss_of_control`, `failure`, `criticism`, `rejection`, `intimacy`, `opportunity`, `boredom`, `novelty`, `uncertainty`.
+- `P1 EventEncoder`
+- `P2 TriggerNetwork`
+- `P3 RegulatorCell`
+- `P4 ThoughtMLP`
+- `P5 ConflictScorer`
+- `P6 ActionPolicy`
 
-**P2 — TriggerNetwork**: Activates genome-derived trigger weights against the event vector and intensity. The `PersonalityGenome` encodes stable traits as float fields (fears, defense mechanisms, vulnerabilities, drive profile).
+This pipeline produces structured internal state such as:
 
-**P3 — RegulatorCell**: GRU-like cell that updates a 10-dimensional regulator state (anxiety, motivation, fatigue, shame, frustration, guilt, closeness, hope, emptiness) from trigger activations and the current genome.
+- `action_name`
+- `dominant_resolution`
+- `perceived_risk`
+- `intensity`
+- `thought_vec`
+- `conflict_vec`
+- `blocked_actions`
 
-**P4 — ThoughtMLP**: Produces a 16-dimensional thought vector from triggers and regulator state. Contains perceived risk, confidence, need dimensions (connection / achievement / safety), and frame dimensions (approach / hold / retreat).
+`CognitiveAuthority` then selects the generation mode:
 
-**P5 — ConflictScorer**: Scores 8 resolution strategies (avoidance, overcompensation, attack, freeze, planning, support-seeking, self-deception) from the thought vector and genome defense profile.
+- `pure_llm`
+- `hint`
+- `planner`
 
-**P6 — ActionPolicy**: MLP selecting one of 14 action families (approach, avoid, freeze, attack, placate, analyze, ask_for_help, seek_control, reduce_exposure, reframe, self_protect, connect, withdraw, plan_small_step) from thought, conflict, regulator state, and defense vector.
+In `planner` mode, `SpeechPlanner` builds a structured `SpeechPlan`, and the model mainly verbalizes that plan instead of inventing behavior from scratch.
 
-`CognitiveRuntime.__init__` uses a fixed seed for weight initialization, isolated from global numpy state, so results are deterministic regardless of test order.
+## Message-Vector Interpretation Layer
 
-### CognitiveAuthority
+The project now also contains a separate message-vector layer used for annotation, correction, and learned interpretation.
 
-After the pipeline runs, `CognitiveAuthority` scores the output and selects a generation mode:
-
-- `pure_llm` (score < 0.20): pipeline not active enough to guide generation; use legacy prompt
-- `hint` (score < 0.55): inject a cognitive hint into `route_guidance`; LLM still drives the reply
-- `planner` (score ≥ 0.55): full `SpeechPlanner` path
-
-### SpeechPlanner
-
-In `planner` mode, `SpeechPlanner.build()` converts `CognitiveTurnOutput` + built context into a structured `SpeechPlan`:
-
-- `action_name`, `speech_goal`, `tone`
-- `perceived_risk`, `confidence`, `intensity`
-- `key_points` (ordered content directives derived from pipeline signals)
-- `blocked_topics` (actions blocked by dominant resolution)
-- `style_hints` (language, register, warmth)
-- `max_tokens` (tighter under high risk or intensity)
-
-`verbalizer_prompt(plan)` builds the final LLM prompt. PERSONA and RECENT EXCHANGE go to the system role; the SPEECH DIRECTIVE goes to the user role via the `"User question:"` separator.
-
-## Request Model
-
-The controller explicitly classifies requests before generation.
-
-Supported request classes include:
-
-- `factual_query`
-- `roleplay_prompt`
-- `persona_specification`
-- `persona_assignment`
-- `persona_analysis`
-- `persona_chat`
-- `document_request`
-- `meta_previous_answer`
-- `general_chat`
-- `project_architecture_request`
-- `clarification_request`
-
-Main runtime routes:
-
-- `factual_answer`
-- `lightweight_conversation`
-- `hypothetical_roleplay`
-- `persona_chat_fast_path`
-- `persona_specification`
-- `persona_assignment`
-- `persona_dialogue_analysis`
-- `persona_graph_reasoning`
-- `project_document_analysis`
-- `meta_previous_answer`
-- `clarification_request`
-
-## Persona Architecture
-
-Persona is stored as a structured object, not as prompt debris or freeform narrative.
-
-High-level shape:
-
-- `identity`
-- `core_goal`
-- `secondary_goals`
-- `fears`
-- `needs`
-- `constraints_internal`
-- `constraints_social`
-- `constraints_hard_system`
-- `allowed_methods`
-- `maladaptive_methods`
-- `core`
-- `conflict`
-- `defense`
-- `behavior`
-- `dynamics`
-- `meta`
-
-This separation is important because believable behavior is derived from:
+Conceptually:
 
 ```text
-goal + fears + constraints + methods + current trigger
+message_t + context_matrix_t -> P-interpreters -> vector_t
 ```
 
-and not from loose style adjectives alone.
+Key properties:
 
-Persona registry hygiene is enforced. Junk entries such as file labels, ontology labels, prompt fragments, or behaviorless nouns are rejected and quarantined instead of entering the active persona pool.
+- coordinates are not a single confidence score,
+- each coordinate stores `main` plus `extra`,
+- context is a matrix of previous message vectors, not a scalar flag,
+- operator corrections are saved separately from ordinary chat history,
+- those corrections can feed future retraining.
 
-Internal storage uses `memory/heads/`, while the operator-facing API exposes these objects under `/api/cognitive/personalities/...`.
+Current coordinate shape:
 
-## Personality Construction Layer
-
-The project distinguishes between:
-
-- validated runtime personas stored under `memory/heads/`,
-- richer `PersonalityObject` records stored under `memory/personalities/`.
-
-Those construction records keep:
-
-- psychological profile fields separate from biography facts,
-- per-entry provenance and confidence,
-- stable vs temporary entries,
-- uncertain hypotheses and conflict records,
-- operator-facing update and override paths.
-
-The API surface for this layer lives under `/api/cognitive/personality-construction/...` and supports creation, deletion, text/document updates, biography inspection, provenance review, conflict resolution, and behavior-model scoring.
-
-## State Transition Runtime
-
-`state_transition_runtime.py` orchestrates a series of LLM-guided enrichment stages that run between context building and generation:
-
-- **state_reader**: reads the current persona state snapshot
-- **persona_update**: updates emotion vector and situation reactions
-- **bounded_state_transition**: selects next active role, risk posture, and mood signals
-- **context_curator**: curates the working context layer
-- **context_reviewer**: reviews context for contradictions and priorities
-- **response_shaping**: shapes response style, behavior mode, and constraints
-
-Each stage calls `call_json_model_for_role` and is individually gated by `COGNITIVE_STAGE_MODEL_STEPS`. All stages fall back gracefully to deterministic output when the LLM returns nothing useful.
-
-## Reliability
-
-`reliability.py` provides atomic rollback guarantees and runtime health reporting.
-
-`StorageWriteFailure` — raised when a graph or persona write fails partway through. The caller must restore the previous snapshot. Both `graph_store.save_graph()` and `persona_engine.materialize_persona()` snapshot state before writing and roll back on failure.
-
-`MutationRejectedFailure` — raised when a node rethink applies a description update but a subsequent graph mutation (e.g. connecting a new link) fails. The node description is rolled back and a snapshot path is included in `details`.
-
-`runtime_status_snapshot()` — inspects the local LLM provider and returns a status dict with `mode` (`full` or `degraded`) and a list of `degraded_modes` with codes and summaries. Used as a pre-flight check before generation: if degraded, the system skips the LLM call entirely and routes to behavioral fallback.
-
-## Thinking Model Support
-
-The runtime supports thinking models (Qwen3.5-2B, Nanbeige4.1-3B) that emit internal reasoning blocks before their answer.
-
-`_strip_think_blocks(text)` in `local_llm_provider.py` handles three output formats:
-
-1. Full `<think>...</think>` block in output
-2. Template-hidden format: `reasoning\n</think>\n\nAnswer` (chat template hides the opening tag)
-3. Truncated unclosed block (context window exhausted during thinking)
-
-In all cases the function returns only the answer portion. Stop token lists do not include `<think>` or `</think>` to avoid 1-token completions.
-
-llama-cpp-python ≥ 0.3.17 is required for Qwen3.5 GGUF support (`qwen35` architecture).
-
-## Degradation Detection
-
-The generation functions in `chat_engine.py` check `runtime_status_snapshot()` **before** calling the LLM. If the runtime is degraded:
-
-- the LLM call is skipped entirely,
-- behavioral fallback is selected directly,
-- `fallback_reason = 'dependency_unavailable'` is set,
-- operator messages include `'local chat provider is unavailable'`.
-
-This removes the fragile post-generation `reply == generic_fallback` string comparison that was previously used to detect degraded responses.
-
-## Memory Layout
-
-```text
-memory/
-  sessions/
-    {session_id}.txt
-    _route_state/
-  notes/
-    {session_id}.jsonl
-  personalities/
-    personalities_index.json
-    {personality_id}.json
-  training_examples/
-    global.jsonl
-    {session_id}.jsonl
-  importance_learner/
-    global_examples.jsonl
-    {session_id}_examples.jsonl
-  files/
-    uploaded_documents/
-      {session_id}/
-  graphs/
-    nodes.json
-    edges.json
-  heads/
-    index.json
-    {persona_slug}/
-  archive/
+```json
+{
+  "P1": {
+    "main": "statement",
+    "extra": ["question"]
+  }
+}
 ```
 
-Key principles:
+The original target scheme was `P1..P49`. The current codebase extends that registry with additional structural coordinates in the live runtime, so the effective registry is slightly broader than the original 49-interpreter brief.
 
-- session history is persistent,
-- manual notes are separate from graph memory and session logs,
-- graph updates are merge-only,
-- persona registry is validated before activation,
-- personality construction keeps biography separate from profile inference,
-- importance learning records save/skip signals but does not autosave turns,
-- training examples are curated explicitly as `(input, correct_output)` pairs,
-- session-first graph retrieval is preferred over unrelated global graph mass.
+## Message and Annotation Data Model
 
-## Planning, Notes, and Behavioral Regulation
+User text and analysis text are now kept separate.
 
-The chat runtime includes deterministic fast paths before the heavy persona/graph pipeline.
+Important fields:
 
-- `/save`, `/notes`, `/del_note`, and `/clear_notes` are executed directly at the top of `run_chat_turn` with no LLM call.
-- planning mode builds a bounded structure from notes, personality summary, feedback class, and overload estimate before asking the model to verbalize it.
-- the regulator pipeline classifies turn events and selects an action family before prompt construction, so the LLM phrases behavior instead of inventing it.
-- crisis signals short-circuit to a canned supportive response, and blocked safety content never reaches the model.
-- the importance learner observes saved vs unsaved turns, while `training_examples_store.py` keeps explicit fine-tuning examples and JSONL exports.
+- `raw_text`: original user input, preserved without destructive rewriting
+- `display_text`: text shown in the chat UI
+- `analysis_text`: optional normalized copy for analysis-only paths
 
-## File Ingestion
+Typical annotation workspace row:
 
-Supported formats:
-
-- `txt`
-- `md`
-- `json`
-- `csv`
-- `pdf`
-- `docx`
-- `odt`
-- `fb2`
-
-Pipeline:
-
-```text
-file
--> ingestion
--> chunking
--> structured extraction
--> graph merge
--> session/global retrieval availability
+```json
+{
+  "message_id": "m17",
+  "role": "assistant",
+  "raw_text": "Well done, of course.",
+  "display_text": "Well done, of course.",
+  "analysis_text": "Well done, of course.",
+  "context_window": ["m13", "m14", "m15", "m16"],
+  "context_matrix_ref": "ctx_m17",
+  "vector": {
+    "P1": {"main": "statement", "extra": []},
+    "P24": {"main": "false_praise", "extra": ["sarcasm"]}
+  }
+}
 ```
 
-`pdf` handling includes structural extraction so section-aware context can be used instead of only flat text dumps when possible.
+Correction storage is separate from ordinary session history:
 
-## Context and Prompting
+- session-level annotations are stored under `memory/message_annotations/`
+- global correction rows are appended to `memory/message_annotations/global.jsonl`
+- runtime message-vector state is stored under `memory/message_vector_models/`
 
-Context selection is density-first, not mass-first.
+## Web Operator UI
 
-Packing order is effectively:
+The frontend in `webapp/` is an operator workspace, not just a chat shell.
 
-1. current request needs
-2. current session evidence
-3. active persona block
-4. local graph evidence
-5. only then relevant global graph evidence
+Important current chat behavior:
 
-Prompt construction uses compact packing with section budgets and reserved answer space. The system explicitly distinguishes:
+- the selected persona in the dropdown is the primary speaker label source for assistant replies,
+- the message composer clears immediately on submit,
+- the user message appears in the thread optimistically before the backend reply returns,
+- common prompt-leak scaffolding is stripped from displayed assistant replies,
+- the chat surface can open an annotation workspace for message-vector correction.
 
-- logical context assembly,
-- model context window,
-- output token reserve.
+The UI also exposes:
 
-## Generation and Review
+- session management,
+- persona inspection,
+- graph tools,
+- diagnostics,
+- file upload,
+- training example curation,
+- message annotation and context-matrix correction.
 
-The runtime supports:
+See [webapp/README.md](/home/karapet/agent_project/webapp/README.md:1) for the frontend surface map.
 
-- `single`
-- `primary_with_reviewer`
-- `alternate`
-- `randomized`
+## API Highlights
 
-The reviewer pass is used for:
-
-- route mismatch detection,
-- truncation repair,
-- persona style repair,
-- invalid draft rewriting.
-
-Fallbacks are reason-coded and not treated as silent success.
-
-## Observability and Runtime Signals
-
-Every chat request receives a trace with:
-
-- request and route metadata,
-- per-stage timings,
-- context-token estimates,
-- fallback usage and reason,
-- model-budget metadata such as `n_ctx`, reserved output budget, and near-window warnings.
-
-The runtime also records counters for graph writes, rebuild scheduling, rethink outcomes, and route-learning signals. These are exposed through debug endpoints and surfaced in the operator UI.
-
-## Content Safety
-
-A deterministic KNN-based safety classifier runs on every incoming message before LLM generation.
-
-- No LLM involved — fully deterministic and explainable.
-- Labels: `safe`, `suggestive`, `explicit`, `illegal`.
-- Actions: `normal_response`, `soft_filter`, `blur_or_generalize`, `block`.
-- Illegal content (e.g. child + sexual co-occurrence) is caught by a fast-path rule before KNN.
-- Blocked messages never reach the LLM. The pipeline returns a canned refusal response.
-- Examples can be added at runtime via `POST /api/cognitive/safety/examples` and persisted to `memory/safety_examples.jsonl`.
-
-## Spirit-Based Localization
-
-The localization engine does not translate. It shapes LLM verbalization behavior for a target language.
-
-- Detects language from character set (Cyrillic → `ru`, Armenian → `hy`, etc.).
-- Extracts voice axes from persona context: formality, warmth, edge, pace.
-- Builds a voice guide injected into the prompt: register rules, avoid rules, rhythm notes.
-- The model writes as a native speaker of the target language — it does not translate from English.
-- Profiles are available for `ru`, `hy`, `en`, `es`, `fr` with sensible fallback to English.
-
-## API Surface
-
-Health and diagnostics:
-
-- `GET /api/health`
-- `GET /api/cognitive/health`
-- `GET /api/cognitive/debug/metrics`
-- `GET /api/cognitive/debug/traces`
-- `GET /api/cognitive/debug/graph-health`
-- `GET /api/cognitive/debug/runtime-status`
-
-Sessions, chat, and files:
+Core chat and session endpoints:
 
 - `GET /api/cognitive/sessions`
 - `POST /api/cognitive/sessions`
 - `GET /api/cognitive/sessions/{session_id}`
 - `DELETE /api/cognitive/sessions/{session_id}`
 - `POST /api/cognitive/chat/respond`
-- `POST /api/cognitive/files/upload`
-- `POST /api/cognitive/rebuild`
 
-Graph inspection and maintenance:
+Annotation and correction endpoints:
 
-- `GET /api/cognitive/graph`
-- `GET /api/cognitive/graph/snapshots`
-- `POST /api/cognitive/graph/restore`
-- `GET /api/cognitive/graph/subgraph`
-- `GET /api/cognitive/graph/nodes/{node_id}/view`
-- `POST /api/cognitive/graph/nodes`
-- `DELETE /api/cognitive/graph/nodes/{node_id}`
-- `POST /api/cognitive/graph/edges`
-- `DELETE /api/cognitive/graph/edges/{edge_id}`
-- `POST /api/cognitive/graph/nodes/merge`
-- `POST /api/cognitive/graph/nodes/{node_id}/state`
-- `POST /api/cognitive/graph/rethink`
+- `GET /api/cognitive/sessions/{session_id}/annotation-workspace`
+- `POST /api/cognitive/sessions/{session_id}/annotations`
 
-Persona and personality construction:
+Learning and diagnostics:
 
-- `GET /api/cognitive/personalities`
-- `GET /api/cognitive/personalities/{name}`
-- `GET /api/cognitive/personalities/{name}/graph-explanation`
-- `GET /api/cognitive/personalities/{name}/revisions`
-- `GET /api/cognitive/personalities/{name}/snapshots`
-- `POST /api/cognitive/personalities/{name}/restore/{revision}`
-- `GET /api/cognitive/personality-construction/personalities`
-- `POST /api/cognitive/personality-construction/personalities`
-- `GET /api/cognitive/personality-construction/personalities/{personality_id}`
-- `DELETE /api/cognitive/personality-construction/personalities/{personality_id}`
-- `POST /api/cognitive/personality-construction/personalities/{personality_id}/update-from-text`
-- `POST /api/cognitive/personality-construction/personalities/{personality_id}/update-from-document`
-- `POST /api/cognitive/personality-construction/personalities/{personality_id}/update-field`
-- `POST /api/cognitive/personality-construction/personalities/{personality_id}/update-biography`
-- `POST /api/cognitive/personality-construction/personalities/{personality_id}/override-entry`
-- `GET /api/cognitive/personality-construction/personalities/{personality_id}/biography`
-- `GET /api/cognitive/personality-construction/personalities/{personality_id}/provenance`
-- `GET /api/cognitive/personality-construction/personalities/{personality_id}/conflicts`
-- `POST /api/cognitive/personality-construction/personalities/{personality_id}/resolve-conflict`
-- `POST /api/cognitive/personality-construction/score-actions`
-- `GET /api/cognitive/personality-construction/personalities/{personality_id}/behavior-model`
-
-Notes, planning, learning, and safety:
-
-- `GET /api/cognitive/sessions/{session_id}/notes`
-- `POST /api/cognitive/sessions/{session_id}/notes`
-- `DELETE /api/cognitive/sessions/{session_id}/notes/{note_ref}`
-- `DELETE /api/cognitive/sessions/{session_id}/notes`
-- `GET /api/cognitive/sessions/{session_id}/notes/context`
-- `POST /api/cognitive/planning/analyze`
-- `POST /api/cognitive/planning/classify-feedback`
-- `POST /api/cognitive/regulator/analyze`
-- `POST /api/cognitive/regulator/classify-event`
-- `GET /api/cognitive/sessions/{session_id}/importance-profile`
-- `POST /api/cognitive/sessions/{session_id}/importance/score`
-- `POST /api/cognitive/sessions/{session_id}/importance/suggest`
 - `POST /api/cognitive/training-examples`
 - `GET /api/cognitive/training-examples`
-- `GET /api/cognitive/training-examples/{example_id}`
-- `DELETE /api/cognitive/training-examples/{example_id}`
 - `GET /api/cognitive/training-examples/export/jsonl`
 - `POST /api/cognitive/safety/classify`
-- `POST /api/cognitive/safety/examples`
+- `GET /api/cognitive/debug/metrics`
+- `GET /api/cognitive/debug/traces`
+- `GET /api/cognitive/debug/graph-health`
 
-## Web UI
-
-The frontend in `webapp/` is an operator workspace focused on:
-
-- session management,
-- persona selection, inspection, and deletion,
-- training-example curation and export,
-- file upload,
-- chat,
-- graph inspection and maintenance,
-- multilingual operator chrome (`en`, `ru`, `hy`, `zh`),
-- debug and trace visibility.
-
-See `webapp/README.md`.
-
-## Models
-
-Model discovery is local-first and prefers `models/gguf/`.
-
-The runtime supports role-based model resolution, compatibility preflight, token budgeting, thinking-block stripping, and reviewer orchestration. See `models/README.md`.
-
-Tested local models:
-
-- `Qwen3.5-2B.Q4_K_M.gguf` — general and creative roles; thinking model
-- `Nanbeige4.1-3B.Q3_K_M.gguf` — analyst and planner roles; thinking model
-- Requires llama-cpp-python ≥ 0.3.17 for Qwen3.5 (`qwen35` architecture)
-
-## Setup
-
-```bash
-cd <project_root>
-./scripts/bootstrap_local.sh
-```
-
-Frontend build:
-
-```bash
-cd <project_root>/webapp
-npm install
-npm run build
-```
-
-## Run
-
-Recommended:
-
-```bash
-cd <project_root>
-./scripts/run_profile.sh development
-```
-
-Direct startup:
-
-```bash
-.venv/bin/python start.py --profile development
-.venv/bin/python start.py --profile development --api-only
-.venv/bin/python start.py --profile server
-```
-
-Diagnostics:
-
-```bash
-.venv/bin/python start.py --list-profiles
-.venv/bin/python start.py --profile development --check
-.venv/bin/python start.py --profile development --print-config
-```
-
-## Tests
+## Local Development
 
 Backend:
 
 ```bash
-cd <project_root>
-.venv/bin/python -m pytest -q tests/agent_system
+.venv/bin/python start.py --profile development
 ```
 
-System realism harness:
+API-only mode:
 
 ```bash
-.venv/bin/python -m pytest -q tests/system_realism
+.venv/bin/python start.py --profile development --api-only
 ```
 
-Frontend build check:
+Frontend:
 
 ```bash
-npm --prefix webapp run build
+cd webapp
+npm install
+npm run dev
 ```
 
-Current test suite state:
+Production build:
 
-- `tests/agent_system`: `382 tests collected, 382 passed` — full suite green
-- Test files cover: routing, cognitive pipeline attractors, persona registry, graph lifecycle, graph hygiene, graph localizer, node rethinker, reliability and rollback, state transition runtime, behavioral fallback, social persona system, task procedures, trace learning, LLM runtime, local LLM provider policy, semantic routing, interaction routing, request pipeline, controller runtime, context pipeline, memory lifecycle, personality construction, planning and notes, behavior quality, file ingestion, API and failures, chat engine, and more.
-- `tests/system_realism`: behavior depends on sandbox socket permissions
+```bash
+cd webapp
+npm run build
+```
 
-## Additional Documentation
+## Training and Dataset Utilities
 
-- `READMEREPORT.md`
-- `READMECONCLUSION.md`
-- `models/README.md`
-- `webapp/README.md`
-- `packages/python-sdk/README.md`
-- `packages/integration-layer-sdk/README.md`
-- `tests/system_realism/README.md`
+Offline helpers:
+
+- `scripts/train_pipeline.py`
+  - calibrates `P1` and `P6` using dataset tuples
+- `scripts/build_coordinate_datasets.py`
+  - builds coordinate-vector datasets into `DataSets/coordinate_vectors/`
+
+Supporting datasets and references:
+
+- [DataSets/idea_attractors/README.md](/home/karapet/agent_project/DataSets/idea_attractors/README.md:1)
+- [tests/system_realism/README.md](/home/karapet/agent_project/tests/system_realism/README.md:1)
+- [models/README.md](/home/karapet/agent_project/models/README.md:1)
+
+## Documentation Map
+
+- [READMEREPORT.md](/home/karapet/agent_project/READMEREPORT.md:1) — detailed Armenian technical report
+- [webapp/README.md](/home/karapet/agent_project/webapp/README.md:1) — operator UI and chat surface
+- [models/README.md](/home/karapet/agent_project/models/README.md:1) — local GGUF model runtime
+- [packages/python-sdk/README.md](/home/karapet/agent_project/packages/python-sdk/README.md:1) — optional Python integration-layer client
+- [packages/integration-layer-sdk/README.md](/home/karapet/agent_project/packages/integration-layer-sdk/README.md:1) — optional JavaScript integration-layer client
+
+## Notes
+
+- Vendor documentation under `node_modules/` is not part of the project documentation set.
+- The runtime is intentionally designed so that degraded model availability is visible, not silently hidden behind changing controller behavior.
+- The correction layer is meant to improve the system through UI-mediated annotation, not by rewriting ordinary chat history in place.

@@ -24,6 +24,22 @@ _HYPOTHETICAL_MARKERS = (
     'гипотетически',
     'сыграй роль',
     'как будто',
+    # Inline character definition patterns (user pastes a character sheet)
+    # NOTE: 'ты — ' and 'ты—' are NOT here — they normalize to bare 'ты' and match everything.
+    # Character definition is caught by _is_character_definition() called separately.
+    'оставаясь в этой роли',
+    'вести себя как реальный',
+    'твоя задача — не играть',
+    'теперь отвечай на мои сообщения',
+    'отвечай на мои сообщения, оставаясь',
+    'staying in character',
+    'stay in character',
+    'you are playing',
+    'you play the role',
+    'remain in character',
+    'ты играешь роль',
+    'ты должен вести себя',
+    'отвечай в роли',
 )
 _META_MARKERS = (
     'previous answer',
@@ -268,6 +284,49 @@ _LIMITATION_MARKERS = (
     'не хватает надежного контекста',
     'уточни объект',
     'уточни тему',
+)
+# Patterns that indicate the LLM broke out of persona into an analysis/assistant mode.
+# Detected in validate_response and trigger regenerate_style_guard.
+_PERSONA_BREAK_MARKERS = (
+    'let me analyze',
+    'analyze the request',
+    'let me think through',
+    'let me carefully analyze',
+    "i'll analyze",
+    'to analyze this',
+    'analysis of the situation',
+    '**analysis',
+    '# анализ ситуации',
+    'ключевая проблема',
+    'safety/policy',
+    'output format',
+    'что я могу сказать',
+    'что я не могу',
+    'внешний ответ персонажа',
+    'review notes',
+    'issues identified',
+    'let me break this down',
+    'thinking process:',
+    'route: ',
+)
+_OUTPUT_SCAFFOLD_MARKERS = (
+    'analyze the request',
+    'analysis of the situation',
+    '# анализ ситуации',
+    'ключевая проблема',
+    'safety/policy',
+    'output format',
+    'what i can say',
+    'what i cannot',
+    'что я могу сказать',
+    'что я не могу',
+    'внешний ответ персонажа',
+    'outer response',
+    'review notes',
+    'issues identified',
+    'constraint:',
+    'role:',
+    'task:',
 )
 _STYLE_TRAIT_MARKERS: tuple[tuple[str, str], ...] = (
     ('робкий', 'shy'),
@@ -663,6 +722,32 @@ def _fragile_persona_style_findings(
 
 
 
+def _persona_name_from_block(persona_reference_text: str) -> str:
+    """Extract the first capitalized name-like word from the persona block."""
+    for word in str(persona_reference_text or '').split():
+        clean = re.sub(r'[^а-яёА-ЯЁa-zA-ZՀ-Ֆա-և\u4e00-\u9fff]', '', word)
+        if clean and clean[0].isupper() and len(clean) >= 3:
+            return clean.lower()
+    return ''
+
+
+def _persona_speaks_as_third_person(text: str, persona_reference_text: str) -> bool:
+    """Return True if the reply references the persona by name in 3rd-person subject position."""
+    name = _persona_name_from_block(persona_reference_text)
+    if not name:
+        return False
+    lowered = text.lower()
+    if name not in lowered:
+        return False
+    # Patterns: "<name> глагол/частица", "вот <name>", "такие как <name>"
+    third_person_patterns = [
+        rf'\b{re.escape(name)}\s+(бы|ответил|сказал|написал|подумал|ска[зж]|реагирует|реагировал|считает|хотел|хочет)',
+        rf'(вот|такой|такая|как|про)\s+{re.escape(name)}\b',
+        rf'{re.escape(name)}\s+(ответила|сказала|написала|подумала|хотела)',
+    ]
+    return any(re.search(p, lowered) for p in third_person_patterns)
+
+
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     lowered = normalize_name(text)
     for marker in markers:
@@ -761,6 +846,84 @@ def _should_continue_persona_specification(
     return _persona_profile_signal_score(normalized_text) >= 2 or _looks_like_profile_name_lead(normalized_text)
 
 
+_EXPLICIT_SAVE_PERSONA_MARKERS = (
+    'запомни эту персону',
+    'сохрани эту персону',
+    'создай персонажа',
+    'создай личность',
+    'сохрани как персону',
+    'save this persona',
+    'remember this character',
+    'create a persona',
+    'add this persona',
+    'register this persona',
+)
+_EPHEMERAL_ROLEPLAY_SIGNALS = (
+    'ты — ',
+    'ты—',
+    'оставаясь в этой роли',
+    'stay in character',
+    'staying in character',
+    'теперь отвечай на мои сообщения',
+    'отвечай на мои сообщения, оставаясь',
+    'ты должен вести себя',
+    'ты играешь роль',
+    'твоя задача — не играть',
+    'не играй театрально',
+    'ты не персонаж',
+)
+
+
+def decide_persona_creation(
+    text: str,
+    *,
+    candidate_name: str = '',
+    request_type: str = '',
+    source: str = 'user',
+) -> dict[str, Any]:
+    """
+    Deterministic decision tree: should a real registered persona head be created?
+
+    Returns a dict with keys:
+      - create: bool — True = register a persona head; False = keep it ephemeral
+      - reason: str — short code for why
+      - candidate_name: str — cleaned name (empty means no usable name extracted)
+    """
+    lowered = str(text or '').lower().strip()
+    clean_name = str(candidate_name or '').strip()
+
+    # NEVER create system-named personas
+    _system_names = frozenset({
+        'generate_persona', 'generate', 'create_persona', 'new_persona',
+        'unnamed', 'unknown', 'default', 'assistant', 'persona',
+    })
+    if clean_name.lower() in _system_names or clean_name.lower().startswith('generate_'):
+        return {'create': False, 'reason': 'system_reserved_name', 'candidate_name': ''}
+
+    # Source guard: graph extraction and system operations never create personas
+    if source in {'graph_extraction', 'system', 'file_ingestion', 'background'}:
+        return {'create': False, 'reason': 'non_user_source', 'candidate_name': clean_name}
+
+    # Explicit inline roleplay → ephemeral: user is playing a scene, not registering a persona
+    if any(marker in lowered for marker in _EPHEMERAL_ROLEPLAY_SIGNALS):
+        return {'create': False, 'reason': 'inline_roleplay_ephemeral', 'candidate_name': ''}
+
+    # Explicit user request to save a persona → create
+    if any(marker in lowered for marker in _EXPLICIT_SAVE_PERSONA_MARKERS):
+        return {'create': True, 'reason': 'explicit_save_request', 'candidate_name': clean_name}
+
+    # Persona specification / assignment with a valid name → create
+    if request_type in {'persona_specification', 'persona_assignment'} and clean_name:
+        return {'create': True, 'reason': 'persona_spec_with_name', 'candidate_name': clean_name}
+
+    # No valid name → no creation
+    if not clean_name:
+        return {'create': False, 'reason': 'no_candidate_name', 'candidate_name': ''}
+
+    # Default: do not create unless explicitly requested
+    return {'create': False, 'reason': 'no_creation_signal', 'candidate_name': clean_name}
+
+
 def _classify_request_type(
     *,
     normalized_text: str,
@@ -779,7 +942,7 @@ def _classify_request_type(
         return 'persona_assignment'
     explicit_spec = _contains_any(normalized_text, _PERSONA_SPEC_MARKERS)
     persona_analysis = _contains_any(normalized_text, _PERSONA_ANALYSIS_MARKERS)
-    hypothetical = bool(interaction_frame.explicit_persona_switch) or _contains_any(normalized_text, _HYPOTHETICAL_MARKERS)
+    hypothetical = bool(interaction_frame.explicit_persona_switch) or _contains_any(normalized_text, _HYPOTHETICAL_MARKERS) or _is_character_definition(normalized_text)
     behavioral_density = _behavioral_description_density(normalized_text)
     message_kind = str(interaction_frame.message_kind or '').strip().lower()
     question_present = bool(interaction_frame.question_present)
@@ -821,6 +984,14 @@ def _merge_unique_items(primary: list[str], inherited: list[str], *, limit: int 
     return merged
 
 
+_INLINE_ROLEPLAY_ROUTES = frozenset({'hypothetical_roleplay', 'persona_graph_reasoning'})
+_INLINE_ROLEPLAY_MARKERS_FAST = (
+    'ты — ', 'ты—', 'оставаясь в этой роли', 'stay in character',
+    'staying in character', 'теперь отвечай на мои сообщения',
+    'ты играешь роль', 'ты должен вести себя',
+)
+
+
 def _should_continue_hypothetical(
     *,
     preprocessing: RequestPreprocessing,
@@ -828,9 +999,11 @@ def _should_continue_hypothetical(
     route_memory: RouteMemory,
 ) -> bool:
     previous_route = str(route_memory.previous_route or '').strip().lower()
-    if previous_route != 'hypothetical_roleplay':
+    previous_persona = str(route_memory.previous_persona_name or '').strip()
+    if previous_route not in _INLINE_ROLEPLAY_ROUTES:
         return False
-    if str(route_memory.previous_persona_name or '').strip():
+    # A real registered persona is active — not an inline roleplay session
+    if previous_persona and previous_route != 'hypothetical_roleplay':
         return False
     if preprocessing.meta_request or preprocessing.file_related or preprocessing.system_debug:
         return False
@@ -849,6 +1022,16 @@ def _should_continue_hypothetical(
         return True
     return False
 
+
+
+_CHARACTER_DEF_RE = re.compile(
+    r'(?:^|\n)\s*ты\s*[—–-]\s*\S',   # "Ты — Name" (em/en/hyphen dash)
+    re.IGNORECASE,
+)
+
+def _is_character_definition(raw_text: str) -> bool:
+    """True if text starts with a Russian character sheet ('Ты — Катерина. ...')."""
+    return bool(_CHARACTER_DEF_RE.search(raw_text[:200]))
 
 
 def _looks_lightweight(text: str) -> bool:
@@ -904,7 +1087,7 @@ def preprocess_request(
     question_present = bool(interaction_frame.question_present)
     intent_type = str(analysis.user_state.intent or request_kind or 'statement').strip().lower() or 'statement'
     entities = [str(entity.name or '').strip() for entity in list(analysis.entities or []) if str(entity.name or '').strip()]
-    hypothetical = bool(interaction_frame.explicit_persona_switch) or _contains_any(normalized, _HYPOTHETICAL_MARKERS)
+    hypothetical = bool(interaction_frame.explicit_persona_switch) or _contains_any(normalized, _HYPOTHETICAL_MARKERS) or _is_character_definition(envelope.raw_text)
     meta_request = _contains_any(normalized, _META_MARKERS)
     file_related = bool(str(explicit_context or '').strip()) or _contains_any(normalized, _FILE_MARKERS)
     system_debug = _contains_any(normalized, _DEBUG_MARKERS)
@@ -1042,19 +1225,34 @@ def select_route(
     secondary_flags: list[str] = []
     evidence = list(preprocessing.evidence)
     has_persona = bool(str(selected_persona or analysis.selected_head or analysis.session_persona or '').strip())
+    explicit_persona_ui = bool(str(selected_persona or '').strip())
     followup = str(interaction_frame.followup_mode or '').strip().lower()
 
     normalized_text = normalize_name(envelope.normalized_text)
+    # persona_chat_fast_path triggers when:
+    # - a persona is active AND the message is clearly conversational/chat
+    # - OR the user explicitly selected a persona in the UI (personality_name param) and the
+    #   message is a simple question or general chat (not a spec/assignment/doc/meta request)
+    _conversational_types = {'persona_chat', 'general_chat'}
+    direct_self_query = _contains_any(envelope.normalized_text, _DIRECT_SELF_QUERY_MARKERS)
+    has_explicit_topic_entity = bool(
+        str(analysis.current_entity or '').strip()
+        or str(interaction_frame.topic_entity or '').strip()
+        or list(analysis.entities or [])
+    )
     persona_fast_candidate = bool(
         has_persona
-        and preprocessing.request_type == 'persona_chat'
         and not preprocessing.file_related
         and not preprocessing.meta_request
         and not preprocessing.system_debug
         and not preprocessing.hypothetical
         and not preprocessing.hypothetical_continuation
+        and not direct_self_query
+        and not has_explicit_topic_entity
         and (
-            preprocessing.interaction_mode == 'lightweight_conversation'
+            preprocessing.request_type == 'persona_chat'
+            or (explicit_persona_ui and preprocessing.request_type in _conversational_types)
+            or preprocessing.interaction_mode == 'lightweight_conversation'
             or _looks_lightweight(envelope.normalized_text)
         )
     )
@@ -1463,6 +1661,17 @@ def validate_response(
             validation.repair_strategy = 'regenerate_meta'
             validation.reason_codes.append('validation:dialogue_review_structure_missing')
             return validation
+    elif route.requires_llm and any(marker in lowered for marker in _OUTPUT_SCAFFOLD_MARKERS):
+        validation.ok = False
+        validation.route_match = False
+        validation.mismatch_reason = 'reply_leaked_generation_scaffold'
+        validation.repair_strategy = (
+            'regenerate_style_guard'
+            if route.selected_route in {'persona_graph_reasoning', 'persona_chat_fast_path', 'hypothetical_roleplay', 'lightweight_conversation', 'meta_previous_answer'}
+            else 'regenerate_with_budget'
+        )
+        validation.reason_codes.append('validation:reply_scaffold_leak')
+        return validation
 
     if route.selected_route in {'lightweight_conversation', 'persona_chat_fast_path'} and graph_used:
         validation.reason_codes.append('validation:heavy_graph_was_not_needed')
@@ -1482,6 +1691,24 @@ def validate_response(
         validation.reason_codes.append('validation:persona_route_mismatch')
         return validation
 
+    # Persona voice break: LLM switched to analysis/assistant mode instead of speaking as persona
+    persona_voice_routes = {'persona_chat_fast_path', 'hypothetical_roleplay', 'persona_graph_reasoning', 'lightweight_conversation'}
+    if route.selected_route in persona_voice_routes and persona_used and any(marker in lowered for marker in _PERSONA_BREAK_MARKERS):
+        validation.ok = False
+        validation.route_match = False
+        validation.mismatch_reason = 'persona_broke_into_analysis_mode'
+        validation.repair_strategy = 'regenerate_style_guard'
+        validation.reason_codes.append('validation:persona_analysis_break')
+        return validation
+
+    if route.selected_route in {'persona_graph_reasoning', 'persona_chat_fast_path', 'hypothetical_roleplay'} and _persona_speaks_as_third_person(text, persona_reference_text):
+        validation.ok = False
+        validation.route_match = False
+        validation.mismatch_reason = 'persona_spoke_in_third_person'
+        validation.repair_strategy = 'regenerate_style_guard'
+        validation.reason_codes.append('validation:persona_third_person_break')
+        return validation
+
     if route.selected_route in {'hypothetical_roleplay', 'persona_graph_reasoning'} and _fragile_persona_requested(route, persona_reference_text):
         style_findings = _fragile_persona_style_findings(
             route,
@@ -1495,6 +1722,23 @@ def validate_response(
             validation.mismatch_reason = 'reply_failed_fragile_persona_style_guard'
             validation.repair_strategy = 'regenerate_style_guard'
             validation.reason_codes.extend(f'validation:{item}' for item in style_findings)
+            return validation
+
+    # Language mismatch: user wrote in Russian, persona responded in English (or vice versa)
+    if route.selected_route in persona_voice_routes and persona_used and request_text:
+        req_lowered = normalize_name(request_text)
+        req_cyrillic = sum(1 for c in req_lowered if 'а' <= c <= 'я' or 'ё' == c)
+        resp_cyrillic = sum(1 for c in lowered if 'а' <= c <= 'я' or 'ё' == c)
+        req_latin = sum(1 for c in req_lowered if 'a' <= c <= 'z')
+        resp_latin = sum(1 for c in lowered if 'a' <= c <= 'z')
+        req_is_russian = req_cyrillic > req_latin * 2
+        resp_is_english = resp_latin > resp_cyrillic * 2 and resp_latin > 20
+        if req_is_russian and resp_is_english:
+            validation.ok = False
+            validation.route_match = False
+            validation.mismatch_reason = 'persona_responded_in_wrong_language'
+            validation.repair_strategy = 'regenerate_style_guard'
+            validation.reason_codes.append('validation:persona_language_mismatch')
             return validation
 
     if route.selected_route == 'clarification_request':

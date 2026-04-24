@@ -1043,6 +1043,7 @@ class ChatTurnRequest:
     selected_persona: str = ''
     explicit_context: str = ''
     language: str = 'en'
+    user_persona_name: str = ''  # who the user is speaking as ("Незнакомец" = anonymous)
 
 
 @dataclass(slots=True)

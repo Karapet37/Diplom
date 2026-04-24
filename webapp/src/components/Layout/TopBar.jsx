@@ -20,6 +20,8 @@ export function TopBar({
   onLanguageChange,
   onRefresh,
   refreshing,
+  trainingMode,
+  onTrainingModeChange,
   t,
 }) {
   return (
@@ -28,6 +30,15 @@ export function TopBar({
         <p className="eyebrow">{t('top_identity')}</p>
         <h1>{t('top_title')}</h1>
         <p className="subtext">{t('top_subtext')}</p>
+        <button
+          type="button"
+          className={`training-mode-toggle ${trainingMode ? 'active' : ''}`}
+          onClick={() => onTrainingModeChange(!trainingMode)}
+          title={t('training_mode_hint')}
+        >
+          <span className="training-mode-toggle__dot" />
+          {trainingMode ? t('training_mode_on') : t('training_mode_off')}
+        </button>
       </div>
       <div className="or-topbar__actions">
         <div className="topbar-language">
