@@ -29,8 +29,11 @@ from .persona_engine import (
     list_persona_revisions,
     list_personas,
     load_active_persona,
+    materialize_persona,
     restore_persona_revision,
+    synthesize_persona_from_logs,
 )
+from .graph_store import normalize_personality_name
 from .memory_layers import list_persona_snapshots
 from .personality_schema import PersonalityObject
 from .personality_store import (
@@ -115,7 +118,8 @@ class ChatRequest(BaseModel):
     personality_name: str = ''
     explicit_context: str = ''
     language: str = 'en'
-    user_persona_name: str = ''
+    user_persona_id: str = ''    # internal identifier (persona name slug)
+    user_persona_name: str = ''  # display label sent to LLM prompt
 
 
 class UploadRequest(BaseModel):
@@ -189,6 +193,55 @@ class TrainingExampleCreateRequest(BaseModel):
     persona_name: str = ''
     notes: str = ''
     tags: list[str] = Field(default_factory=list)
+
+
+class PersonaQuestionnaireRequest(BaseModel):
+    # Identity — persona_name is the only required field
+    persona_name: str
+    display_name: str = ''
+    age: str = ''
+    gender: str = ''
+    nationality: str = ''
+    occupation: str = ''
+    education: str = ''
+    location: str = ''
+    # Personality
+    self_description: str = ''
+    how_others_see_you: str = ''
+    # Values
+    core_values: str = ''
+    life_philosophy: str = ''
+    worldview: str = ''
+    # Goals
+    main_life_goals: str = ''
+    dreams: str = ''
+    what_drives_you: str = ''
+    # Fears
+    main_fears: str = ''
+    insecurities: str = ''
+    shame_topics: str = ''
+    triggers: str = ''
+    # Life story
+    childhood: str = ''
+    key_life_events: str = ''
+    biggest_challenge: str = ''
+    proudest_achievement: str = ''
+    # Relationships
+    family_description: str = ''
+    friendship_style: str = ''
+    romantic_patterns: str = ''
+    # Communication
+    communication_style: str = ''
+    humor_style: str = ''
+    conflict_approach: str = ''
+    emotional_expression: str = ''
+    # Habits
+    hobbies: str = ''
+    pet_peeves: str = ''
+    guilty_pleasures: str = ''
+    # Free form
+    additional_context: str = ''
+    fictional_basis: str = ''
 
 
 class MessageAnnotationCreateRequest(BaseModel):
@@ -334,13 +387,15 @@ def create_router() -> APIRouter:
     @router.post('/chat/respond')
     def chat_endpoint(request: ChatRequest) -> dict[str, Any]:
         selected_persona = str(request.selected_persona or request.personality_name or '').strip()
+        # Prefer display label; fall back to id if label not provided
+        _user_persona_display = str(request.user_persona_name or request.user_persona_id or '').strip()
         return generate_response(
             message=request.message,
             session_id=request.session_id,
             selected_persona=selected_persona,
             explicit_context=request.explicit_context,
             language=request.language,
-            user_persona_name=str(request.user_persona_name or '').strip(),
+            user_persona_name=_user_persona_display,
         )
 
     @router.post('/files/upload')
@@ -670,6 +725,73 @@ def create_router() -> APIRouter:
         update_hover_summary(personality)
         save_personality(personality)
         return {'ok': True, 'personality': generate_compact_summary(personality)}
+
+    @router.post('/personality-construction/personalities/from-questionnaire')
+    def create_persona_from_questionnaire_endpoint(body: PersonaQuestionnaireRequest) -> dict[str, Any]:
+        """
+        Create a new persona from a structured questionnaire.
+        Questionnaire answers are formatted as text, analyzed by LLM,
+        and merged into a full PersonalityObject + runtime head.
+        """
+        from .prompt_builder import format_questionnaire_as_text
+        from .reliability import MutationRejectedFailure
+
+        name = str(body.display_name or body.persona_name).strip()
+        if not name:
+            raise HTTPException(status_code=400, detail='persona_name is required')
+
+        excerpt = format_questionnaire_as_text(body.model_dump())
+        if not excerpt.strip():
+            raise HTTPException(status_code=400, detail='Questionnaire has no content to synthesize')
+
+        # LLM synthesis → runtime persona head
+        try:
+            payload = synthesize_persona_from_logs(
+                name, [excerpt],
+                reason='Created from identity questionnaire.',
+            )
+            bundle = materialize_persona(name, payload, explicit=True)
+        except MutationRejectedFailure as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        # Store structured biography facts in the personality store
+        slug = normalize_personality_name(bundle.name)
+        personality = get_or_create_personality(slug, label=name, source_texts=[excerpt])
+
+        bio_fields: list[tuple[str, str]] = [
+            ('occupation', 'occupation'),
+            ('education', 'education'),
+            ('location', 'location'),
+            ('family_description', 'family'),
+            ('childhood', 'life_event'),
+            ('key_life_events', 'life_event'),
+            ('biggest_challenge', 'life_event'),
+            ('proudest_achievement', 'achievement'),
+        ]
+        bio_candidates = [
+            build_direct_biography_update(fact_type, val, source_channel='questionnaire')
+            for attr, fact_type in bio_fields
+            for val in [str(getattr(body, attr, '') or '').strip()]
+            if val
+        ]
+        if bio_candidates:
+            apply_update_candidates(personality, bio_candidates)
+
+        update_hover_summary(personality)
+        save_personality(personality)
+
+        # Resolve persona summary from runtime list
+        persona_summary = next(
+            (p for p in list_personas() if p.get('name') == slug or str(p.get('label') or '').lower() == name.lower()),
+            {'name': slug, 'label': name},
+        )
+        return {
+            'ok': True,
+            'persona_name': bundle.name,
+            'persona_slug': slug,
+            'persona_summary': persona_summary,
+            'personality': generate_compact_summary(personality),
+        }
 
     @router.get('/personality-construction/personalities/{personality_id}')
     def get_personality_endpoint(personality_id: str) -> dict[str, Any]:

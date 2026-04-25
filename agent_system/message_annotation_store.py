@@ -227,6 +227,21 @@ def build_annotation_workspace(session_id: str, *, window_size: int = 4) -> dict
     }
 
 
+def _is_empty_vector(v: Any) -> bool:
+    """True when a vector dict is missing or contains only default/empty choices."""
+    if not isinstance(v, dict) or not v:
+        return True
+    return all(
+        not (isinstance(choice, dict) and choice.get('extra'))
+        and str((choice or {}).get('main') or '') in (
+            '', 'absent', 'neutral', 'unclear', 'continuation', 'defined',
+            'direct', 'literal', 'statement', 'non_answer', 'independent',
+            'opening_new_direction', 'calm', 'no_change', 'full_window',
+        )
+        for choice in v.values()
+    )
+
+
 def build_runtime_message_vector_payload(
     session_id: str,
     *,
@@ -239,16 +254,32 @@ def build_runtime_message_vector_payload(
     _session, message_rows = _build_effective_session_rows(session_id, window_size=clean_window_size)
     runtime = get_message_vector_runtime()
     context_rows = message_rows[-clean_window_size:]
-    context_matrix = [
-        {
+
+    # Build context_matrix, computing P-vectors on-the-fly for messages that
+    # were never annotated (the common case for regular chat turns).
+    computed_so_far: list[dict[str, Any]] = []
+    context_matrix: list[dict[str, Any]] = []
+    for entry in context_rows:
+        stored_vector = entry.get('vector')
+        if _is_empty_vector(stored_vector):
+            # Bootstrap-predict the vector using the messages before it
+            computed_vector = runtime.predict_vector(
+                text=str(entry.get('display_text') or ''),
+                role=str(entry.get('role') or ''),
+                context_matrix=computed_so_far[-3:],
+                persona_name=str(entry.get('persona_name') or ''),
+            )
+        else:
+            computed_vector = normalize_coordinate_vector(stored_vector)
+        row = {
             'message_id': str(entry.get('message_id') or ''),
             'role': str(entry.get('role') or ''),
             'persona_name': str(entry.get('persona_name') or ''),
             'display_text': str(entry.get('display_text') or ''),
-            'vector': normalize_coordinate_vector(entry.get('vector')),
+            'vector': computed_vector,
         }
-        for entry in context_rows
-    ]
+        computed_so_far.append(row)
+        context_matrix.append(row)
     current_vector = runtime.predict_vector(
         text=str(message_text or ''),
         role=str(role or ''),

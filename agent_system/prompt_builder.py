@@ -110,6 +110,9 @@ def load_prompt_stage(name: str) -> str:
 
 
 def _staged_prompt_header(stage_name: str) -> str:
+    # final_generator has its own complete ruleset (with /no_think); skip shared_rules
+    if stage_name == 'final_generator':
+        return load_prompt_stage('final_generator')
     shared = load_prompt_stage('shared_rules')
     stage = load_prompt_stage(stage_name)
     return '\n\n'.join(part for part in (shared, stage) if str(part).strip())
@@ -240,7 +243,7 @@ def _persona_activation_prompt(
     elif normalized_language == 'zh':
         _lang_instruction = "Respond in Chinese. 请用中文回答。"
     blocks: list[str] = [
-        _staged_prompt_header('final_generator'),
+        load_prompt_stage('final_generator'),
         _lang_instruction,
     ]
     if is_russian:
@@ -285,7 +288,7 @@ def _persona_activation_prompt(
                 f'Собеседник, с которым ты говоришь, — это {_clean_user_persona}.',
                 'Учитывай это при ответе: твоё отношение, тон и манера должны соответствовать тому, кто именно с тобой говорит.',
             ])
-        blocks.extend(['[USER INPUT]', question])
+        blocks.extend(['User question:', question])
         if reviewed_context_block:
             blocks.extend(['[REVIEWED CONTEXT]', reviewed_context_block])
         if graph_context:
@@ -336,7 +339,7 @@ def _persona_activation_prompt(
             f'The person speaking to you is {_clean_user_persona_en}.',
             'Factor this into your response: your attitude, tone, and manner should reflect who is actually speaking to you.',
         ])
-    blocks.extend(['[USER INPUT]', question])
+    blocks.extend(['User question:', question])
     if reviewed_context_block:
         blocks.extend(['[REVIEWED CONTEXT]', reviewed_context_block])
     if graph_context:
@@ -898,3 +901,63 @@ def render_graph_context(nodes: list[dict[str, Any]], edges: list[dict[str, Any]
         dst = node_map.get(str(edge.get('to') or ''), {}).get('name') or edge.get('to')
         lines.append(f'- relation: {src} {edge.get("type")} {dst} (weight={edge.get("weight")})')
     return _truncate_tokens_equivalent('\n'.join(lines).strip(), 2200)
+
+
+def format_questionnaire_as_text(q: dict[str, Any]) -> str:
+    """Format persona questionnaire answers into a single text excerpt for LLM synthesis."""
+    lines: list[str] = []
+
+    def add(label: str, key: str) -> None:
+        val = str(q.get(key) or '').strip()
+        if val:
+            lines.append(f'{label}: {val}')
+
+    display_name = str(q.get('display_name') or q.get('persona_name') or '').strip()
+    if display_name:
+        lines.append(f'ИМЯ: {display_name}')
+
+    add('ВОЗРАСТ', 'age')
+    add('ПОЛ/ГЕНДЕР', 'gender')
+    add('НАЦИОНАЛЬНОСТЬ/ПРОИСХОЖДЕНИЕ', 'nationality')
+    add('ПРОФЕССИЯ/РОД ДЕЯТЕЛЬНОСТИ', 'occupation')
+    add('ОБРАЗОВАНИЕ', 'education')
+    add('МЕСТО ЖИТЕЛЬСТВА', 'location')
+
+    add('КАК Я ОПИСЫВАЮ СЕБЯ', 'self_description')
+    add('КАК МЕНЯ ВИДЯТ ДРУГИЕ', 'how_others_see_you')
+
+    add('МОИ ГЛАВНЫЕ ЦЕННОСТИ', 'core_values')
+    add('ЖИЗНЕННАЯ ФИЛОСОФИЯ', 'life_philosophy')
+    add('МИРОВОЗЗРЕНИЕ И УБЕЖДЕНИЯ', 'worldview')
+
+    add('МОИ ЦЕЛИ В ЖИЗНИ', 'main_life_goals')
+    add('МОИ МЕЧТЫ И ЖЕЛАНИЯ', 'dreams')
+    add('ЧТО МЕНЯ ДВИЖЕТ И ВДОХНОВЛЯЕТ', 'what_drives_you')
+
+    add('МОИ ГЛАВНЫЕ СТРАХИ', 'main_fears')
+    add('МОИ НЕУВЕРЕННОСТИ', 'insecurities')
+    add('ТЕМЫ-ТАБУ И СТЫДНЫЕ ТЕМЫ', 'shame_topics')
+    add('МОИ ТРИГГЕРЫ', 'triggers')
+
+    add('МОЁ ДЕТСТВО', 'childhood')
+    add('КЛЮЧЕВЫЕ СОБЫТИЯ ЖИЗНИ', 'key_life_events')
+    add('САМОЕ ТЯЖЁЛОЕ ИСПЫТАНИЕ', 'biggest_challenge')
+    add('ЧЕМ ГОРЖУСЬ БОЛЬШЕ ВСЕГО', 'proudest_achievement')
+
+    add('МОЯ СЕМЬЯ', 'family_description')
+    add('КАК Я ДРУЖУ', 'friendship_style')
+    add('МОИ ЛЮБОВНЫЕ ОТНОШЕНИЯ', 'romantic_patterns')
+
+    add('МОЙ СТИЛЬ ОБЩЕНИЯ', 'communication_style')
+    add('МОЙ ЮМОР', 'humor_style')
+    add('КАК Я ВЕДУ СЕБЯ В КОНФЛИКТЕ', 'conflict_approach')
+    add('КАК Я ВЫРАЖАЮ ЭМОЦИИ', 'emotional_expression')
+
+    add('МОИ ХОББИ И ИНТЕРЕСЫ', 'hobbies')
+    add('ЧТО РАЗДРАЖАЕТ В МЕЛОЧАХ', 'pet_peeves')
+    add('МОИ ТАЙНЫЕ УДОВОЛЬСТВИЯ', 'guilty_pleasures')
+
+    add('ДОПОЛНИТЕЛЬНО', 'additional_context')
+    add('ОСНОВАН НА', 'fictional_basis')
+
+    return '\n'.join(lines)

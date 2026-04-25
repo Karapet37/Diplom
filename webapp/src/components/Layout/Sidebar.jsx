@@ -21,6 +21,8 @@ export function Sidebar({
   selectedPersonality,
   selectedPersonalitySummary,
   onSelectPersonality,
+  userPersonaName,
+  onUserPersonaChange,
   onUploadFiles,
   uploadingFiles,
   graphQuery,
@@ -92,6 +94,15 @@ export function Sidebar({
                 <span>{selectedPersonalitySummary.short_description || selectedPersonalitySummary.hover_text || ''}</span>
               </div>
             ) : null}
+          </label>
+          <label className="field-stack compact span-2">
+            <span>{t('chat_user_persona_label')}</span>
+            <select value={userPersonaName || ''} onChange={(event) => onUserPersonaChange && onUserPersonaChange(event.target.value)}>
+              <option value="">{t('chat_user_persona_stranger')}</option>
+              {personalities.map((item) => (
+                <option key={item.name} value={item.name}>{item.label || item.profile?.name || item.name}</option>
+              ))}
+            </select>
           </label>
           <label className="field-stack compact span-2">
             <span>{t('files_upload')}</span>

@@ -79,6 +79,17 @@ _GENERIC_PERSONA_NAMES = {
     'game_engine',
     'unity',
     'unity_engine',
+    'user',
+    # Concept-graph ontology nodes — must never become persona heads
+    'biology',
+    'psychology',
+    'sociology',
+    'culture',
+    'language',
+    'cognition',
+    'ethics',
+    'activity',
+    'identity',
 }
 _GENERIC_PERSONA_TOKENS = {
     'human',
@@ -218,6 +229,17 @@ _REJECT_EXACT = {
     'unnamed',
     'default',
     'assistant',
+    'user',
+    # Concept-graph ontology nodes
+    'biology',
+    'psychology',
+    'sociology',
+    'culture',
+    'language',
+    'cognition',
+    'ethics',
+    'activity',
+    'identity',
 }
 _REJECT_SUBSTRINGS = (
     'ты пита',

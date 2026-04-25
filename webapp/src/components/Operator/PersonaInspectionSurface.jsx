@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 
+import { PersonaQuestionnaire } from './PersonaQuestionnaire';
+
 function sectionList(items) {
   return Array.isArray(items) && items.length ? items : null;
 }
@@ -12,6 +14,7 @@ export function PersonaInspectionSurface({
   loading,
   deletingPersonalityId,
   onDeletePersonality,
+  onCreatePersonaFromQuestionnaire,
   trainingExamples,
   trainingExamplesLoading,
   onAddTrainingExample,
@@ -26,12 +29,33 @@ export function PersonaInspectionSurface({
       ? lastChatResult.persona_response
       : null;
 
+  // Questionnaire state
+  const [showQuestionnaire, setShowQuestionnaire] = useState(false);
+  const [questionnaireSubmitting, setQuestionnaireSubmitting] = useState(false);
+  const [questionnaireError, setQuestionnaireError] = useState('');
+
   // Training example form state
   const [newInput, setNewInput] = useState('');
   const [newOutput, setNewOutput] = useState('');
   const [newNotes, setNewNotes] = useState('');
   const [addingExample, setAddingExample] = useState(false);
   const [exportContent, setExportContent] = useState('');
+
+  async function handleQuestionnaireSubmit(formData) {
+    setQuestionnaireSubmitting(true);
+    setQuestionnaireError('');
+    try {
+      const result = await onCreatePersonaFromQuestionnaire(formData);
+      setShowQuestionnaire(false);
+      if (result?.persona_slug || result?.persona_name) {
+        onSelectPersonality(result.persona_slug || result.persona_name);
+      }
+    } catch (err) {
+      setQuestionnaireError(err.message || String(err));
+    } finally {
+      setQuestionnaireSubmitting(false);
+    }
+  }
 
   const personalityId = personaDetail?.personality?.personality_id
     || personaDetail?.personality_id
@@ -63,6 +87,44 @@ export function PersonaInspectionSurface({
     }
   }
 
+  if (showQuestionnaire) {
+    return (
+      <div className="operator-surface-grid persona-surface-grid">
+        <section className="workspace-panel glass-panel qform-panel">
+          <PersonaQuestionnaire
+            onSubmit={(data) => void handleQuestionnaireSubmit(data)}
+            onCancel={() => { setShowQuestionnaire(false); setQuestionnaireError(''); }}
+            submitting={questionnaireSubmitting}
+            error={questionnaireError}
+          />
+        </section>
+        <section className="workspace-panel glass-panel operator-inspector-panel">
+          <header className="panel-heading compact">
+            <div>
+              <p className="eyebrow">{t('persona_inspection_detail')}</p>
+              <h2>Создание новой личности</h2>
+            </div>
+          </header>
+          <div className="operator-stack" style={{ padding: '1.2rem 1rem' }}>
+            <p style={{ fontSize: '0.9rem', lineHeight: 1.6 }}>
+              Заполни анкету слева. Обязательно только поле <strong>«Псевдоним»</strong>.
+            </p>
+            <p style={{ fontSize: '0.85rem', opacity: 0.7, lineHeight: 1.6 }}>
+              ЛЛМ проанализирует ответы и выведет психологический профиль: цели, страхи, ценности, стиль поведения и речи. Чем больше заполнено — тем точнее личность.
+            </p>
+            <ul style={{ fontSize: '0.82rem', opacity: 0.65, paddingLeft: '1.2rem', lineHeight: 1.8 }}>
+              <li>Идентификация — основные факты</li>
+              <li>Характер — как видит себя</li>
+              <li>Ценности, цели, страхи — внутренний мир</li>
+              <li>Жизненный путь — события и история</li>
+              <li>Отношения, общение, привычки</li>
+            </ul>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="operator-surface-grid persona-surface-grid">
       <section className="workspace-panel glass-panel">
@@ -71,6 +133,13 @@ export function PersonaInspectionSurface({
             <p className="eyebrow">{t('persona_inspection_title')}</p>
             <h2>{t('persona_inspection_list')}</h2>
           </div>
+          <button
+            type="button"
+            className="button-primary qform-create-btn"
+            onClick={() => { setShowQuestionnaire(true); setQuestionnaireError(''); }}
+          >
+            + Анкета
+          </button>
         </header>
         <div className="operator-list-stack">
           {personalities.length ? personalities.map((item) => {

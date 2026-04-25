@@ -32,6 +32,7 @@ import {
   saveSessionMessageAnnotation,
   uploadCognitiveFiles,
   classifySafety,
+  createPersonaFromQuestionnaire,
 } from './api';
 import { Sidebar } from './components/Layout/Sidebar';
 import { TopBar } from './components/Layout/TopBar';
@@ -45,12 +46,13 @@ import { createTranslator, LANGUAGE_OPTIONS } from './lib/i18n';
 import { normalizeRethinkPreview } from './lib/operatorFormatters';
 
 const LANGUAGE_STORAGE_KEY = 'workspace_ui_language_mvp';
+const USER_PERSONA_STORAGE_KEY = 'workspace_ui_user_persona';
 
 function currentUtcStamp() {
   return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
-function buildOptimisticThreadMessage(text) {
+function buildOptimisticThreadMessage(text, userPersonaName = '') {
   const rawText = String(text || '');
   const timestamp = currentUtcStamp();
   const messageId = `pending-user-${timestamp}-${Math.random().toString(36).slice(2, 8)}`;
@@ -64,6 +66,7 @@ function buildOptimisticThreadMessage(text) {
     message: rawText,
     timestamp,
     persona_name: '',
+    user_persona_name: String(userPersonaName || ''),
     pending: true,
   };
 }
@@ -157,7 +160,9 @@ export default function App() {
 
   const [personalities, setPersonalities] = useState([]);
   const [selectedPersonality, setSelectedPersonality] = useState('');
-  const [userPersonaName, setUserPersonaName] = useState('');
+  const [userPersonaName, setUserPersonaName] = useState(
+    () => window.localStorage.getItem(USER_PERSONA_STORAGE_KEY) || ''
+  );
   const [personaDetail, setPersonaDetail] = useState(null);
   const [personaDetailLoading, setPersonaDetailLoading] = useState(false);
   const [deletingPersonalityId, setDeletingPersonalityId] = useState('');
@@ -198,6 +203,12 @@ export default function App() {
       window.localStorage.setItem(LANGUAGE_STORAGE_KEY, uiLanguage);
     }
   }, [uiLanguage]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(USER_PERSONA_STORAGE_KEY, userPersonaName || '');
+    }
+  }, [userPersonaName]);
 
   useEffect(() => {
     const visibleIds = new Set((graphData.nodes || []).map((node) => String(node.id)));
@@ -387,6 +398,15 @@ export default function App() {
     }
   }
 
+  async function handleCreatePersonaFromQuestionnaire(formData) {
+    const result = await createPersonaFromQuestionnaire(formData);
+    if (result?.ok) {
+      const updated = await listCognitivePersonalities();
+      setPersonalities(updated.personalities || []);
+    }
+    return result;
+  }
+
   async function handleDeletePersonality(personalityId) {
     const cleanId = String(personalityId || '').trim();
     if (!cleanId || deletingPersonalityId) return;
@@ -467,6 +487,14 @@ export default function App() {
       setError(err.message || String(err));
       return null;
     }
+  }
+
+  async function handleSaveAnnotationCorrection(payload) {
+    return handleAddTrainingExample({
+      ...payload,
+      session_id: activeSessionId || '',
+      persona_name: payload.persona_name || selectedPersonality || '',
+    });
   }
 
   async function handleDeleteTrainingExample(exampleId) {
@@ -705,7 +733,11 @@ export default function App() {
     const rawMessage = chatInput;
     const analysisMessage = rawMessage.trim();
     if (!analysisMessage || chatRunning) return;
-    const optimisticUserMessage = buildOptimisticThreadMessage(rawMessage);
+    const resolvedUserPersonaDisplay = resolvePersonalityRecord(personalities, userPersonaName)?.label
+      || resolvePersonalityRecord(personalities, userPersonaName)?.name
+      || userPersonaName
+      || '';
+    const optimisticUserMessage = buildOptimisticThreadMessage(rawMessage, resolvedUserPersonaDisplay);
     setChatRunning(true);
     setChatProgress(t('chat_running'));
     setError('');
@@ -724,7 +756,11 @@ export default function App() {
         language: uiLanguage,
         selected_persona: selectedPersonality,
         personality_name: selectedPersonality,
-        user_persona_name: userPersonaName || '',
+        user_persona_id: userPersonaName || '',
+        user_persona_name: resolvePersonalityRecord(personalities, userPersonaName)?.label
+          || resolvePersonalityRecord(personalities, userPersonaName)?.name
+          || userPersonaName
+          || '',
       });
       setLastChatResult(result);
       setGraphContentLanguage(result?.response_language || result?.analysis?.user_state?.language || uiLanguage);
@@ -943,6 +979,7 @@ export default function App() {
           safetyResult={safetyResult}
           trainingMode={trainingMode}
           onSaveAnnotation={handleSaveMessageAnnotation}
+          onSaveCorrection={handleSaveAnnotationCorrection}
           selectedPersonality={selectedPersonalityDisplayName}
           personas={personalities}
           userPersonaName={userPersonaName}
@@ -963,6 +1000,7 @@ export default function App() {
           loading={personaDetailLoading}
           deletingPersonalityId={deletingPersonalityId}
           onDeletePersonality={(pid) => void handleDeletePersonality(pid)}
+          onCreatePersonaFromQuestionnaire={(data) => handleCreatePersonaFromQuestionnaire(data)}
           trainingExamples={trainingExamples}
           trainingExamplesLoading={trainingExamplesLoading}
           onAddTrainingExample={(payload) => handleAddTrainingExample(payload)}
@@ -1077,6 +1115,8 @@ export default function App() {
           selectedPersonality={selectedPersonality}
           selectedPersonalitySummary={selectedPersonalitySummary}
           onSelectPersonality={(name) => void handleSelectPersonality(name)}
+          userPersonaName={userPersonaName}
+          onUserPersonaChange={setUserPersonaName}
           onUploadFiles={(files) => void handleUploadFiles(files)}
           uploadingFiles={uploadingFiles}
           graphQuery={graphQuery}

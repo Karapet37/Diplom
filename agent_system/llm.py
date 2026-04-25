@@ -34,6 +34,12 @@ VISIBLE_REPLY_LEAK_MARKERS = (
     'what i cannot',
     'что я могу сказать',
     'что я не могу',
+    'что происходит',
+    'мои ограничения',
+    'что делать',
+    'моя реакция',
+    '**что',
+    '**мои',
     'внешний ответ персонажа',
     'outer response',
     'the user has instructed me',
@@ -46,6 +52,10 @@ VISIBLE_REPLY_LEAK_MARKERS = (
     'user question:',
     'review notes',
     'issues identified',
+    'мой ответ:',
+    'my response:',
+    'internal reasoning',
+    'внутренние рассуждения',
 )
 _MODEL_CALL_LOCK = Lock()
 _MODEL_META_LOCK = Lock()

@@ -720,6 +720,11 @@ def _make_raw_llm_fn(llm: "Llama", *, max_tokens: int | None = None) -> Callable
             "total_tokens": 0,
         }
         messages = _split_chat_prompt_messages(prompt)
+        # Qwen3 no-think mode: if system prompt starts with /no_think, prefill the
+        # assistant turn with </think> so the model skips its reasoning block entirely.
+        _first_msg_content = str((messages[0] if messages else {}).get("content") or "")
+        if _first_msg_content.lstrip().startswith("/no_think"):
+            messages = messages + [{"role": "assistant", "content": "</think>\n"}]
         kwargs = {
             "max_tokens": resolved_max_tokens,
             "temperature": float(os.getenv("LOCAL_GGUF_TEMPERATURE", "0.15")),

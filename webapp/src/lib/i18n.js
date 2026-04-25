@@ -201,6 +201,9 @@ const TRANSLATIONS = {
     annotation_no_context: 'No previous messages in the current context window.',
     annotation_corrected: 'corrected',
     annotation_pending: 'needs review',
+    annotation_correct_response: 'Correct response',
+    annotation_correct_placeholder: 'Type the ideal response the persona should have given…',
+    annotation_correction_saved: '✓ Correction saved',
   },
   ru: {
     top_identity: 'Минимальный runtime',
@@ -397,6 +400,9 @@ const TRANSLATIONS = {
     annotation_no_context: 'В текущем контекстном окне нет предыдущих реплик.',
     annotation_corrected: 'исправлено',
     annotation_pending: 'проверить',
+    annotation_correct_response: 'Правильный ответ',
+    annotation_correct_placeholder: 'Напишите идеальный ответ, который должна была дать личность…',
+    annotation_correction_saved: '✓ Исправление сохранено',
   },
   hy: {
     graph_canonical_english: 'Կանոնական անգլերեն բացատրություն',
@@ -580,6 +586,9 @@ const HY_TRANSLATION_PATCH = {
   annotation_no_context: 'Ընթացիկ context window-ում նախորդ հաղորդագրություններ չկան։',
   annotation_corrected: 'ուղղված է',
   annotation_pending: 'ստուգման կարիք ունի',
+  annotation_correct_response: 'Ճիշտ պատասխան',
+  annotation_correct_placeholder: 'Գրի՛ր՝ ինչ պատասխան պետք է տայ personaն…',
+  annotation_correction_saved: '✓ Ուղղումը պահպանված է',
 };
 
 const ZH_TRANSLATION_PATCH = {
@@ -745,6 +754,9 @@ const ZH_TRANSLATION_PATCH = {
   annotation_no_context: '当前上下文窗口中没有更早的消息。',
   annotation_corrected: '已修正',
   annotation_pending: '待复核',
+  annotation_correct_response: '正确回应',
+  annotation_correct_placeholder: '输入该角色本应给出的理想回复…',
+  annotation_correction_saved: '✓ 已保存修正',
 };
 
 TRANSLATIONS.hy = {

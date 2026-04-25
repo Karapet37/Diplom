@@ -1,0 +1,11 @@
+{
+  "selected_route": "factual_answer",
+  "request_type": "factual_query",
+  "interaction_mode": "factual_query",
+  "response_style": "grounded_answer",
+  "persona_name": "",
+  "current_entity": "Ну",
+  "persona_style_traits": [],
+  "speech_style_hints": [],
+  "session_id": "session-20260425002458"
+}

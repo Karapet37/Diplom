@@ -161,6 +161,7 @@ export function ChatSurface({
   safetyResult,
   trainingMode,
   onSaveAnnotation,
+  onSaveCorrection,
   selectedPersonality,
   personas,
   userPersonaName,
@@ -191,6 +192,7 @@ export function ChatSurface({
         safetyResult={safetyResult}
         trainingMode={trainingMode}
         onSaveAnnotation={onSaveAnnotation}
+        onSaveCorrection={onSaveCorrection}
         activePersonaName={activePersonaName}
         personas={personas}
         userPersonaName={userPersonaName}

@@ -191,6 +191,16 @@ export function deletePersonality(personalityId) {
   });
 }
 
+// Personality construction — create from questionnaire
+// ---------------------------------------------------------------------------
+
+export function createPersonaFromQuestionnaire(payload = {}) {
+  return request('/api/cognitive/personality-construction/personalities/from-questionnaire', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Training examples — fine-tuning dataset curation
 // ---------------------------------------------------------------------------

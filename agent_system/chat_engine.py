@@ -291,8 +291,8 @@ def _write_concept_graph_from_message(message: str, *, graph_store: GraphStore, 
         side_effects.add_graph_write('chat:concept_graph_extraction')
 
 
-def _write_session_history(session_id: str, user_message: str, assistant_reply: str, *, side_effects: ChatSideEffects, persona_name: str = '') -> None:
-    history_path = append_turn(session_id, user_message, assistant_reply, persona_name=persona_name)
+def _write_session_history(session_id: str, user_message: str, assistant_reply: str, *, side_effects: ChatSideEffects, persona_name: str = '', user_persona_name: str = '') -> None:
+    history_path = append_turn(session_id, user_message, assistant_reply, persona_name=persona_name, user_persona_name=user_persona_name)
     side_effects.history_write_path = str(history_path)
 
 
@@ -944,6 +944,7 @@ def _build_reviewer_prompt(
     target = normalize_language_code(language, fallback='en')
     if target == 'ru':
         parts = [
+            '/no_think',
             'Верни только финальный ответ пользователю plain text.',
             'Ты второй проверяющий model.',
             'Первый model уже написал черновик. Твоя задача: проверить его по выбранному route и, если нужно, переписать лучше.',
@@ -973,6 +974,7 @@ def _build_reviewer_prompt(
         )
         return '\n\n'.join(part for part in parts if str(part).strip())
     parts = [
+        '/no_think',
         'Return only the final user-facing reply as plain text.',
         'You are the second reviewing model.',
         'The first model already produced a draft. Check it against the selected route and rewrite it if needed.',
@@ -1070,13 +1072,13 @@ def _model_budget_trace_meta(model_budget: dict[str, Any]) -> dict[str, Any]:
 def _route_output_budget(route: RouteDecision, *, repair: bool = False) -> int:
     selected = str(route.selected_route or '').strip()
     if selected == 'persona_graph_reasoning':
-        return 896 if repair else 640
+        return 2048 if repair else 1536
     if selected == 'persona_chat_fast_path':
-        return 512 if repair else 320
+        return 1024 if repair else 768
     if selected == 'persona_dialogue_analysis':
-        return 896 if repair else 640
+        return 2048 if repair else 1536
     if selected in {'hypothetical_roleplay', 'project_document_analysis'}:
-        return 640 if repair else 448
+        return 1024 if repair else 768
     if selected == 'meta_previous_answer':
         return 704 if repair else 512
     if selected == 'factual_answer':
@@ -1918,7 +1920,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 trace,
                 'storage_writes',
                 lambda: (
-                    _write_session_history(clean_session_id, raw_message, assistant_reply, side_effects=side_effects, persona_name=str(persona_action.get('persona_name') or current_entity_for_state or '').strip()),
+                    _write_session_history(clean_session_id, raw_message, assistant_reply, side_effects=side_effects, persona_name=str(persona_action.get('persona_name') or current_entity_for_state or '').strip(), user_persona_name=str(request.user_persona_name or '').strip()),
                     setattr(
                         side_effects,
                         'route_state_path',
@@ -2334,6 +2336,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                         language=response_language,
                         persona_selected=simple_persona_selected,
                         allow_builtin_fallback=False,
+                        max_tokens_override=_style_guard_output_budget(route, trace_learning),
                         role_override=str(chat_orchestration.get('reviewer_role') or simple_chat_role).strip() or simple_chat_role,
                     )
                 if str(repaired_reply or '').strip():
@@ -2449,7 +2452,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 trace,
                 'storage_writes',
                 lambda: (
-                    _write_session_history(clean_session_id, raw_message, assistant_reply, side_effects=side_effects, persona_name=str(built.get('persona_name') or simple_selected_persona or '').strip()),
+                    _write_session_history(clean_session_id, raw_message, assistant_reply, side_effects=side_effects, persona_name=str(built.get('persona_name') or simple_selected_persona or '').strip(), user_persona_name=str(request.user_persona_name or '').strip()),
                     setattr(
                         side_effects,
                         'route_state_path',
@@ -3240,7 +3243,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             trace,
             'storage_writes',
             lambda: (
-                _write_session_history(clean_session_id, raw_message, assistant_reply, side_effects=side_effects, persona_name=primary_name),
+                _write_session_history(clean_session_id, raw_message, assistant_reply, side_effects=side_effects, persona_name=primary_name, user_persona_name=str(request.user_persona_name or '').strip()),
                 _record_persona_reaction(primary_name, analysis.situation, assistant_reply, side_effects=side_effects),
                 _capture_persona_dossier_update(
                     primary_name,

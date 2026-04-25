@@ -2327,3 +2327,416 @@ small,
 .node-answer-panel h3 {
   margin-bottom: 8px;
 }
+
+/* ─── Annotation workbench v2 ───────────────────────────────────────── */
+
+.annot-msg-preview {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+/* Active signals section */
+.annot-signals {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(78, 163, 255, 0.04);
+}
+.annot-signals__label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+/* Search row */
+.annot-all {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 0 4px;
+}
+.annot-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--panel-strong);
+  z-index: 1;
+}
+.annot-search {
+  flex: 1;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+/* Group */
+.annot-group {
+  border-bottom: 1px solid var(--line);
+}
+.annot-group__toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text);
+  text-align: left;
+}
+.annot-group__toggle:hover { background: rgba(255,255,255,0.03); }
+.annot-group__toggle strong { font-size: 0.72rem; color: var(--accent); min-width: 18px; }
+.annot-group__toggle span { flex: 1; font-size: 0.82rem; }
+.annot-group__toggle small { font-size: 0.9rem; color: var(--muted); }
+.annot-group__badge {
+  font-size: 0.68rem;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 10px;
+  padding: 1px 6px;
+  min-width: 18px;
+  text-align: center;
+}
+
+/* Coordinate row */
+.annot-coord-row {
+  display: grid;
+  grid-template-columns: 130px 120px auto 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  font-size: 0.8rem;
+}
+.annot-coord-row.dirty {
+  background: rgba(255, 200, 60, 0.05);
+}
+.annot-coord-row__id strong { font-size: 0.75rem; color: var(--accent); display: block; }
+.annot-coord-row__id span { font-size: 0.72rem; color: var(--muted); }
+.annot-coord-row__select {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 3px 6px;
+  color: var(--text);
+  font-size: 0.78rem;
+  min-width: 90px;
+}
+.annot-coord-row__predicted {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.annot-coord-row__predicted:hover { color: var(--text); border-color: var(--accent); }
+.annot-coord-row__extras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.annot-extra-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  font-size: 0.7rem;
+  cursor: pointer;
+  color: var(--muted);
+  user-select: none;
+}
+.annot-extra-chip input { display: none; }
+.annot-extra-chip.on {
+  background: rgba(78,163,255,0.15);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* Bottom bar */
+.annot-bottom {
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.annot-bottom__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.button-primary {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+.button-primary:disabled { opacity: 0.5; cursor: default; }
+
+/* Correct-response field */
+.annot-correction {
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(var(--accent-rgb, 0,120,220), 0.06);
+}
+.annot-correction__label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  margin-bottom: 6px;
+  display: block;
+}
+.annot-correction__input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.9rem;
+  padding: 8px 10px;
+  resize: vertical;
+  font-family: inherit;
+}
+.annot-correction__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.training-saved-badge.correction {
+  color: var(--accent);
+}
+
+/* ============================================================
+   Questionnaire form (PersonaQuestionnaire)
+   ============================================================ */
+
+.qform-panel {
+  overflow-y: auto;
+}
+
+.qform {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 100%;
+}
+
+.qform-header {
+  padding: 1.2rem 1.2rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.qform-header h2 {
+  margin: 0.15rem 0 0.3rem;
+  font-size: 1.2rem;
+}
+
+.qform-header__hint {
+  font-size: 0.8rem;
+  opacity: 0.6;
+  margin: 0;
+}
+
+.qform-name-block {
+  padding: 1rem 1.2rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.qform-name-input {
+  font-size: 1rem !important;
+  padding: 8px 12px !important;
+}
+
+.qform-name-hint {
+  font-size: 0.72rem;
+  opacity: 0.5;
+  margin: 4px 0 0;
+}
+
+.qform-required {
+  color: var(--danger, #f44);
+}
+
+.qform-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0.5rem 1.2rem;
+  font-size: 0.78rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.qform-controls__count {
+  flex: 1;
+  opacity: 0.5;
+}
+
+/* Sections */
+.qform-section {
+  border-bottom: 1px solid var(--line);
+}
+
+.qform-section__toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 1.2rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text);
+  text-align: left;
+}
+
+.qform-section__toggle:hover {
+  background: rgba(255,255,255,0.03);
+}
+
+.qform-section__icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.qform-section__title {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.qform-section__title strong {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.qform-section__title small {
+  font-size: 0.72rem;
+  opacity: 0.5;
+}
+
+.qform-section__badge {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 10px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 6px;
+}
+
+.qform-section__chevron {
+  font-size: 0.85rem;
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.qform-section__body {
+  padding: 0.6rem 1.2rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  background: rgba(255,255,255,0.015);
+}
+
+/* Fields */
+.qform-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.qform-field__label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.qform-field__input,
+.qform-field__textarea {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.85rem;
+  padding: 7px 10px;
+  font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.qform-field__textarea {
+  resize: vertical;
+  min-height: 2.5rem;
+}
+
+.qform-field__input:focus,
+.qform-field__textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Footer */
+.qform-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 1rem 1.2rem;
+  border-top: 1px solid var(--line);
+  position: sticky;
+  bottom: 0;
+  background: var(--bg-elevated);
+  backdrop-filter: blur(8px);
+}
+
+.qform-submit {
+  font-size: 0.95rem;
+  padding: 8px 22px;
+}
+
+.qform-error {
+  color: var(--danger, #f44);
+  font-size: 0.82rem;
+  padding: 0.4rem 1.2rem;
+}
+
+/* Create button in persona list header */
+.panel-heading.compact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.qform-create-btn {
+  font-size: 0.78rem;
+  padding: 5px 12px;
+  white-space: nowrap;
+}
+

@@ -63,17 +63,19 @@ function resolveAssistantSpeakerName(item, activePersonaName) {
   if (item?.role === "user") {
     return "";
   }
-  const explicitPersonaName = String(activePersonaName || "").trim();
   const storedPersonaName = String(item?.persona_name || "").trim();
   const storedSpeakerName = String(item?.speaker_name || "").trim();
-  const resolvedSpeakerName = explicitPersonaName
-    || storedPersonaName
+  const explicitPersonaName = String(activePersonaName || "").trim();
+  // Prefer the persona name stored in the message record — it's accurate for that message.
+  // Fall back to the currently selected persona only when no record exists (legacy messages).
+  const resolvedSpeakerName = storedPersonaName
+    || explicitPersonaName
     || (!isGenericAssistantLabel(storedSpeakerName) ? storedSpeakerName : "")
     || DEFAULT_ASSISTANT_SPEAKER;
   return `${resolvedSpeakerName}`;
 }
 
-function ThreadMessage({ item, t, trainingMode, activePersonaName, selected, onSelect }) {
+function ThreadMessage({ item, t, trainingMode, activePersonaName, userPersonaName, selected, onSelect }) {
   const role = item.role === "user" ? "user" : "assistant";
   const preview = summarizeVector(item.vector);
 
@@ -98,7 +100,7 @@ function ThreadMessage({ item, t, trainingMode, activePersonaName, selected, onS
     >
       <header>
         <div className="chat-thread-item__identity">
-          <strong>{role === "user" ? t("chat_you") : resolveAssistantSpeakerName(item, activePersonaName)}</strong>
+          <strong>{role === "user" ? (item.user_persona_name || userPersonaName || t("chat_user_persona_stranger")) : resolveAssistantSpeakerName(item, activePersonaName)}</strong>
           {trainingMode ? (
             <span className={`training-label ${item.has_correction ? "saved" : ""}`}>
               {item.has_correction ? t("annotation_corrected") : t("annotation_pending")}
@@ -113,42 +115,123 @@ function ThreadMessage({ item, t, trainingMode, activePersonaName, selected, onS
   );
 }
 
+function isDefaultValue(v) {
+  return !v || HIDDEN_DEFAULTS.has(v);
+}
+
+function CoordinateRow({ spec, choice, predicted, onChange, onToggleExtra }) {
+  const extras = Array.isArray(choice?.extra) ? choice.extra : [];
+  const predictedMain = predicted?.main || "";
+  const currentMain = choice?.main || spec.options?.[0] || "";
+  const isDirty = currentMain !== (predicted?.main || spec.options?.[0] || "");
+  return (
+    <div className={`annot-coord-row ${isDirty ? "dirty" : ""}`}>
+      <div className="annot-coord-row__id" title={spec.description}>
+        <strong>{spec.interpreter_id}</strong>
+        <span>{spec.title}</span>
+      </div>
+      <select
+        className="annot-coord-row__select"
+        value={currentMain}
+        onChange={(e) => onChange(spec.interpreter_id, e.target.value)}
+      >
+        {(spec.options || []).map((opt) => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </select>
+      {predictedMain && predictedMain !== currentMain && (
+        <button
+          type="button"
+          className="annot-coord-row__predicted"
+          title={`Predicted: ${predictedMain}`}
+          onClick={() => onChange(spec.interpreter_id, predictedMain)}
+        >
+          ← {predictedMain}
+        </button>
+      )}
+      <div className="annot-coord-row__extras">
+        {(spec.options || []).filter((o) => o !== currentMain).map((opt) => (
+          <label key={opt} className={`annot-extra-chip ${extras.includes(opt) ? "on" : ""}`}>
+            <input type="checkbox" checked={extras.includes(opt)} onChange={() => onToggleExtra(spec.interpreter_id, opt)} />
+            {opt}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MessageAnnotationEditor({
   selectedMessage,
   registry,
   messagesById,
   onSaveAnnotation,
+  onSaveCorrection,
   onSelectMessage,
   activePersonaName,
+  userPersonaName,
   t,
 }) {
   const [draftVector, setDraftVector] = useState({});
   const [notes, setNotes] = useState("");
+  const [correctOutput, setCorrectOutput] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [openGroups, setOpenGroups] = useState(["A", "B", "C", "D", "E", "F", "G"]);
+  const [correctionSaved, setCorrectionSaved] = useState(false);
+  const [openGroups, setOpenGroups] = useState([]);
+  const [filterText, setFilterText] = useState("");
 
   useEffect(() => {
     setDraftVector(cloneVector(selectedMessage?.vector || {}));
     setNotes(selectedMessage?.annotation_notes || "");
+    setCorrectOutput("");
     setSaved(false);
-  }, [selectedMessage?.message_id, selectedMessage?.annotation_id, selectedMessage?.vector, selectedMessage?.annotation_notes]);
+    setCorrectionSaved(false);
+    setFilterText("");
+    // Auto-open groups that have non-default predicted values
+    const predicted = selectedMessage?.predicted_vector || selectedMessage?.vector || {};
+    const activeGroups = new Set();
+    for (const spec of registry || []) {
+      const main = (predicted[spec.interpreter_id] || {}).main || "";
+      if (!isDefaultValue(main)) activeGroups.add(spec.group_id);
+    }
+    setOpenGroups(Array.from(activeGroups));
+  }, [selectedMessage?.message_id, selectedMessage?.annotation_id]);
 
   const groupedRegistry = useMemo(() => {
     const groups = new Map();
     for (const spec of registry || []) {
       const groupId = spec.group_id || "misc";
       if (!groups.has(groupId)) {
-        groups.set(groupId, {
-          groupId,
-          title: spec.group_title || groupId,
-          items: [],
-        });
+        groups.set(groupId, { groupId, title: spec.group_title || groupId, items: [] });
       }
       groups.get(groupId).items.push(spec);
     }
     return Array.from(groups.values());
   }, [registry]);
+
+  // Signals = P-coords with non-default value in draft or predicted
+  const activeSignals = useMemo(() => {
+    const predicted = selectedMessage?.predicted_vector || {};
+    return (registry || []).filter((spec) => {
+      const draftMain = (draftVector[spec.interpreter_id] || {}).main || "";
+      const predMain = (predicted[spec.interpreter_id] || {}).main || "";
+      return !isDefaultValue(draftMain) || !isDefaultValue(predMain);
+    });
+  }, [registry, draftVector, selectedMessage?.predicted_vector]);
+
+  const filteredGroups = useMemo(() => {
+    if (!filterText.trim()) return groupedRegistry;
+    const q = filterText.trim().toLowerCase();
+    return groupedRegistry
+      .map((g) => ({
+        ...g,
+        items: g.items.filter(
+          (s) => s.interpreter_id.toLowerCase().includes(q) || s.title.toLowerCase().includes(q)
+        ),
+      }))
+      .filter((g) => g.items.length > 0);
+  }, [groupedRegistry, filterText]);
 
   if (!selectedMessage) {
     return (
@@ -202,25 +285,41 @@ function MessageAnnotationEditor({
       : [...current, groupId]);
   }
 
+  function acceptPredicted() {
+    const predicted = selectedMessage?.predicted_vector || {};
+    setDraftVector(cloneVector(Object.keys(predicted).length ? predicted : selectedMessage?.vector || {}));
+    setSaved(false);
+  }
+
   async function handleSave() {
     if (saving) return;
     setSaving(true);
     try {
-      const result = await onSaveAnnotation({
-        message_id: selectedMessage.message_id,
-        role: selectedMessage.role,
-        raw_text: selectedMessage.raw_text,
-        analysis_text: selectedMessage.analysis_text,
-        display_text: selectedMessage.display_text,
-        timestamp: selectedMessage.timestamp,
-        persona_name: selectedMessage.persona_name,
-        coordinates: draftVector,
-        context_window: selectedMessage.context_window || [],
-        context_matrix: selectedMessage.context_matrix || [],
-        transition_interpretation: selectedMessage.transition_interpretation || {},
-        notes,
-      });
-      setSaved(Boolean(result));
+      const [annotResult, corrResult] = await Promise.all([
+        onSaveAnnotation({
+          message_id: selectedMessage.message_id,
+          role: selectedMessage.role,
+          raw_text: selectedMessage.raw_text,
+          analysis_text: selectedMessage.analysis_text,
+          display_text: selectedMessage.display_text,
+          timestamp: selectedMessage.timestamp,
+          persona_name: selectedMessage.persona_name,
+          coordinates: draftVector,
+          context_window: selectedMessage.context_window || [],
+          context_matrix: selectedMessage.context_matrix || [],
+          transition_interpretation: selectedMessage.transition_interpretation || {},
+          notes,
+        }),
+        correctOutput.trim() && onSaveCorrection
+          ? onSaveCorrection({
+              input_text: selectedMessage.raw_text || selectedMessage.display_text || "",
+              correct_output: correctOutput.trim(),
+              persona_name: selectedMessage.persona_name || "",
+            })
+          : Promise.resolve(null),
+      ]);
+      setSaved(Boolean(annotResult));
+      if (corrResult) setCorrectionSaved(true);
     } finally {
       setSaving(false);
     }
@@ -231,137 +330,116 @@ function MessageAnnotationEditor({
       <header className="annotation-workbench__header">
         <div>
           <p className="eyebrow">{t("annotation_title")}</p>
-          <h3>{t("annotation_selected_message")}</h3>
+          <strong>
+            {selectedMessage.role === "user"
+              ? (selectedMessage.user_persona_name || t("chat_user_persona_stranger"))
+              : resolveAssistantSpeakerName(selectedMessage, activePersonaName)}
+          </strong>
+          <span className="annot-msg-preview">{selectedMessage.display_text?.slice(0, 80)}{selectedMessage.display_text?.length > 80 ? "…" : ""}</span>
         </div>
         <div className="annotation-workbench__actions">
           {saved ? <span className="training-saved-badge">{t("training_saved")}</span> : null}
-          <button type="button" className="button-secondary" disabled={saving} onClick={handleSave}>
-            {saving ? "..." : t("annotation_save")}
+          <button type="button" className="button-secondary" title="Accept all predicted values" onClick={acceptPredicted}>
+            ↺ predicted
+          </button>
+          <button type="button" className="button-primary" disabled={saving} onClick={handleSave}>
+            {saving ? "…" : t("annotation_save")}
           </button>
         </div>
       </header>
 
-      <div className="annotation-selected-card">
-        <div className="annotation-selected-card__meta">
-          <strong>{selectedMessage.role === "user" ? t("chat_you") : resolveAssistantSpeakerName(selectedMessage, activePersonaName)}</strong>
-          <span>{selectedMessage.timestamp || "—"}</span>
+      {/* Active signals — only non-default P-coords */}
+      {activeSignals.length > 0 && (
+        <section className="annot-signals">
+          <p className="annot-signals__label">Активные сигналы</p>
+          {activeSignals.map((spec) => (
+            <CoordinateRow
+              key={spec.interpreter_id}
+              spec={spec}
+              choice={draftVector?.[spec.interpreter_id] || { main: spec.options?.[0] || "", extra: [] }}
+              predicted={selectedMessage.predicted_vector?.[spec.interpreter_id] || {}}
+              onChange={updateMain}
+              onToggleExtra={toggleExtra}
+            />
+          ))}
+        </section>
+      )}
+
+      {/* Search + full registry */}
+      <section className="annot-all">
+        <div className="annot-search-row">
+          <input
+            type="search"
+            className="annot-search"
+            placeholder="Поиск P-координаты…"
+            value={filterText}
+            onChange={(e) => setFilterText(e.target.value)}
+          />
+          <button type="button" className="link-button" onClick={() => setOpenGroups(filteredGroups.map((g) => g.groupId))}>
+            развернуть все
+          </button>
+          <button type="button" className="link-button" onClick={() => setOpenGroups([])}>
+            свернуть все
+          </button>
         </div>
-        <p>{selectedMessage.display_text}</p>
-        <div className="annotation-transition-grid">
-          <div>
-            <span>{t("annotation_history_flow")}</span>
-            <strong>{(selectedMessage.history_flow || []).join(" → ") || "—"}</strong>
-          </div>
-          <div>
-            <span>{t("annotation_transition")}</span>
-            <strong>{selectedMessage.transition_interpretation?.type || "—"}</strong>
-          </div>
+
+        {filteredGroups.map((group) => {
+          const isOpen = openGroups.includes(group.groupId) || Boolean(filterText.trim());
+          const nonDefaultCount = group.items.filter((s) => {
+            const m = (draftVector?.[s.interpreter_id] || {}).main || "";
+            return !isDefaultValue(m);
+          }).length;
+          return (
+            <section key={group.groupId} className="annot-group">
+              <button type="button" className="annot-group__toggle" onClick={() => toggleGroup(group.groupId)}>
+                <strong>{group.groupId}</strong>
+                <span>{group.title}</span>
+                {nonDefaultCount > 0 && <span className="annot-group__badge">{nonDefaultCount}</span>}
+                <small>{isOpen ? "−" : "+"}</small>
+              </button>
+              {isOpen && group.items.map((spec) => (
+                <CoordinateRow
+                  key={spec.interpreter_id}
+                  spec={spec}
+                  choice={draftVector?.[spec.interpreter_id] || { main: spec.options?.[0] || "", extra: [] }}
+                  predicted={selectedMessage.predicted_vector?.[spec.interpreter_id] || {}}
+                  onChange={updateMain}
+                  onToggleExtra={toggleExtra}
+                />
+              ))}
+            </section>
+          );
+        })}
+      </section>
+
+      <div className="annot-bottom">
+        <label className="field-stack annot-correction">
+          <span className="annot-correction__label">{t("annotation_correct_response")}</span>
+          <textarea
+            className="annot-correction__input"
+            value={correctOutput}
+            onChange={(e) => { setCorrectOutput(e.target.value); setCorrectionSaved(false); }}
+            rows={3}
+            placeholder={t("annotation_correct_placeholder")}
+          />
+        </label>
+        <label className="field-stack annotation-notes">
+          <span>{t("annotation_notes")}</span>
+          <textarea
+            value={notes}
+            onChange={(e) => { setNotes(e.target.value); setSaved(false); }}
+            rows={2}
+            placeholder={t("annotation_notes_placeholder")}
+          />
+        </label>
+        <div className="annot-bottom__actions">
+          {correctionSaved ? <span className="training-saved-badge correction">{t("annotation_correction_saved")}</span> : null}
+          {saved ? <span className="training-saved-badge">{t("training_saved")}</span> : null}
+          <button type="button" className="button-primary" disabled={saving} onClick={handleSave}>
+            {saving ? "…" : t("annotation_save")}
+          </button>
         </div>
       </div>
-
-      <section className="annotation-context-panel">
-        <header>
-          <div>
-            <h4>{t("annotation_context_window")}</h4>
-            <p>{t("annotation_context_matrix")}</p>
-          </div>
-        </header>
-        {selectedMessage.context_matrix?.length ? (
-          <div className="annotation-context-list">
-            {selectedMessage.context_matrix.map((entry) => {
-              const full = messagesById.get(entry.message_id) || entry;
-              return (
-                <article key={entry.message_id} className="annotation-context-card">
-                  <header>
-                    <div>
-                      <strong>{full.role === "user" ? t("chat_you") : resolveAssistantSpeakerName(full, activePersonaName)}</strong>
-                      <span>{full.timestamp || ""}</span>
-                    </div>
-                    <button type="button" className="link-button" onClick={() => onSelectMessage(entry.message_id)}>
-                      {t("annotation_edit_context")}
-                    </button>
-                  </header>
-                  <p>{full.display_text}</p>
-                  <p className="annotation-inline-summary">{summarizeVector(full.vector)}</p>
-                </article>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="empty-inline">{t("annotation_no_context")}</p>
-        )}
-      </section>
-
-      <section className="annotation-groups">
-        {groupedRegistry.map((group) => (
-          <section key={group.groupId} className="annotation-group-card">
-            <button type="button" className="annotation-group-toggle" onClick={() => toggleGroup(group.groupId)}>
-              <strong>{group.groupId}</strong>
-              <span>{group.title}</span>
-              <small>{openGroups.includes(group.groupId) ? "−" : "+"}</small>
-            </button>
-            {openGroups.includes(group.groupId) ? (
-              <div className="annotation-group-grid">
-                {group.items.map((spec) => {
-                  const choice = draftVector?.[spec.interpreter_id] || { main: spec.options?.[0] || "", extra: [] };
-                  const predicted = selectedMessage.predicted_vector?.[spec.interpreter_id] || {};
-                  const extras = Array.isArray(choice.extra) ? choice.extra : [];
-                  return (
-                    <article key={spec.interpreter_id} className="annotation-coordinate-row">
-                      <div className="annotation-coordinate-row__meta">
-                        <strong>{spec.interpreter_id}</strong>
-                        <span>{spec.title}</span>
-                        <small>{spec.description}</small>
-                      </div>
-                      <div className="annotation-coordinate-row__controls">
-                        <label className="field-stack">
-                          <span>{t("annotation_main")}</span>
-                          <select value={choice.main || ""} onChange={(event) => updateMain(spec.interpreter_id, event.target.value)}>
-                            {(spec.options || []).map((option) => (
-                              <option key={option} value={option}>{option}</option>
-                            ))}
-                          </select>
-                        </label>
-                        <div className="annotation-extra-block">
-                          <span>{t("annotation_extra")}</span>
-                          <div className="annotation-extra-grid">
-                            {(spec.options || []).filter((option) => option !== choice.main).map((option) => (
-                              <label key={option} className={`annotation-extra-chip ${extras.includes(option) ? "active" : ""}`}>
-                                <input
-                                  type="checkbox"
-                                  checked={extras.includes(option)}
-                                  onChange={() => toggleExtra(spec.interpreter_id, option)}
-                                />
-                                <span>{option}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                        <p className="annotation-predicted">
-                          {t("annotation_predicted")}: {formatPrediction(predicted)}
-                        </p>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            ) : null}
-          </section>
-        ))}
-      </section>
-
-      <label className="field-stack annotation-notes">
-        <span>{t("annotation_notes")}</span>
-        <textarea
-          value={notes}
-          onChange={(event) => {
-            setNotes(event.target.value);
-            setSaved(false);
-          }}
-          rows={3}
-          placeholder={t("annotation_notes_placeholder")}
-        />
-      </label>
     </section>
   );
 }
@@ -378,6 +456,7 @@ export function ChatGraphPanel({
   onRun,
   trainingMode,
   onSaveAnnotation,
+  onSaveCorrection,
   activePersonaName,
   personas,
   userPersonaName,
@@ -453,6 +532,7 @@ export function ChatGraphPanel({
                 t={t}
                 trainingMode={trainingMode}
                 activePersonaName={resolvedActivePersonaName}
+                userPersonaName={userPersonaName || ""}
                 selected={trainingMode && item.message_id === selectedMessageId}
                 onSelect={setSelectedMessageId}
               />
@@ -467,33 +547,15 @@ export function ChatGraphPanel({
           registry={registry}
           messagesById={messagesById}
           onSaveAnnotation={onSaveAnnotation}
+          onSaveCorrection={onSaveCorrection}
           onSelectMessage={setSelectedMessageId}
           activePersonaName={resolvedActivePersonaName}
+          userPersonaName={userPersonaName || ""}
           t={t}
         />
       ) : null}
 
       <form className="chat-composer-fixed" onSubmit={onSubmit}>
-        <div className="chat-composer-persona-row">
-          <label className="chat-composer-persona-label">
-            <span>{t("chat_user_persona_label")}</span>
-            <select
-              className="chat-composer-persona-select"
-              value={userPersonaName || ""}
-              onChange={(event) => onUserPersonaChange && onUserPersonaChange(event.target.value)}
-              disabled={running}
-            >
-              <option value="">{t("chat_user_persona_stranger")}</option>
-              {(personas || []).map((p) => {
-                const name = String(p.name || p.label || "").trim();
-                const display = String(p.label || p.name || "").trim();
-                return name ? (
-                  <option key={name} value={name}>{display}</option>
-                ) : null;
-              })}
-            </select>
-          </label>
-        </div>
         <label className="field-stack">
           <span>{t("chat_message")}</span>
           <textarea
@@ -530,6 +592,7 @@ function listMessages(session, annotationWorkspace, optimisticMessages = []) {
         analysis_text: item.analysis_text || displayText,
         timestamp: item.timestamp || "",
         persona_name: item.persona_name || "",
+        user_persona_name: item.user_persona_name || "",
         speaker_name: item.speaker_name || "",
         vector: item.vector || {},
         predicted_vector: item.predicted_vector || {},
@@ -558,6 +621,7 @@ function listMessages(session, annotationWorkspace, optimisticMessages = []) {
         analysis_text: item.analysis_text || displayText,
         timestamp: item.timestamp || "",
         persona_name: item.persona_name || "",
+        user_persona_name: item.user_persona_name || "",
         speaker_name: item.speaker_name || "",
         vector: item.vector || {},
         predicted_vector: item.predicted_vector || {},

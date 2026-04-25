@@ -268,6 +268,8 @@ def _normalize_message_item(
         'display_text': display_text,
         'timestamp': timestamp,
         'persona_name': persona_name,
+        'user_persona_name': str(item.get('user_persona_name') or '').strip(),
+        'speaker_name': str(item.get('speaker_name') or '').strip(),
     }
 
 
@@ -457,7 +459,7 @@ def apply_session_memory_policy(session_id: str) -> dict[str, Any]:
     }
 
 
-def append_turn(session_id: str, user_message: str, assistant_message: str, *, persona_name: str = '') -> Path:
+def append_turn(session_id: str, user_message: str, assistant_message: str, *, persona_name: str = '', user_persona_name: str = '') -> Path:
     path = session_text_path(session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
@@ -484,6 +486,7 @@ def append_turn(session_id: str, user_message: str, assistant_message: str, *, p
                 'display_text': raw_user_message,
                 'timestamp': user_timestamp,
                 'persona_name': '',
+                'user_persona_name': str(user_persona_name or '').strip(),
             }
         )
         blocks.append(f'[{user_timestamp}]\nuser: {raw_user_message}')
