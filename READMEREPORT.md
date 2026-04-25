@@ -1,693 +1,1023 @@
-# `Persona-Graph-Agent` համակարգի մանրամասն հաշվետվություն
+# Persona-Graph-Agent — Подробное техническое описание системы
 
-## 1. Ներածություն
+---
 
-Սույն փաստաթուղթը նկարագրում է `Persona-Graph-Agent` համակարգի ներկա, փաստացի աշխատանքային վիճակը։ Այն այլևս չի դիտարկվում որպես սովորական chat wrapper կամ մեկ մեծ `LLM`-ի շուրջ կառուցված միջավայր։ Համակարգի հիմքում դրված է `controller-first` մոտեցումը, որտեղ յուրաքանչյուր հարցում անցնում է ծրագրայինորեն վերահսկվող փուլերով, իսկ լեզվային մոդելը օգտագործվում է միայն սահմանափակ և հստակ տեղերում։
+## 1. Что это такое
 
-Համակարգի նպատակն է ապահովել՝
+Persona-Graph-Agent — это локальный AI-рантайм с архитектурой **controller-first**: каждый запрос проходит через детерминированные слои анализа, принятия решений и контроля **до** того, как языковая модель вообще вызывается. LLM — это только последний шаг, вербализатор, а не мозг системы.
 
-- persona-կենտրոնացված պատասխանների ձևավորում,
-- graph-ով և հիշողությամբ հիմնավորված reasoning,
-- deterministic route ընտրություն,
-- կոգնիտիվ վարքային pipeline,
-- հաղորդագրությունների վեկտորային մեկնաբանման ուսուցանվող շերտ,
-- operator-facing correction interface,
-- observability, validation և repair։
+Система выполняет две вещи одновременно:
 
-Այսպիսով, համակարգը չի աշխատում հետևյալ պարզ սխեմայով՝
+1. **Персонаж-диалог** — отвечает от лица выбранного персонажа (Дракула, Катерина, Капитан Джек Воробей и др.) с психологически глубокой и стабильной личностью.
+2. **Адаптивный коуч** — режим планирования, где система помогает пользователю с задачами, отслеживает его прогресс, запоминает паттерны и адаптируется к его психологическому профилю.
 
-```text
-message -> LLM -> answer
+Всё работает **полностью локально** — никаких облачных API.
+
+---
+
+## 2. Общая архитектура
+
+```
+Входящий запрос
+       │
+       ▼
+ Request Preprocessing        ← языкодетекция, нормализация, маркеры ситуации
+       │
+       ▼
+ Controller (router)          ← route decision + capability plan
+       │
+       ├─── Lightweight path  ← фактические вопросы, короткие реплики
+       │
+       └─── Persona-aware path
+                │
+                ├── Memory + Graph Load    ← персонаж, граф знаний, история сессии
+                │
+                ├── Cognitive Pipeline V1 (P1–P6)    ← событие → регулятор → действие
+                │
+                ├── Cognitive Modules V2 (P1–P49)    ← 49 параллельных сигнальных детекторов
+                │
+                ├── Message Vector System (P1–P51)   ← 51 координата диалога
+                │
+                ├── Context Builder                  ← сборка промпта с бюджетами токенов
+                │
+                ├── Response Shaping                 ← Speech Plan / State Transition
+                │
+                ├── LLM Call (Qwen3.5-2B Q4_K_M)    ← вербализация
+                │
+                ├── Validation + Repair              ← проверка персонажности, утечек, ошибок
+                │
+                └── Persistence                      ← история, трейс, обновление памяти
 ```
 
-Փոխարենը կիրառվում է վերահսկվող գործառնական հոսք՝
+---
 
-```text
-request
--> controller interpretation
--> route selection
--> capability planning
--> cognitive pipeline
--> context assembly
--> response shaping
--> generation
--> validation
--> repair
--> persistence
+## 3. Языковые модели (ИИ в основе)
+
+### 3.1. Основная модель
+**Модель:** `Qwen3.5-2B.Q4_K_M.gguf`
+- Архитектура: Qwen 3.5, 2 миллиарда параметров
+- Квантизация: Q4_K_M (4-бит, средней точности) — примерно 1.4 ГБ на диске
+- Роли: `general`, `analyst`, `creative`, `planner` — используется для **всего диалога**
+- Контекстное окно: до 7168 токенов (`LOCAL_GGUF_N_CTX=7168`)
+- Максимум токенов на ответ: 2048
+- Запуск: через `llama.cpp` (Python binding `llama-cpp-python`)
+
+**Ограничение:** Модель 2B — маленькая. Из-за RLHF-тренировки она иногда ломает персонажа и отвечает как ИИ-ассистент. Именно поэтому система имеет несколько слоёв защиты: `ЗАПРЕЩЕНО`-правила в примерах персонажа, ремонт ответа, ситуационные реакции.
+
+### 3.2. Модель для кода
+**Модель:** `qwen2.5-coder-7b-instruct-q4_k_m.gguf`
+- 7B параметров, Qwen 2.5 Coder Instruct
+- Роли: `coder_architect`, `coder_reviewer`, `coder_refactor`, `coder_debug`
+- Контекст: 7000 токенов
+
+### 3.3. Детектор языка
+Эвристический детектор по Unicode-диапазонам:
+- Кириллица (`Ѐ-ӿ`) → русский
+- Армянский (`԰-֏`) → армянский
+- Арабский (`؀-ۿ`) → арабский
+- CJK (`一-鿿`) → китайский
+- Иначе → английский
+
+---
+
+## 4. PersonalityGenome — 53 обучаемых параметра
+
+Геном — это **числовой ДНК персонажа**: 53 параметра типа `float[0..1]`, каждый из которых определяет реакции, тревожность, доминирование, стиль защиты и т.д.
+
+### Структура LearnableParam
+```python
+LearnableParam:
+    value:      float         # текущее значение
+    prior:      float         # начальное значение (якорь)
+    lr:         float = 0.03  # скорость обучения
+    stability:  float = 0.5   # 0=свободный, 1=замороженный
+    confidence: float         # растёт с каждым обновлением
+    updates:    int           # счётчик обновлений
+    history:    list          # последние 200 изменений (timestamp, delta, source)
 ```
 
-Այս ճարտարապետության հիմնական գաղափարն այն է, որ `LLM`-ը որոշումներ կայացնող կենտրոն չէ։ Որոշումների զգալի մասը կայացվում է runtime-ի կողմից, իսկ մոդելը ներգրավվում է այնտեղ, որտեղ անհրաժեշտ է լեզվային ձևակերպում, սահմանափակ enrichment կամ կառուցվածքային արտածում։
+**Обновление:** `effective = delta × lr × (1 - stability)`, затем clip к `[-0.08, +0.08]`.
+**Регуляризация:** `elastic_pull = -0.015 × (value - prior) × (1 - stability)` — тянет параметр обратно к prior.
 
-## 2. Համակարգի ընդհանուր ճարտարապետությունը
+### Группы параметров
 
-### 2.1. `controller-first` մոտեցումը
+**A. Мотивационные влечения (8 параметров)**
+| Параметр | Смысл |
+|---|---|
+| `drive_recognition` | Жажда признания |
+| `drive_security` | Потребность в безопасности |
+| `drive_control` | Стремление к контролю |
+| `drive_closeness` | Тяга к близости |
+| `drive_autonomy` | Потребность в независимости |
+| `drive_superiority` | Стремление к превосходству (по умолчанию 0.3) |
+| `drive_stability` | Потребность в стабильности |
+| `drive_meaning` | Поиск смысла |
 
-Համակարգի առանցքային տարբերությունը սովորական chatbot-ներից այն է, որ այստեղ request-ը նախ անցնում է controller շերտով։ Այդ controller-ը որոշում է՝
+**B. Страхи (8 параметров, stability=0.6–0.7 — медленно меняются)**
+`fear_shame`, `fear_rejection`, `fear_loss_of_control`, `fear_helplessness`, `fear_abandonment`, `fear_judgment`, `fear_chaos`, `fear_failure`
 
-- ինչ տեսակի դիմում է ստացվել,
-- պետք է արդյոք persona,
-- անհրաժեշտ է արդյոք graph,
-- բավարար է արդյոք lightweight path-ը,
-- պետք է արդյոք ծանր persona reasoning,
-- ինչ validation է պահանջվում,
-- ինչքան context կարելի է թույլատրել։
+**C. Когнитивный стиль (9 параметров)**
+`planning_depth`, `analysis_bias`, `impulsivity`, `ambiguity_tolerance`, `category_rigidity`, `generalization_bias`, `suspicion_bias`, `threat_first`, `hypothesis_switch_speed`
 
-Սա թույլ է տալիս նույն backend-ում սպասարկել ինչպես պարզ lightweight հարցումներ, այնպես էլ persona-հիմնված ծանր turn-եր՝ առանց ամբողջ համակարգը անընդհատ ծանր path-ով անցկացնելու։
+**D. Социальная регуляция (7 параметров)**
+`hierarchy_sensitivity`, `approval_seeking`, `dominance_tendency`, `vulnerability_concealment`, `social_distance_default`, `trust_baseline`, `mirror_tendency`
 
-### 2.2. Գործառնական հոսքը
+**E. Механизмы защиты (6 параметров)**
+`defense_avoidance`, `defense_rationalization`, `defense_aggression`, `defense_freeze`, `defense_humor`, `defense_hypercontrol`
 
-Ընդհանուր runtime հոսքը կարելի է ներկայացնել այսպես՝
+**F. Энергетика / базовая регуляция (6 параметров)**
+`baseline_anxiety` (stability=0.65), `baseline_drive` (stability=0.6), `fatigue_sensitivity`, `stress_recovery_speed`, `novelty_reward`, `shame_recovery_speed`
 
-```text
-run_chat_turn()
--> request envelope
--> controller_runtime
--> route decision
--> capability plan
--> simple path կամ persona path
--> runtime status pre-flight
--> LLM generation կամ deterministic fallback
--> validation / repair
--> history persistence
--> trace logging
+**G. Якоря памяти (4 параметра)**
+`pain_memory_weight`, `shame_memory_weight`, `success_memory_weight`, `past_influence_decay`
+
+**H. Когнитивные смещения (5 параметров)**
+`threat_scan_first`, `blame_self_vs_other` (0=себя, 1=других), `feel_first` (0=думать, 1=чувствовать), `justify_vs_plan`, `pessimism_bias`
+
+---
+
+## 5. Когнитивный пайплайн V1 (P1–P6)
+
+Шесть NumPy-перцептронов, работающих последовательно. **Нет LLM, нет случайности** — чистая линейная алгебра.
+
+### P1 — Event Encoder (EventEncoder)
+**Назначение:** Текст → вероятности 14 типов событий.
+
+**Входной вектор:** `float[48]`
+- `[0:14]` — совпадения по паттернам (regex keyword scores) для каждого из 14 типов событий
+- `[14:20]` — структурные: длина, вопросы, восклицания, заглавные, отрицания, команды
+- `[20:26]` — референции к лицам: я/меня, ты/тебя, он/она/они, мы/нас
+- `[26:32]` — временные: прошедшее, настоящее, будущее, срочность, частотность, длительность
+- `[32:38]` — маркеры интенсивности: очень/крайне, всегда/всё, никогда/ничего, самый, всё ещё, полностью
+- `[38:44]` — социальный контекст: публично, в одиночестве, сравнение, авторитет, группа, кто-то
+- `[44:48]` — флаги сессии: prior_failure, repeated, escalating, resolved
+
+**Архитектура:** `W[14×48] @ x + b[14]` → softmax → `event_probs[14]`
+
+**14 типов событий:**
+`criticism`, `praise`, `rejection`, `failure`, `overload`, `uncertainty`, `intimacy`, `opportunity`, `danger`, `shame_trigger`, `boredom`, `novelty`, `loss_of_control`, `neutral`
+
+**Выход:** `(event_probs[14], intensity: float)`
+
+**Обучение:** Офлайн через `perceptron_trainer.py` → метод градиентного спуска по кросс-энтропии, LR=0.01, 30 эпох, минимум 20 размеченных примеров.
+
+---
+
+### P2 — Trigger Network (TriggerNetwork)
+**Назначение:** Какие гены генома активированы данным событием?
+
+**Вход:** `event_probs[14] + ctx_flags[6] = [20]` + `genome_vec[53]` + `intensity`
+
+**Архитектура:** `S[53×20] @ ev_extended × genome_vec × intensity`
+
+Матрица S инициализируется prior-правилами из психологии:
+- `fear_shame ← criticism` (вес 1.2)
+- `fear_rejection ← rejection` (вес 1.3)
+- `fear_loss_of_control ← loss_of_control` (вес 1.4)
+- `fear_shame ← shame_trigger` (вес 1.5)
+- `drive_recognition ← praise` (вес 0.8)
+- `drive_closeness ← intimacy` (вес 0.9)
+
+**Выход:** `triggers[53]` — активация каждого параметра генома
+
+---
+
+### P3 — Regulator Cell (RegulatorCell) — упрощённый GRU
+**Назначение:** Обновить 10 внутренних регуляторов на основе триггеров.
+
+**10 регуляторов:**
+| Регулятор | Аналог |
+|---|---|
+| `anxiety` | тревожность |
+| `drive` | побуждение к действию |
+| `fatigue` | усталость |
+| `motivation` | мотивация |
+| `shame` | стыд |
+| `confidence` | уверенность |
+| `threat_sense` | восприятие угрозы |
+| `control_sense` | ощущение контроля |
+| `closeness` | близость |
+| `frustration` | фрустрация |
+
+**Вход:** `[triggers(53), h_prev(10), energy_genes(6)]` = вектор 69
+
+**GRU-шаг:**
+```
+z = sigmoid(Wz @ x + bz)        # ворота забывания
+r = sigmoid(Wr @ x + br)        # ворота сброса
+xr = concat([triggers, r*h, energy])
+hc = tanh(Wh @ xr + bh)         # кандидат
+h_next = (1-z)*h + z*hc         # обновлённое состояние
 ```
 
-Հիմնական branch-երը երկուսն են՝
+Prior-правила в Wh: `fear_shame→shame`, `fear_rejection→anxiety`, `drive_recognition→motivation`, `drive_closeness→closeness`
 
-1. `simple path`
-   Օգտագործվում է այն դեպքերում, երբ բավարար է արագ context assembly-ը և bounded generation-ը։
+**Выход:** `regulator_state[10]` — новые значения всех регуляторов
 
-2. `persona path`
-   Օգտագործվում է այն դեպքերում, երբ պետք է persona selection, cognitive pipeline, state transition, response shaping և ավելի խորը reasoning։
+---
 
-### 2.3. Backend-ի հիմնական ակտիվ մոդուլները
+### P4 — Thought MLP (ThoughtMLP) — 3-слойный персептрон
+**Назначение:** Построить "мысль" — что персонаж думает прямо сейчас.
 
-Համակարգի ակտիվ backend-ը գտնվում է `agent_system/` պանակում։ Իրական աշխատանքային շերտում հատկապես կարևոր են հետևյալ մոդուլները՝
+**Вход:** `[triggers(53), regulators(10), cognitive_genes(9)]` = вектор 72
 
-- `chat_engine.py`
-- `controller_runtime.py`
-- `request_pipeline.py`
-- `context_builder.py`
-- `prompt_builder.py`
-- `llm.py`
-- `history_store.py`
-- `cognitive_pipeline.py`
-- `cognitive_authority.py`
-- `speech_planner.py`
-- `state_transition_runtime.py`
-- `head_caller.py`
-- `persona_engine.py`
-- `graph_store.py`
-- `reliability.py`
-- `node_rethinker.py`
-- `behavioral_fallback.py`
-- `safety_classifier.py`
-- `api.py`
-- `message_vector_registry.py`
-- `message_vector_runtime.py`
-- `message_annotation_store.py`
+**Архитектура:** 72 → ReLU → 32 → 16 (ThoughtVector)
 
-Վերջին երեք մոդուլները կազմում են հաղորդագրությունների վեկտորային մեկնաբանման և correction-layer-ի ներկայիս հիմքը, և հենց այդ շերտն է տարբերակում համակարգը սովորական persona-chat runtime-ից։
-
-## 3. Request intake, դասակարգում և route ընտրություն
-
-### 3.1. Request envelope
-
-Յուրաքանչյուր նոր chat turn-ի համար ստեղծվում է envelope, որը պահում է առնվազն հետևյալ դաշտերը՝
-
-- `request_id`
-- `session_id`
-- `raw_text`
-- `analysis_text`
-- `timestamp`
-
-Այստեղ կարևոր սկզբունքը հետևյալն է. սկզբնական user text-ը այլևս չպետք է կորցվի կամ վերագրվի։ Վերլուծական normalize-ը կիրառվում է միայն առանձին պատճենի վրա, ոչ թե այն տեքստի վրա, որը պահվում է history-ում կամ ցուցադրվում է UI-ում։
-
-### 3.2. Request preprocessing
-
-`request_pipeline.py`-ը յուրաքանչյուր հարցման համար փորձում է կառուցել կառուցվածքային նկարագրություն, որը ներառում է՝
-
-- լեզվի որոշում,
-- intent,
-- interaction mode,
-- request type,
-- clarification անհրաժեշտություն,
-- persona-style hints,
-- response style guidance։
-
-Համակարգը տարբերակում է, օրինակ՝
-
-- `factual_query`
-- `general_chat`
-- `persona_chat`
-- `persona_specification`
-- `persona_assignment`
-- `persona_dialogue_analysis`
-- `project_document_analysis`
-- `meta_previous_answer`
-
-Այս տարբերակումը կարևոր է, որովհետև persona dossier, սովորական հարց, meta-analysis և file request-ը չեն կարող նույն route-ով գնալ։
-
-### 3.3. RouteDecision և CapabilityPlan
-
-Route ընտրությունից հետո ձևավորվում է `RouteDecision`, որը որոշում է՝
-
-- `selected_route`
-- `requires_history`
-- `requires_graph`
-- `requires_persona`
-- `requires_llm`
-- `strict_grounding`
-- `validation_mode`
-- `fast_path`
-
-Դրան զուգահեռ `CapabilityPlan`-ը որոշում է, թե տվյալ turn-ի համար ինչ իրական գործողություններ են պետք՝
-
-- history load,
-- graph retrieval,
-- persona load,
-- heavy persona runtime,
-- deterministic reply,
-- LLM call,
-- reviewer / repair։
-
-Այս մեխանիզմի առավելությունն այն է, որ lightweight հարցումը չի անցնում անիմաստ ծանր graph կամ persona pipeline-ով, իսկ ծանր persona turn-ը չի մնա չափազանց պարզ chat պատասխանողի հույսին։
-
-## 4. Կոգնիտիվ pipeline-ը
-
-### 4.1. Ընդհանուր գաղափարը
-
-Heavy persona path-ում համակարգը օգտագործում է deterministic 6-փուլ կոգնիտիվ pipeline, որը մոդելավորում է ոչ թե վերջնական բառերը, այլ ներքին վիճակի որոշ մասը։ Այդ pipeline-ը կառուցված է այնպես, որ persona-ի վարքը կախված չլինի միայն language model-ի ազատ ձևակերպումից։
-
-### 4.2. P1–P6 փուլերը
-
-Pipeline-ը բաղկացած է հետևյալ փուլերից՝
-
-1. `P1 — EventEncoder`
-   Մուտքային տեքստը վերածում է event probability vector-ի և intensity signal-ի։
-
-2. `P2 — TriggerNetwork`
-   Event vector-ը համադրում է genome-derived trigger weights-ի հետ։
-
-3. `P3 — RegulatorCell`
-   Թարմացնում է ներքին regulator state-ը՝ anxiety, motivation, fatigue, shame, frustration, guilt, closeness, hope, emptiness ուղղություններով։
-
-4. `P4 — ThoughtMLP`
-   Ստեղծում է thought vector, որտեղ արտացոլվում են perceived risk, confidence, needs և interaction frame-ը։
-
-5. `P5 — ConflictScorer`
-   Գնահատում է conflict / resolution ռազմավարությունները։
-
-6. `P6 — ActionPolicy`
-   Ընտրում է action family՝ օրինակ `approach`, `avoid`, `freeze`, `attack`, `analyze`, `connect`, `withdraw` և այլն։
-
-Արդյունքում ստացվում է `CognitiveTurnOutput`, որը պարունակում է՝
-
-- `action_name`
-- `dominant_resolution`
-- `perceived_risk`
-- `intensity`
-- `thought_vec`
-- `conflict_vec`
-- `blocked_actions`
-
-### 4.3. `CognitiveAuthority` և `SpeechPlanner`
-
-Pipeline-ի արդյունքը անմիջապես չի վերածվում վերջնական պատասխանի։ Նախ աշխատում է `CognitiveAuthority`-ը, որը որոշում է generation mode-ը՝
-
-- `pure_llm`
-- `hint`
-- `planner`
-
-Եթե pipeline-ի ազդեցությունը քիչ է, runtime-ը կարող է անցնել `pure_llm` կամ `hint` mode-ի։ Եթե pipeline-ը բավականաչափ վստահելի է, կիրառվում է `planner` mode, որտեղ `SpeechPlanner`-ը նախ կառուցում է structured `SpeechPlan`, և միայն հետո `LLM`-ը verbalize է անում այդ plan-ը։
-
-Այսպիսով, ծանր persona mode-ում `LLM`-ը հաճախ արդեն ոչ թե ինքնուրույն որոշող է, այլ նախապես ձևավորված հոսքի լեզվական արտահայտիչ։
-
-## 5. Հաղորդագրության վեկտորային մեկնաբանման շերտը
-
-### 5.1. Նպատակը
-
-Համակարգի կարևոր նոր շերտերից մեկը հաղորդագրության վեկտորային մեկնաբանման ենթահամակարգն է, որը նախատեսված է ոչ թե ուղղակի պատասխան ստեղծելու, այլ հաղորդագրությունների իմաստային և հարաբերական կոորդինատային ներկայացում կառուցելու համար։
-
-Այս շերտը ձևավորում է յուրաքանչյուր message-ի համար առանձին vector, որը պահում է մի քանի անկախ մեկնաբանիչների արդյունքները։
-
-Այստեղ կիրառվում է հետևյալ սկզբունքը՝
-
-```text
-message_t + context_matrix_t -> Pn interpreters -> vector_t
+**16 компонент мысли:**
+```
+perceived_risk        — насколько опасна ситуация
+confidence_in_frame   — насколько персонаж уверен в своей позиции
+dominant_need_goal    — softmax: security vs recognition vs control
+dominant_need_social  — softmax: closeness vs autonomy vs stability
+dominant_need_other
+frame_approach        — softmax: approach / hold / retreat
+frame_avoid
+frame_freeze
+self_deception        — степень самообмана
+action_urgency        — срочность ответа
+social_concern        — беспокойство о социальных последствиях
+planning_horizon      — горизонт планирования (fatigue ↑ → horizon ↓)
+blame_direction       — на кого направляется вина
+emotional_intensity   — накал эмоций
+control_assessment    — оценка контроля над ситуацией
+novelty_seeking       — поиск нового
 ```
 
-որտեղ `context_matrix_t`-ը նախորդ հաղորդագրությունների վեկտորների պատուհանն է, ոչ թե մեկ scalar flag։
+**Выход:** `thought_vec[16]`
 
-### 5.2. `P1..P51` registry
+---
 
-Ներկայիս իրական implementation-ում registry-ն արդեն ընդլայնված է մինչև `P1..P51`։ Սկզբնական գաղափարը եղել է `P1..P49`, սակայն համակարգի ներկա տարբերակում ավելացվել են նաև՝
+### P5 — Conflict Scorer (ConflictScorer)
+**Назначение:** Какой внутренний конфликт сейчас активен, какова стратегия его разрешения?
 
-- `P50` — թեմայի շեղման կամ topic shift-ի արձանագրում,
-- `P51` — կիրառելի context boundary-ի արձանագրում։
+**Вход:** `[thought(16), goals(8), fears(8), regulators(10)]` = вектор 42
 
-Registry-ն խմբավորված է հետևյալ բաժիններով։
+**Выход:** `conflict_vec[8]` = `[intensity, avoidance, overcompensation, attack, freeze, planning, support_seeking, self_deception]`
 
-Գործնական ստուգմամբ հաստատվում է, որ թե՛ registry payload-ը, թե՛ annotation workspace-ում վերադարձվող vector-ները ներկայումս արդեն աշխատում են հենց `51` interpreter-ով, այսինքն այստեղ փաստաթուղթը նկարագրում է ոչ թե ապագա մտադրություն, այլ live runtime-ի ընթացիկ ձևը։
+**Блокировки действий по стратегии:**
+- `freeze` → блокирует: approach, attack, connect
+- `avoidance` → блокирует: approach, connect, attack
+- `attack` → блокирует: placate, ask_for_help, connect
+- `self_deception` → блокирует: analyze, reframe
 
-#### A. Խոսքային ձև
+---
 
-- `P1` — հարց / պնդում / միտք / մեջբերում / հորդոր
-- `P2` — ուղիղ իմաստ կամ քողարկված / փոխաբերական իմաստ
-- `P3` — բառացի արտահայտություն կամ ռետորիկական քայլ
-- `P4` — պատասխան / չպատասխան / խուսափում
-- `P5` — ինքնուրույն միտք կամ նախորդ replica-ի ռեակցիա
-- `P6` — թեմայի փակո՞ւմ, թե նոր ուղղության բացում
-- `P7` — տրամաբանական հստակություն / մշուշոտություն
+### P6 — Action Policy (ActionPolicy) — 2-слойный персептрон
+**Назначение:** Выбрать поведенческое действие.
 
-#### B. Հոգեբանական ձև
+**Вход:** `[thought(16), conflict(8), regulators(10), defenses(6)]` = вектор 40
 
-- `P8` — կասկած
-- `P9` — վստահություն
-- `P10` — ներքին կոնֆլիկտ
-- `P11` — պաշտպանություն
-- `P12` — խոցելիություն
-- `P13` — հարձակում
-- `P14` — զսպում
-- `P15` — հուզական լարվածություն
+**Архитектура:** 40 → ReLU(24) → logits[14]
 
-#### C. Հարաբերություն զրուցակցի նկատմամբ
+**14 семейств действий:**
+```
+approach       — открыться, напрямую ответить
+avoid          — остаться на поверхности
+freeze         — пауза, признать вес ситуации
+attack         — чёткий отпор
+placate        — сгладить напряжение
+analyze        — холодный разбор ситуации
+ask_for_help   — выразить нужду
+seek_control   — установить границы
+reduce_exposure — краткий ответ, не раскрываться
+reframe        — другой ракурс
+self_protect   — минимальный ответ, держать границу
+connect        — близость, эмпатия
+withdraw       — отступить, нужна дистанция
+plan_small_step — один конкретный маленький шаг
+```
 
-- `P16` — հոգատարություն
-- `P17` — հարգանք
-- `P18` — արժեզրկում
-- `P19` — նվաստացում
-- `P20` — բարեհաճություն
-- `P21` — թաքնված թշնամանք
-- `P22` — գերիշխում
-- `P23` — զիջում / ենթարկում
+**Обучение:** `train_p6()` в `perceptron_trainer.py` — те же 30 эпох, LR=0.01.
 
-#### D. Թաքնված իմաստային կառուցվածք
+---
 
-- `P24` — սարկազմ
-- `P25` — հեգնանք
-- `P26` — ծաղր / mockery
-- `P27` — գովասանքի դիմակ
-- `P28` — հոգատարության դիմակ
-- `P29` — մանիպուլյացիա
-- `P30` — ճնշում
-- `P31` — կեղծ մեղմացում
+### CognitiveRuntime — полный проход P1→P6
 
-#### E. Զրույցի շարժման ուղղություն
+```python
+CognitiveTurnOutput:
+    action_id            # выбранное действие (0-13)
+    action_name          # его название
+    action_probs         # вероятности всех 14 действий
+    thought_vec          # вектор мысли [16]
+    conflict_vec         # вектор конфликта [8]
+    regulator_state      # состояние регуляторов {name: float}
+    event_probs          # вероятности событий [14]
+    primary_event        # главное событие
+    intensity            # интенсивность
+    perceived_risk       # воспринимаемый риск
+    dominant_resolution  # стратегия разрешения конфликта
+    blocked_actions      # заблокированные действия
+```
 
-- `P32` — մոտեցում
-- `P33` — հեռացում
-- `P34` — հաշտեցում
-- `P35` — էսկալացիա
-- `P36` — սրում
-- `P37` — կապի խզում
-- `P38` — մեղմացում
-- `P39` — կապի պահպանում
+---
 
-#### F. Ճշմարտություն և դիրք
+## 6. Когнитивные модули V2 (P1–P49)
 
-- `P40` — անկեղծություն
-- `P41` — դիմակ / ոչ անկեղծություն
-- `P42` — ընդունում
-- `P43` — հերքում
-- `P44` — վերաիմաստավորում
-- `P45` — ուղղող գովասանք
-- `P46` — կեղծ գովասանք
-- `P47` — թաքնված նախատինք
+Параллельная система из 49 детекторов — работает одновременно с V1. Каждый модуль — лёгкий линейный классификатор над общим вектором признаков.
 
-#### G. Մետա-մեկնաբանում
+### SignalFeatureExtractor — общий вектор признаков `float[70]`
 
-- `P48` — ընթացիկ replica-ի ընթերցում նախորդ շղթայի համատեքստում
-- `P49` — turn-ի ընդհանուր ուղղությունը երկխոսության պատմության նկատմամբ
-- `P50` — թեմայի կտրուկ շեղում / topic shift
-- `P51` — համապատասխան context boundary
+Детерминированное преобразование текста в 70-мерный вектор:
 
-Այս registry-ն այլևս պարզապես տեքստային նկարագրություն չէ։ Այն իրականում պահվում է առանձին կոնֆիգուրացիոն շերտով և օգտագործվում է ինչպես prediction-ի, այնպես էլ UI խմբագրման ընթացքում։
+**[0:60] Семантические признаки (6 групп по 10):**
+```
+Группа I   (0-9)  — отношение к себе:
+    humiliation_signal, care_signal, respect_signal, acceptance_signal,
+    control_attempt, instrumental_use, sincerity_cue, hostility_cue,
+    warmth_cue, hierarchy_cue
 
-### 5.3. Վեկտորի տվյալային ձևը
+Группа II  (10-19) — намерения другого:
+    intent_clean, manipulation_cue, hidden_agenda, honesty_cue,
+    promise_cue, consistency_cue, predictability_cue, accountability_cue,
+    mature_motive, conflict_subtext
 
-Յուրաքանչյուր interpreter-ի արդյունքը պահվում է երկիմաստությունը թույլատրող կառուցվածքով՝
+Группа III (20-29) — угроза / безопасность:
+    physical_threat, social_threat, emotional_threat, practical_risk,
+    freedom_threat, identity_threat, dependency_trap, error_risk,
+    irreversibility, threat_composite (= среднее группы × 1.5)
 
+Группа IV  (30-39) — смысл / ценности:
+    principle_trigger, value_alignment, fairness_cue, goal_visibility,
+    meaningfulness, self_benefit, other_benefit, longterm_value,
+    self_fidelity, compromise_cost
+
+Группа V   (40-49) — внутреннее состояние:
+    desire_signal, repulsion_signal, doubt_signal, certainty_signal,
+    internal_conflict, goal_priority, action_impulse, inhibition_signal,
+    urgency_signal, ambivalence_signal
+
+Группа VI  (50-59) — тонкий человеческий подтекст:
+    sarcasm_signal, passive_aggression, self_deprecation, existential_despair,
+    cry_for_help, dark_humor, provocation, deflection,
+    irony_marker, implicit_pain
+```
+
+**[60:70] Структурные признаки:**
+```
+question_count, exclamation_intensity, negation_density,
+intensity_markers, self_reference, other_reference,
+hedging_language, command_language, length_signal, sentiment_balance
+```
+
+**Мультиязычность:** паттерны для русского, английского, армянского, китайского.
+
+### CognitiveModuleV2 — один детектор
+
+```python
+CognitiveModuleV2:
+    module_id:   int       # 1..48
+    name:        str       # e.g. "humiliation"
+    feat_indices: list[int] # какие из 70 признаков использует
+    W:  np.ndarray[n]      # веса
+    b:  float              # смещение
+    sensitivity: float     # модулируется геномом
+
+    def process(feat, sensitivity, text) -> ModuleSignal:
+        raw = W @ feat[feat_indices] + b
+        value = sigmoid(raw × sensitivity)
+        direction = ...    # -1..+1
+        confidence = ...   # 0..1
+```
+
+**ModuleSignal:**
+```python
+ModuleSignal:
+    module_id:  int
+    name:       str
+    value:      float   # интенсивность [0..1]
+    direction:  float   # -1=плохо/угроза, +1=хорошо/безопасно
+    confidence: float   # уверенность детектора
+    evidence:   list    # что сработало
+```
+
+### 48 модулей по группам
+
+**Группа I — отношение к себе (P1–P10):**
+Humiliation, Care, Respect, Acceptance, ControlOverMe, BeingUsed, Sincerity, Hostility, Benevolence, SocialHierarchy
+
+**Группа II — намерения (P11–P20):**
+IntentPurity, Manipulation, HiddenBenefit, MessageHonesty, PromiseReliability, BehavioralConsistency, Predictability, Accountability, MatureMotive, HiddenConflict
+
+**Группа III — безопасность (P21–P30):**
+PhysicalThreat, SocialThreat, EmotionalThreat, PracticalRisk, FreedomThreat, IdentityThreat, DependencyTrap, ErrorRisk, Irreversibility, ThreatIndex
+
+**Группа IV — смысл/ценности (P31–P40):**
+Principle, ValueAlignment, Fairness, GoalVisibility, Meaningfulness, SelfBenefit, OtherBenefit, LongTermValue, SelfFidelity, CostOfCompromise
+
+**Группа V — внутреннее состояние (P41–P49):**
+Desire, Repulsion, Doubt, Certainty, InternalConflict, GoalPriority, ActionImpulse, Inhibition, FinalPosition
+
+### P49 — FinalPositionIntegrator
+
+Читает сигналы всех 48 модулей → строит `FinalPosition`:
+
+```python
+FinalPosition:
+    # 5 осей, каждая float [0..1]
+    trust / distrust        — доверие vs подозрение
+    approach / distance     — близость vs дистанция
+    accept / argue          — принятие vs возражение
+    defend / open           — закрытость vs открытость
+    speak / silence         — говорить vs молчать
+
+    dominant_stance: str    # итоговая позиция
+    threat_level: float     # из группы III
+    signals: dict           # все сырые значения
+```
+
+Связь с геномом: `genome_sensitivity` определяет чувствительность каждого модуля. Например, для персонажа с высоким `fear_shame` модуль Humiliation имеет чувствительность > 0.8 → реагирует на слабые намёки на унижение.
+
+---
+
+## 7. Система координат сообщений (P1–P51)
+
+Каждое сообщение получает 51 координату — структурированное описание его диалогической природы. Это не embedding, а **символьные метки** с оценками уверенности.
+
+### Группы координат
+
+**Группа A — Форма речи (P1–P7)**
+```
+P1  Форма высказывания:   question | statement | thought | quote | directive
+P2  Тип смысла:           direct | figurative | masked
+P3  Буквальность:         literal | rhetorical_move
+P4  Ответность:           answer | non_answer | avoidance
+P5  Самостоятельность:    independent | reaction
+P6  Направление хода:     closing | opening_new_direction
+P7  Логическая ясность:   defined | diffuse
+```
+
+**Группа B — Психологическое состояние (P8–P15)**
+```
+P8  Сомнение:             absent | doubt
+P9  Уверенность:          absent | confidence
+P10 Внутренний конфликт:  absent | inner_conflict
+P11 Защита:               absent | defense
+P12 Уязвимость:           absent | vulnerability
+P13 Нападение:            absent | attack
+P14 Сдерживание:          absent | containment
+P15 Напряжённость:        calm | tense | overloaded
+```
+
+**Группа C — Отношение (P16–P23)**
+```
+P16 Забота:               absent | care
+P17 Уважение:             absent | respect
+P18 Обесценивание:        absent | devaluation
+P19 Унижение:             absent | humiliation
+P20 Дружелюбие:           absent | friendliness
+P21 Скрытая враждебность: absent | hidden_hostility
+P22 Доминирование:        neutral | dominance
+P23 Уступка:              neutral | concession
+```
+
+**Группа D — Риторические маски (P24–P31)**
+```
+P24 Сарказм:              absent | sarcasm | dry_sarcasm | false_praise
+P25 Ирония:               absent | irony
+P26 Издевательство:       absent | mockery
+P27 Маска похвалы:        absent | mask_of_praise
+P28 Маска заботы:         absent | mask_of_care
+P29 Манипуляция:          absent | manipulation
+P30 Давление:             absent | pressure
+P31 Ложное смягчение:     absent | false_softening
+```
+
+**Группа E — Реляционное движение (P32–P39)**
+```
+P32 Сближение:            neutral | approach
+P33 Дистанцирование:      neutral | distancing
+P34 Примирение:           neutral | reconciliation
+P35 Эскалация:            neutral | escalation
+P36 Обострение:           neutral | sharpening
+P37 Разрыв:               neutral | rupture
+P38 Смягчение:            neutral | softening
+P39 Удержание контакта:   neutral | contact_maintenance
+```
+
+**Группа F — Искренность (P40–P47)**
+```
+P40 Искренность:          unclear | sincerity
+P41 Маска/неискренность:  unclear | masking
+P42 Признание:            absent | admission
+P43 Отрицание:            absent | denial
+P44 Переосмысление:       absent | reframing
+P45 Корректирующая похвала: absent | corrective_praise
+P46 Ложная похвала:       absent | false_praise
+P47 Скрытый упрёк:        absent | hidden_reproach
+```
+
+**Группа G — Структура дискурса (P48–P51)**
+```
+P48 Реплика в цепочке:    continuation | reinterpretation | masking_shift |
+                           conflict_reply | repair_attempt
+P49 Итоговое направление: neutral | toward_repair | toward_distance |
+                           toward_escalation | toward_masking | toward_contact
+P50 Смена темы:           no_change | soft_shift | hard_shift | return_to_topic
+P51 Граница контекста:    full_window | since_topic_shift | last_turn_only | anchor_only
+```
+
+**P51** особенно важен — он говорит Context Builder-у, сколько истории диалога включать в промпт:
+- `full_window` → вся история
+- `since_topic_shift` → только с последней смены темы
+- `last_turn_only` → только последняя реплика
+
+### Как работает предсказание координат
+
+`MessageVectorRuntime` → для каждого из P1–P51:
+1. Извлекает `float[256]`-вектор из текста (хэш-функция + структурные признаки)
+2. Если есть обученная модель из annotation store — использует её
+3. Иначе — детерминированная эвристика по паттернам
+
+---
+
+## 8. Персона-движок (PersonaEngine)
+
+### Структура персонажной головы
+
+Каждый персонаж хранится в `memory/heads/{slug}/`:
+
+```
+meta.json             — метаданные: name, slug, entity_type, aliases, readiness,
+                        validation_status, revision, maturity_score, evidence_count,
+                        adaptation_locked, persona_confidence
+
+baseline.json         — базовые неизменяемые факты: knowledge, traits, relations
+
+persona_form.json     — психологический профиль:
+                        identity_class, core_goal, secondary_goals,
+                        core_dispositions, communication_style, speech_tendencies,
+                        sarcasm_profile, clarification_policy,
+                        constraints_internal/social/hard_system,
+                        allowed_methods, defense_mechanisms,
+                        triggers, reaction_patterns, decision_patterns
+
+learned_patterns.json — обученные паттерны:
+                        examples (Q&A пары с примерами ответов),
+                        situation_reactions (как реагировать на тип ситуации),
+                        log_tuples (частотные паттерны из диалогов),
+                        persona_form (встроенная копия — ВАЖНО: перезаписывает persona_form.json)
+
+examples.json         — конкретные примеры реплик с ситуационными реакциями
+
+knowledge.txt         — знания о персонаже (текстовое описание)
+
+traits.json           — список черт характера
+
+decision_explanation.txt — объяснение логики принятия решений персонажем
+
+dynamic_state.json    — текущее эмоциональное состояние:
+                        emotion_vector {anger, fear, curiosity, confidence, empathy},
+                        last_situation, last_response_style
+
+log_tuples.json       — частотные n-граммы из диалогов (для обучения)
+structured_persona.json — структурированный психологический профиль
+```
+
+### Цикл фонового перестроения
+
+После каждых N диалогов система запускает фоновый rebuild:
+1. Читает `log_tuples.json` — находит вхождение с максимальной `frequency`
+2. Из него дериверует `core_goal`, `communication_style`, `core_self_image`
+3. Обновляет `persona_form.json`
+
+**Критично:** `learned_patterns.json` содержит встроенную копию `persona_form`. При загрузке именно она перезаписывает файл `persona_form.json`. Поэтому оба файла должны быть синхронизированы.
+
+### Активные персонажи
+
+| Slug | Тип | Зрелость |
+|---|---|---|
+| `катерина` | FICTIONAL_CHARACTER | mature |
+| `dracula` | FICTIONAL_CHARACTER | mature |
+| `капитан_джек_воробей` | FICTIONAL_CHARACTER | mature |
+| `rum` | CONCEPT | — |
+
+---
+
+## 9. Граф знаний (GraphStore)
+
+### Структура узла
 ```json
 {
-  "main": "statement",
-  "extra": ["question"]
+    "id": "uuid",
+    "name": "Дракула",
+    "entity_type": "FICTIONAL_CHARACTER",   // PERSON|CONCEPT|PHENOMENON|OBJECT|FICTIONAL_CHARACTER|PROFESSION
+    "aliases": ["Dracula", "Count Dracula"],
+    "facts": ["...", "..."],
+    "importance": 1.0,        // обучаемый параметр
+    "confidence": 0.97,
+    "frequency": 10,          // сколько раз встречался
+    "state": "active"         // active|weak|suspect|archived|merged
 }
 ```
 
-Այս մոտեցումը կարևոր է, որովհետև հաղորդագրությունը շատ հաճախ չի տեղավորվում մեկ միանշանակ պիտակի մեջ։ Օրինակ՝ մի replica-ն կարող է ձևով լինել հարց, բայց գործառույթով՝ պնդում կամ ճնշում։
+### Формула quality score
+```
+quality = 0.45 × confidence + 0.35 × min(frequency/10, 1) + 0.2 × min(importance, 1)
+```
 
-Ընդհանուր message-vector շերտը կարող է ունենալ այսպիսի տեսք՝
+### Интеграция с контекстом
 
+Context Builder ранжирует узлы графа для включения в промпт по формуле:
+```
+context_score = 0.34 × relevance
+              + 0.16 × importance
+              + 0.16 × persona_alignment
+              + 0.12 × confidence
+              + 0.12 × recency
+              + 0.10 × graph_connectivity
+```
+
+Источники контекста (в порядке приоритета):
+```
+persona_memory → persona_triad → social_role → mood_research →
+session_graph_context → local_graph_neighborhood → global_graph_facts →
+file_ingested_knowledge → session_short_term_history
+```
+
+---
+
+## 10. Построитель промпта (ContextBuilder + PromptBuilder)
+
+### Бюджеты токенов
+
+```
+COGNITIVE_MAX_CONTEXT_TOKENS=3400  — общий лимит
+COGNITIVE_PERSONA_BLOCK_BUDGET=900 — на блок персонажа
+COGNITIVE_GRAPH_CONTEXT_BUDGET=1100 — на граф и факты
+COGNITIVE_RECENT_DIALOGUE_BUDGET=320 — на недавний диалог
+```
+
+### Порядок рендеринга блоков персонажа
+```
+1. persona_core              — основное "кто я"
+2. persona_identity          — идентичность
+3. persona_work_profile      — рабочий профиль
+4. persona_social_role       — социальная роль в сессии
+5. persona_mood_dynamics     — текущее настроение/динамика
+6. persona_control           — ограничения и запреты
+7. persona_knowledge         — знания о мире
+8. persona_relations         — отношения с другими
+9. persona_form              — психологический профиль
+10. persona_decision_explanation — объяснение логики
+11. persona_state            — текущее эмоциональное состояние
+12. persona_reactions        — ситуационные реакции
+13. persona_examples         — примеры реплик (Q&A)
+14. persona_log_tuples       — обученные паттерны
+```
+
+### Локализационный движок
+
+Не переводит, а **обеспечивает нативность тона**. Для русского языка инжектирует в промпт:
+- формальность: formal | neutral | informal | intimate
+- теплота: cold | reserved | warm | tender
+- острота: flat | ironic | sharp | confrontational
+- темп: slow | measured | brisk | rapid
+
+---
+
+## 11. Регулятор ситуаций (SituationRegulator) — 4 слоя
+
+### Слой 1: Классификатор событий (14 типов)
+```
+threat, reward_signal, social_shame, warm_support,
+challenge, failure, social_rejection, attachment_activation,
+overload, novelty, planning_request, feedback_report,
+neutral, crisis
+```
+
+Специальный случай: `crisis` — детектирует суицидальные маркеры и немедленно переключается на режим поддержки, подавляя планирование.
+
+### Слой 2: Политика выброса регуляторов
+Правила вида `событие → изменения регуляторов`:
+- `threat → cortisol↑, adrenaline↑`
+- `reward_signal → dopamine↑`
+- `social_shame → cortisol↑, serotonin↓`
+- `warm_support → oxytocin↑, cortisol↓`
+
+### Слой 3: Выбор действия
+Взвешенная оценка по силам личности + состоянию регуляторов → выбор семейства поведенческого ответа.
+
+### Слой 4: LLM-вербализатор
+Получает выбранное действие + весь контекст → генерирует текст.
+
+---
+
+## 12. Speech Planner (SpeechPlan)
+
+Мост между `CognitiveTurnOutput` и LLM-промптом. LLM получает не «ответь на вопрос», а структурированный план:
+
+```python
+SpeechPlan:
+    action_name:     str         # "withdraw", "attack", "analyze", ...
+    speech_goal:     str         # "step back, reply minimally"
+    tone:            str         # "sharp and direct, does not soften edges"
+    perceived_risk:  float       # 0..1
+    confidence:      float       # 0..1
+    intensity:       float       # интенсивность события
+    primary_event:   str         # "criticism", "rejection", ...
+    key_points:      list[str]   # что обязательно сказать
+    blocked_topics:  list[str]   # что нельзя затрагивать
+    style_hints:     list[str]   # как говорить
+    language:        str         # ru/en/hy
+```
+
+LLM вербализует план — не изобретает структуру, только облекает в слова.
+
+---
+
+## 13. Движок поведенческих действий (behavioral_action_engine)
+
+Детерминированный слой между контроллером и LLM. Вычисляет оценку каждого возможного действия:
+
+```
+ActionScore(action) =
+      Σ(fear alignment × wf)
+    + Σ(desire alignment × wd)
+    + Σ(goal alignment × wg)
+    + Σ(need alignment × wn)
+    + Σ(value alignment × wv)
+    + Σ(habit alignment × wh)
+    + Σ(attachment alignment × wa)
+    + Σ(shame pressure × ws)
+    + current_trigger_sensitivity × wt
+    + current_state_modifier × wx
+    - internal_constraint_penalty × ci
+    - social_constraint_penalty × cs
+    - hard_constraint_penalty × ch   ← если > 0, действие ЗАПРЕЩЕНО
+```
+
+Жёсткие ограничения аннулируют действие полностью.
+
+---
+
+## 14. Классификатор безопасности (SafetyClassifier)
+
+**Без LLM**, детерминированный, многоуровневый:
+
+1. **Быстрый rule-based путь** — явные нелегальные/экстремальные сигналы → немедленная блокировка
+2. **Извлечение признаков** — 10-мерный вектор (плотность ключевых слов, структурные, эвристические)
+3. **KNN поиск** — k=7 ближайших соседей по косинусной метрике над векторами примеров
+4. **Взвешенное большинство** → метка + уверенность
+
+**Метки:** `safe → normal_response`, `suggestive → soft_filter`, `explicit → blur_or_generalize`, `illegal → block`
+
+Если уверенность < 0.45 — эскалация к следующей более строгой метке.
+
+---
+
+## 15. Движок планирования (PlanningEngine)
+
+Основной продуктовый режим системы — **адаптивный коуч**.
+
+### Логика одного цикла
+```
+Сообщение пользователя
+    → классификация типа хода (репорт / вопрос / рефлексия / обратная связь)
+    → загрузка заметок + профиля личности + недавних результатов
+    → вычисление сил, конфликтов, перегрузки
+    → выбор ОДНОГО маленького следующего шага
+    → выбор ОДНОГО резервного меньшего шага
+    → выбор ОДНОГО уточняющего вопроса
+    → PlanningOutput
+```
+
+LLM только вербализует готовый план — не строит его.
+
+### Классификация обратной связи
+| Метка | Смысл | Реакция системы |
+|---|---|---|
+| `success` | шаг сработал | усилить паттерн |
+| `partial` | частично сработал | уменьшить размер шага |
+| `failure` | не сработал | переключиться на резервный |
+| `resistance` | пользователь изменил план | адаптироваться |
+| `crisis` | кризис | стоп планирование, переключение на поддержку |
+| `neutral` | нет сигнала | продолжить |
+
+---
+
+## 16. Learner важности (ImportanceLearner)
+
+Учится **что пользователь считает важным сохранить**.
+
+### Механика
+- `/save` → позитивный пример
+- Каждый непомеченный ход → слабый негативный пример
+- Оценка хода: keyword score + длина + давность + личный контент
+- `SUGGESTION_THRESHOLD = 0.45` — выше этого значения предлагает сохранить
+
+### Что важно (по дизайну)
+- Личные факты (биография, отношения)
+- Заявленные цели
+- Эмоциональные переломные моменты
+- Провалы и успехи
+- Принятые обязательства
+- Явные просьбы запомнить
+
+### Что шум
+Короткие подтверждения, вопросы без личного содержания, приветствия.
+
+---
+
+## 17. Офлайн-обучение перцептронов (PerceptronTrainer)
+
+```python
+train_p1(rt, tuples):
+    # обучает EventEncoder (P1 из когнитивного пайплайна V1)
+    # только на размеченных (text, event_label) парах
+    # минимум 20 примеров, иначе пропускает
+    # 30 эпох, LR=0.01
+    # взвешивание по |feedback|
+
+train_p6(rt, tuples, genome):
+    # обучает ActionPolicy (P6)
+    # только на парах (текст, целевое_действие)
+    # то же самое: 30 эпох, LR=0.01
+```
+
+`TrainingTuple` = `(session_id, text, event_label, action_label, feedback_score, timestamp)`
+
+---
+
+## 18. Память системы (Memory Architecture)
+
+```
+memory/
+├── sessions/           — история диалогов
+│   ├── *.txt           — legacy формат (одиночный файл)
+│   └── _messages/      — modern JSONL (по сообщению, сохраняет user_persona_name)
+│
+├── graphs/             — граф знаний
+│   ├── nodes.json      — все узлы
+│   └── edges.json      — все рёбра
+│
+├── heads/              — персонажи (см. раздел 8)
+│
+├── importance_learner/ — паттерны важности
+│   ├── global_examples.jsonl
+│   └── {session_id}_examples.jsonl
+│
+├── message_annotations/ — операторские правки координат P1-P51
+│   └── *.json
+│
+├── message_vector_models/ — обученные модели координат
+│   └── p_registry_v1.json
+│
+├── personalities/      — профили пользователя (психологический портрет)
+│
+├── proposals/          — предложения по новым персонажам (ожидают проверки)
+│
+├── training_examples/  — обучающие примеры для персептронов
+│
+└── working/            — текущий рабочий контекст сессий
+```
+
+---
+
+## 19. API (`/api/cognitive/`)
+
+### Основные эндпоинты
+
+| Метод | URL | Назначение |
+|---|---|---|
+| GET | `/health` | Статус системы |
+| GET | `/sessions` | Список сессий |
+| POST | `/sessions` | Создать сессию |
+| GET | `/sessions/{id}` | Получить сессию с историей |
+| DELETE | `/sessions/{id}` | Удалить сессию |
+| POST | `/chat/respond` | Основной чат-эндпоинт |
+| GET | `/graph` | Граф знаний |
+| GET | `/graph/snapshots` | Снапшоты графа |
+| GET | `/genome/{persona_id}` | Геном персонажа |
+| POST | `/files/upload` | Загрузить файл (PDF/DOCX/TXT) |
+| POST | `/sessions/{id}/annotations` | Сохранить операторскую правку |
+| GET | `/debug/metrics` | Метрики системы |
+| GET | `/debug/traces` | Трейсы запросов |
+| GET | `/debug/graph-health` | Здоровье графа |
+
+### ChatRequest (POST /chat/respond)
 ```json
 {
-  "message_id": "m17",
-  "role": "assistant",
-  "raw_text": "Դե ապրես, երբ ուզես կարողանում ես։",
-  "display_text": "Դե ապրես, երբ ուզես կարողանում ես։",
-  "analysis_text": "Դե ապրես, երբ ուզես կարողանում ես։",
-  "vector": {
-    "P1": {"main": "statement", "extra": []},
-    "P24": {"main": "false_praise", "extra": ["sarcasm"]},
-    "P45": {"main": "corrective_praise", "extra": []}
-  },
-  "context_window": ["m13", "m14", "m15", "m16"],
-  "context_matrix_ref": "ctx_17"
+    "message":          "текст",
+    "session_id":       "session-xxx",
+    "user_persona_id":  "катерина",    // slug персонажа
+    "user_persona_name": "Катерина"    // отображаемое имя
 }
 ```
 
-### 5.4. `context_matrix` հասկացությունը
+---
 
-Համակարգի այս շերտում context-ը չի ներկայացվում մեկ թվով, մեկ probability score-ով կամ մեկ summary flag-ով։ Փոխարենը օգտագործվում է նախորդ հաղորդագրությունների վեկտորների պատուհան՝
+## 20. Frontend (React + Vite)
 
-```text
-context_matrix_t = [vector_(t-k), ..., vector_(t-1)]
+```
+webapp/
+├── src/
+│   ├── components/
+│   │   ├── Chat/           — чат-интерфейс, ChatGraphPanel
+│   │   ├── Graph/          — визуализация графа знаний
+│   │   ├── Persona/        — карточки персонажей
+│   │   ├── Inspector/      — инспектор P-векторов
+│   │   ├── Trace/          — трейс пайплайна
+│   │   ├── Studio/         — редактирование персонажей
+│   │   ├── Rebuild/        — управление фоновым перестроением
+│   │   ├── Operator/       — операторские правки
+│   │   ├── Controller/     — управление контроллером
+│   │   ├── Hypotheses/     — система гипотез
+│   │   └── Editor/         — редактор заметок
+│   └── api.js              — клиент к бэкенду
+└── vite.config.js
 ```
 
-Այդ պատճառով նույն բառերը կարող են տարբեր կերպ մեկնաբանվել տարբեր պատմությունների մեջ։ Օրինակ՝
+---
 
-- հաշտեցումից հետո `ապրես` կարող է կարդացվել որպես իրական գովասանք,
-- սրված երկխոսությունից հետո նույն `ապրես`-ը կարող է կարդացվել որպես սարկազմ, կեղծ գովասանք կամ ծաղր։
+## 21. Конфигурация рантайма
 
-Սա հենց այն պատճառներից է, որ correction layer-ը չի սահմանափակվում միայն ընթացիկ message-ի label խմբագրմամբ։ Եթե նախորդ replica-ն սխալ է նշված եղել որպես `care`, իսկ իրականում եղել է `pressure`, ապա ընթացիկ turn-ի մեկնաբանումը նույնպես կարող է խեղաթյուրվել։
+Ключевые env-переменные:
 
-### 5.5. Ուսուցանվող runtime
+```bash
+# Модели
+LOCAL_GGUF_MODEL=Qwen3.5-2B.Q4_K_M.gguf
+LOCAL_GGUF_N_CTX=7168
+LOCAL_GGUF_MAX_TOKENS=2048
+LOCAL_GGUF_MAX_LOADED=1          # сколько моделей держать в памяти
 
-`message_vector_runtime.py`-ը կառուցված է որպես trainable inference layer։ Յուրաքանչյուր `Pn` դիտարկվում է որպես առանձին classifier-like մեկնաբանիչ, որի վրա կարող են ազդել՝
+# Роли
+COGNITIVE_CHAT_ROLE=general
+COGNITIVE_RETHINK_ROLE=analyst
 
-- current text,
-- role,
-- persona name,
-- context matrix,
-- operator correction-երը։
+# Оркестрация чата
+COGNITIVE_CHAT_ORCHESTRATION=single     # single|multi
+COGNITIVE_CHAT_REVIEW_MODE=never        # never|always|on_failure
 
-Bootstrap փուլում կարող են գոյություն ունենալ պարզ նախնական հուշումներ, բայց այդ շերտը նախագծված է correction data-ով աստիճանաբար բարելավվելու համար։ Այսինքն՝ այստեղ նպատակը rule-engine կառուցելը չէ, այլ ուսուցանվող մեկնաբանման շերտ ունենալը։
+# Контекстные бюджеты (токены)
+COGNITIVE_MAX_CONTEXT_TOKENS=3400
+COGNITIVE_PERSONA_BLOCK_BUDGET=900
+COGNITIVE_GRAPH_CONTEXT_BUDGET=1100
+COGNITIVE_RECENT_DIALOGUE_BUDGET=320
 
-Կարևոր է նաև, որ այս շերտը ներկայումս արդեն օգտագործվում է ոչ միայն annotation UI-ում, այլ նաև live chat runtime-ում։ `chat_engine.py`-ը կանչում է `build_runtime_message_vector_payload()`-ը, ստանում է ընթացիկ `context_matrix` և `current_vector`, այնուհետև այդ տվյալը ներառում է prompt/planner guidance-ի և trace preview-ի մեջ։ Այսինքն message-vector layer-ը ներկայումս արդեն դեկորատիվ interface չէ, այլ պատասխան ձևավորող runtime-ի ակտիվ մասն է։
+# Какие этапы пускать через LLM (по умолчанию — ни одного, кроме шейпера)
+COGNITIVE_STAGE_MODEL_STEPS=none        # none | response_shaper | state_reader | ...
 
-## 6. Annotation և correction layer
-
-### 6.1. Ընդհանուր գաղափարը
-
-Համակարգի correction layer-ը առանձին է սովորական chat history-ից։ Սա կարևոր է, որովհետև operator-ը պետք է կարողանա ուղղել ոչ միայն վերջնական պատասխանը, այլ նաև՝
-
-- message vector-ը,
-- context window-ի անցյալ replica-ների vector-ները,
-- transition interpretation-ը։
-
-Այս ուղղումները չեն պետք վերագրեն chat history-ն այնպես, կարծես սկզբից հենց այդպես է եղել։ Դրանք պետք է պահվեն որպես առանձին annotation շերտ, որը հետագայում կարող է օգտագործվել որպես ուսուցողական dataset։
-
-### 6.2. `message_annotation_store.py`
-
-Այս մոդուլը պատասխանատու է՝
-
-- session history-ից annotation workspace հավաքելու,
-- predicted vector-ը կառուցելու,
-- correction-ով effective vector-ը ստանալու,
-- `context_window` և `context_matrix` կազմելու,
-- `transition_interpretation` հաշվարկելու,
-- correction-երը session-level և global dataset շերտերում պահելու համար։
-
-Արդյունքում համակարգը յուրաքանչյուր հաղորդագրության համար կարող է ցուցադրել ոչ միայն տեքստը, այլ նաև նրա շուրջ կառուցված իմաստային դիրքը։
-
-### 6.3. Correction storage
-
-Correction-երը պահվում են առանձին շերտերով, որպեսզի չխառնվեն սովորական history-ի հետ։ Գաղափարական մակարդակում առանձնացվում են՝
-
-- session-level annotation store,
-- global correction dataset,
-- trainable vector-model state։
-
-Սա թույլ է տալիս մի կողմից անմիջապես կիրառել operator ուղղումները տվյալ workspace-ում, մյուս կողմից՝ հետագայում օգտագործել դրանք որպես ուսուցանման օրինակներ։
-
-Ներկայիս implementation-ում այդ շերտերը ֆիզիկապես առանձնացված են հետևյալ ուղիներով՝
-
-- `memory/message_annotations/<session_id>.json`
-- `memory/message_annotations/global.jsonl`
-- `memory/message_vector_models/`
-
-Այս տարանջատումը կարևոր է, որովհետև սովորական session history-ն չի վերագրվում «կարծես սկզբից այդպես էր», իսկ correction շերտը պահպանվում է որպես ուսուցման և հետագա վերամշակման նյութ։
-
-### 6.4. Annotation API
-
-Annotation workspace-ը և correction save-ը հասանելի են նաև backend API-ի մակարդակում, ոչ միայն UI state-ի ներսում։ Ներկայիս ակտիվ endpoint-ներն են՝
-
-- `GET /api/cognitive/sessions/{session_id}/annotation-workspace`
-- `POST /api/cognitive/sessions/{session_id}/annotations`
-
-Այսպիսով frontend correction interface-ը կապակցված է իրական persistence շերտի հետ և չի հանդիսանում mock կամ purely local editor։
-
-## 7. Chat frontend և operator workspace
-
-### 7.1. Frontend-ի դերը
-
-`webapp/`-ը նախագծված չէ որպես սովորական վերջնական օգտագործողի chat shell։ Այն operator-facing միջավայր է, որտեղ միավորվում են՝
-
-- session management,
-- persona selection,
-- chat surface,
-- graph inspection,
-- diagnostics,
-- training / correction գործիքներ։
-
-Այսինքն frontend-ը ցույց է տալիս ոչ միայն վերջնական պատասխանը, այլ նաև runtime-ի մի շարք ներքին աշխատանքային շերտեր։
-
-### 7.2. Persona ընտրությունը որպես source of truth
-
-Ներկայիս տարբերակում chat surface-ում persona ընտրության dropdown-ը հանդիսանում է assistant speaker label-ի հիմնական աղբյուրը։ Սա կարևոր ուղղում է, որովհետև նախկինում UI-ն հաճախ generic fallback-ով assistant reply-ը ցուցադրում էր պարզապես `Assistant` կամ `Ассистент` պիտակով։
-
-Այժմ speaker label-ի առաջնահերթությունը կառուցված է այս տրամաբանությամբ՝
-
-1. operator-ի կողմից dropdown-ով ընտրված persona,
-2. session history-ից եկող persona name,
-3. եթե առկա է meaningful speaker name,
-4. fallback label, եթե persona ընդհանրապես ընտրված չէ։
-
-Արդյունքում chat thread-ում assistant reply-ը պետք է ներկայանա persona-ի անունով, ոչ թե generic assistant label-ով։
-
-Եթե persona ընդհանրապես ընտրված չէ և meaningful stored label չկա, ներկայիս frontend fallback-ը `LLM`-ն է, ոչ թե `Assistant`։
-
-### 7.3. Անմիջական chat UX
-
-Frontend-ի chat composer-ում կատարվել է կարևոր վարքային ուղղում. user-ը submit անելուն պես իր հաղորդագրությունը անմիջապես պետք է՝
-
-- անհետանա input field-ից,
-- հայտնվի chat thread-ում որպես user bubble,
-- backend reply-ին սպասելու ընթացքում մնա տեսանելի որպես ուղարկված հաղորդագրություն։
-
-Այս փոփոխությունը կարևոր է, որովհետև նախկին վարքում user-ի տեքստը մնում էր textarea-ում մինչև backend-ի պատասխանը, ինչը ստեղծում էր այն տպավորությունը, որ submit-ը դեռ չի կատարվել։
-
-Նոր հոսքը հետևյալն է՝
-
-```text
-textarea input
--> submit
--> composer reset
--> optimistic user message in thread
--> await backend
--> assistant reply appended
+# Облако (выключено)
+CLOUD_LLM_ENABLE=0
 ```
 
-Սա իրականում արդեն կապված է UI state-ի կոնկրետ մեխանիզմի հետ՝ optimistic message insertion և composer reset token, այսինքն խոսքը ոչ թե ցանկալի UX-ի, այլ արդեն ներդրված հոսքի մասին է։
+---
 
-### 7.4. Prompt-leak cleanup
+## 22. Что система умеет решать
 
-Chat UI-ում և backend validation layer-ում կիրառվում է պաշտպանություն այն դեպքերի դեմ, երբ language model-ը պատասխանի մեջ արտածում է ծառայողական scaffold, օրինակ՝
+### 22.1. Стабильный персонаж в диалоге
+Обычная LLM на 2B деградирует после 3–5 ходов. Эта система держит персонажа через:
+- Частотные паттерны (`log_tuples`) — не просто описание, а выученные формулировки
+- Ситуационные реакции (`situation_reactions`) — как реагировать на конкретный тип хода
+- ЗАПРЕЩЕНО-правила — жёсткий запрет на определённые фразы
+- Ремонт ответа при деградации
 
-- `# Answer`
-- `Review Notes`
-- `Analyze the Request`
-- `Issues Identified`
+### 22.2. Психологически точная модель личности
+53-параметровый геном + 10 регуляторов создают персонажей, у которых:
+- Есть страхи и влечения (не просто "черты")
+- Защитные механизмы меняются по ситуации
+- Реакция на критику отличается от реакции на похвалу
 
-Նպատակն այն է, որ operator thread-ում չցուցադրվեն reviewer prompt-ի, internal plan-ի կամ chain-like boilerplate-ի պատահական արտահոսքերը։
+### 22.3. Граф знаний и память
+Факты о мире и отношениях не теряются между сессиями. Граф обновляется при каждом диалоге — система знает, кто такой пользователь, какие у него отношения, что происходило раньше.
 
-### 7.5. Training / annotation editor
+### 22.4. Адаптивное планирование
+В режиме коуча: отслеживает прогресс, адаптируется к успехам/провалам, предлагает микрошаги. Не даёт советов в кризис — переключается на поддержку.
 
-Chat surface-ի training / annotation workspace-ը թույլ է տալիս՝
+### 22.5. Полная локальность и приватность
+Никаких внешних API. Все данные — на машине пользователя. Подходит для личных дневников, конфиденциального консультирования, закрытых корпоративных систем.
 
-- ընտրել ընթացիկ message-ը,
-- տեսնել դրա speaker-ը և text-ը,
-- տեսնել predicted vector-ը,
-- խմբագրել յուրաքանչյուր interpreter-ի `main` և `extra`,
-- բացել context window-ի նախորդ replica-ները,
-- տեսնել դրանց vector-ները,
-- անհրաժեշտության դեպքում ուղղել նաև context replica-ները։
+### 22.6. Мультиязычность
+Русский, английский, армянский, китайский — в паттернах признаков, детекции языка, локализационном движке.
 
-Այսպիսով correction layer-ը սահմանափակված չէ միայն վերջին assistant reply-ի վերագրությամբ։ Այն աշխատում է երկխոսության պատմության վրա։
+### 22.7. Операторский контроль
+Через веб-интерфейс: правка P-координат сообщений, исправление геномов, управление перестроением персонажей. Правки накапливаются и влияют на следующие обучения.
 
-## 8. History persistence և տվյալների ամբողջականություն
+---
 
-### 8.1. `raw_text`, `display_text`, `analysis_text`
+## 23. Нерешённые проблемы и ограничения
 
-Վերջին ուղղումներից կարևորագույններից մեկը user message-ի ամբողջականության պահպանումն է։ Համակարգը այժմ տրամաբանականորեն տարբերակում է՝
+| Проблема | Корень | Статус |
+|---|---|---|
+| 2B LLM ломает персонажа на провокациях | RLHF 2B-модели перебивает persona prompt | Частично решено через примеры + ЗАПРЕЩЕНО |
+| Фоновый rebuild перезаписывает persona_form.json | rebuild читает log_tuples → дериверует параметры | Решено заменой доминантной записи log_tuples |
+| sexual_orientation и кастомные поля стираются rebuild-ом | rebuild не знает о нестандартных полях | Известная проблема, нет автофикса |
+| Медленный первый ответ | llama.cpp холодный старт 1–3 сек | Частично решено prewarm |
+| Контекстное окно 3400 токенов мало для длинных сессий | Модель 2B не тянет больше | Решается через P51-обрезку контекста |
 
-- `raw_text` — սկզբնական մուտքագրված տեքստը,
-- `display_text` — UI-ում ցուցադրվող տեքստը,
-- `analysis_text` — normalize / preprocessing-ի համար նախատեսված պատճենը։
+---
 
-User message-ի դեպքում `display_text`-ը պետք է լռությամբ համընկնի `raw_text`-ի հետ։ Այս բաժանումը կանխում է այն սխալը, երբ մուտքային տեքստը պատահաբար կտրատվում կամ վերաձևակերպվում էր preprocessing logic-ի պատճառով։
+## 24. Заключение
 
-### 8.2. History store
+Persona-Graph-Agent — это не обёртка над ChatGPT и не RAG с LangChain. Это **собственная когнитивная архитектура**, где языковая модель — только один из компонентов.
 
-`history_store.py`-ը պահպանում է session data-ն այնպես, որ հաղորդագրությունները լինեն վերարտադրելի, traceable և annotation-layer-ի հետ համադրելի։ Սա կարևոր է ոչ միայն UI-ի համար, այլ նաև հետագա correction dataset-ի ձևավորման տեսանկյունից։
+Ключевое: система знает **что сказать** (через P1–P6, поведенческий движок, Speech Plan) ещё до того, как LLM открывает рот. LLM только переводит этот план в связный текст.
 
-Ներկայիս implementation-ում structured message rows-ը պահվում են session sidecar ձևաչափով, ինչը թույլ է տալիս վերականգնել `raw_text`, `display_text`, `analysis_text`, `persona_name` և այլ օժանդակ դաշտերը առանց հին plain-text history-ի սահմանափակումների։
+Система решает проблемы, которые не решаются prompt-инжинирингом:
+- **Стабильность персонажа** на дешёвой 2B-модели — через обученные паттерны, геном и ремонт
+- **Психологическая точность** — не "персонаж злой", а 53-параметровая модель с регуляторами и защитными механизмами
+- **Долгосрочная память** — граф + персонажные головы + история сессий
+- **Приватность** — 100% локально, без интернета
+- **Обучаемость** — система учится на каждом диалоге: паттерны, геном, координаты сообщений
 
-## 9. Reliability, validation և degradation handling
-
-### 9.1. Reliability layer
-
-`reliability.py`-ը նախատեսված է storage mutation-ների անվտանգ իրականացման համար։ Այն ապահովում է snapshot-before-write մոտեցում, rollback և structured failure reporting։
-
-Դա հատկապես կարևոր է հետևյալ դեպքերում՝
-
-- graph mutation,
-- persona materialization,
-- node rethink apply,
-- partial write failure։
-
-### 9.2. Runtime degradation
-
-Եթե local provider-ը կամ անհրաժեշտ dependency-ն անհասանելի է, runtime-ը pre-flight փուլում դա ճանաչում է և ըստ անհրաժեշտության անցնում fallback շերտի։ Կարևոր սկզբունքն այն է, որ degraded path-ի որոշումը կատարվում է նախքան generation փորձը, ոչ թե հետադարձ string-matching-ով։
-
-Այս մոտեցումը զգալիորեն ավելի հուսալի է, քան դատել այն բանից հետո, երբ արդեն ստացվել է դատարկ կամ անորակ reply։
-
-Ներկայիս chat fallback-ը նույնպես բերված է ավելի հստակ պայմանագրի. base reply-ը այլևս չի ձևանում persona-introduction կամ context-explanation, այլ պահպանում է չեզոք ներկայության ձև (`I'm here.` / `Go ahead.` և դրանց թարգմանված տարբերակները)՝ կախված persona selection-ի առկայությունից։
-
-### 9.3. Validation և repair
-
-Generation-ից հետո համակարգը կարող է կիրառել՝
-
-- format validation,
-- grounding validation,
-- persona consistency check,
-- repair / regeneration։
-
-Այս շերտը նպատակ ունի թույլ չտալ, որ ակնհայտ prompt leak-ը, empty response-ը կամ route-ին չհամապատասխանող reply-ը անմիջապես գրանցվի որպես վերջնական արդյունք։
-
-## 10. Knowledge graph, persona և rethink շերտեր
-
-### 10.1. Persona engine
-
-`persona_engine.py`, `head_caller.py` և հարակից մոդուլները ապահովում են persona-ների ընտրությունը, նյութականացումը և normalized naming-ը։ Persona-ն այստեղ միայն text description չէ. այն կապված է հիշողության, graph data-ի և behavioral state-ի հետ։
-
-### 10.2. Graph runtime
-
-Graph layer-ը պահպանում է entity-ները, կապերը, localized views-ը և retrieval-ի համար անհրաժեշտ կառուցվածքը։ Այս շերտը կարևոր է հատկապես factual կամ graph-grounded persona reasoning-ի ժամանակ։
-
-### 10.3. Node rethink
-
-`node_rethinker.py`-ը փորձում է բարելավել graph node-երի նկարագրությունները և կապերը, բայց դա անում է reliability layer-ի հսկողությամբ, որպեսզի անհաջող mutation-ի դեպքում ամբողջ փոփոխությունը rollback արվի։
-
-## 11. Թեստավորում և որակի վերահսկում
-
-Համակարգը ունի մեծածավալ backend test tree, որը ներառում է routing, persona, graph, reliability, chat engine, context pipeline, local LLM runtime և մի շարք այլ ենթահամակարգեր։
-
-Թեստային ծածկույթը ներառում է՝
-
-- route runtime,
-- request pipeline,
-- controller runtime,
-- cognitive pipeline,
-- reliability,
-- node rethink rollback,
-- graph lifecycle,
-- behavioral fallback,
-- local LLM policy,
-- chat engine,
-- API behavior,
-- annotation / memory lifecycle։
-
-Առանձին ստուգվում են նաև հետևյալ նոր behavior-ները՝
-
-- user `raw_text`-ի ամբողջական պահպանում,
-- annotation workspace-ի կառուցում `context_matrix`-ով,
-- correction layer-ի առանձին պահպանում,
-- corrected context-ի օգտագործումը runtime message-vector payload-ում։
-
-Առանձնապես կարևոր է, որ ուղղումները կատարվել են ոչ թե միայն test patching-ի միջոցով, այլ նաև իրական ճարտարապետական սխալների շտկմամբ, օրինակ՝
-
-- degradation detection-ի refactor,
-- deterministic seeding cognitive runtime-ում,
-- factual grounding contract-ի հստակեցում,
-- history contamination-ի կանխում,
-- prompt leak-երի մաքրում։
-
-## 12. Ճարտարապետական էվոլյուցիան
-
-Համակարգի զարգացման ընթացքում աստիճանաբար պարզ է դարձել, որ միայն route-երի բազմապատկումը և prompt-երի շերտավորումը բավարար չեն։ Եթե wrapper-ը չափազանց շատ է, բայց իրական runtime որոշումը մնում է `LLM`-ի վրա, ապա համակարգը դառնում է և՛ բարդ, և՛ փխրուն։
-
-Դրա արդյունքում ձևավորվել է հետևյալ անցումը՝
-
-### Նախորդ վիճակ
-
-- չափազանց շատ հաջորդական routing քայլեր,
-- context-ի չափազանց մեծ փաթեթավորում,
-- model-ի կողմից behavior invention,
-- թույլ observability,
-- fast path-երի բացակայություն,
-- correction layer-ի բացակայություն։
-
-### Ներկա վիճակ
-
-- controller-first route որոշում,
-- persona heavy path միայն անհրաժեշտության դեպքում,
-- deterministic cognitive pipeline,
-- structured `SpeechPlan`,
-- runtime degradation pre-flight check,
-- message-vector annotation layer,
-- operator correction workspace,
-- ավելի հստակ persistence և traceability։
-
-Այս փոփոխությունները համակարգը մոտեցրել են ոչ թե «ավելի խելացի chatbot»-ի, այլ վերահսկվող cognitive-agent runtime-ի գաղափարին։
-
-## 13. Ընթացիկ սահմանափակումները
-
-Թեև համակարգը զգալիորեն առաջ է գնացել, մի շարք խնդիրներ դեռ բաց են և համարվում են հետագա աշխատանքի ուղղություններ։
-
-### 13.1. Regulator state-ի երկարաժամկետ պահպանում
-
-Կոգնիտիվ pipeline-ի regulator state-ը դեռ ամբողջությամբ չի պահվում session-level persistent ձևաչափով բոլոր սցենարների համար։
-
-### 13.2. Annotation dataset-ի խորացված ուսուցում
-
-Message-vector correction layer-ը արդեն գործում է, սակայն երկարաժամկետ տեսանկյունից անհրաժեշտ է խորացնել trainable interpreter-ների վերաուսուցման pipeline-ը, որպեսզի session-level ուղղումները ավելի արդյունավետ կերպով տեղափոխվեն global learning state։
-
-### 13.3. Frontend-ի լրացուցիչ operator գործիքներ
-
-Թեև chat annotation UI-ն արդեն գոյություն ունի, notes/planning/advanced correction flow-երի ամբողջական visualization-ը դեռ կարելի է ընդլայնել։
-
-### 13.4. Small-model calibration
-
-Փոքր տեղային մոդելների դեպքում planner mode-ի չափից ավելի կառուցվածքային հուշումները երբեմն կարող են ծանրաբեռնել verbalization փուլը։ Հետևաբար պետք է շարունակական calibration։
-
-### 13.5. Persona-grounded style reliability
-
-Persona ընտրությունն այժմ ավելի լավ է կապված chat UI-ի հետ, սակայն տարբեր degraded կամ rare fallback path-երում դեռ պետք է շարունակել վերահսկել, որ generic assistant label-երը և persona-ից կտրված պատասխանները ամբողջությամբ չվերադառնան։
-
-## 14. Եզրակացություն
-
-`Persona-Graph-Agent` համակարգի ներկա տարբերակը ներկայացնում է controller-driven, graph-aware, persona-aware և correction-aware միջավայր, որտեղ `LLM`-ը այլևս չի դիտարկվում որպես միակ որոշող ուժ։
-
-Համակարգի հիմնական ձեռքբերումներն են՝
-
-- request-երի controller-first կազմակերպում,
-- heavy persona path-ի հստակ տարանջատում lightweight chat-ից,
-- deterministic P1–P6 cognitive pipeline,
-- `CognitiveAuthority` և `SpeechPlanner`-ով կառավարվող verbalization,
-- message-vector մեկնաբանման `P1..P51` շերտ,
-- `context_matrix`-ով աշխատող correction workspace,
-- operator-facing UI, որտեղ հնարավոր է ուղղել ոչ միայն վերջնական պատասխանը, այլ նաև դրա համատեքստային մեկնաբանումը,
-- history և annotation տվյալների տարանջատում,
-- reliability, validation և degradation handling-ի հասունացում։
-
-Ամենակարևոր եզրահանգումն այն է, որ այս համակարգը կառուցված է ոչ թե մեկ մեծ model-ի «ամեն ինչ հասկանալու» գաղափարի վրա, այլ մի քանի իրար հետ կապված, բայց ծրագրայինորեն վերահսկվող շերտերի վրա։ Այդ շերտերի համադրությունը թույլ է տալիս ոչ միայն պատասխան ստեղծել, այլ նաև հասկանալ, թե ինչ route-ով, ինչ context-ով և ինչ ներքին մեկնաբանությամբ է այդ պատասխանը ստացվել։
-
-Այդ պատճառով համակարգի հետագա զարգացումը պետք է շարունակվի նույն ուղղությամբ՝
-
-- մեծացնել trainable interpretation layer-ի որակը,
-- խորացնել correction dataset-ի կիրառելիությունը,
-- ավելի լավ կապել context history-ն և runtime behavior-ը,
-- պահել UI-ն operator-centric, թափանցիկ և խմբագրվող։
-
-Այս փաստաթուղթը ներկայացնում է համակարգի հենց այդ ներկա վիճակը և կարող է դիտարկվել որպես նախագծի համապարփակ տեխնիկական հաշվետվություն։
+Текущий приоритет развития: превратить её в **локального адаптивного коуча** — персонаж + память + планирование + психологический профиль пользователя в одном рантайме.
