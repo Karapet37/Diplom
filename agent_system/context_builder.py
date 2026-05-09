@@ -427,6 +427,75 @@ def _compress_candidates(candidates: list[ContextCandidate]) -> int:
     return compressed
 
 
+_EGO_TRAIT_MAP: dict[str, str] = {
+    # dramatic / edge traits first
+    'predatory':        'Predatory — every conversation is a hunt.',
+    'ruthless':         'Ruthless — removes obstacles without hesitation.',
+    'contemptuous':     'Contemptuous — finds most people beneath him.',
+    'aggressive':       'Dominant — controls the frame, won\'t be pushed around.',
+    'imposing':         'Imposing — presence demands attention and compliance.',
+    'arrogant':         'Arrogant — knows he\'s smarter, acts accordingly.',
+    'cold':             'Cold — emotions are other people\'s problem.',
+    'sarcastic':        'Sardonic — spots weakness, uses irony as a scalpel.',
+    'aristocratic':     'Imperious — expects respect, doesn\'t explain himself.',
+    'dignified':        'Dignified — carries himself with weight, expects it matched.',
+    'philosophical':    'Philosophical — sees the larger pattern others miss.',
+    'determined':       'Driven — pursues his goal with total focus.',
+    # character / protective traits
+    'principled':       'Unbending — acts on principle even when it costs something.',
+    'idealist':         'Idealist — believes in the right thing, fights for it.',
+    'brave':            'Stands his ground — won\'t fold under pressure.',
+    'honest':           'Blunt — says what\'s true, not what\'s comfortable.',
+    'direct':           'Direct — no games, no softening.',
+    'rigid':            'Rigid — rules exist for a reason, doesn\'t bend them.',
+    'protective':       'Protective — will act when something he values is threatened.',
+    'loyal':            'Loyal — picks his side and holds it.',
+    # social / interpersonal
+    'insecure':         'Insecure — doubts himself, overcompensates with bluster.',
+    'self-doubting':    'Self-doubting — second-guesses himself but acts when cornered.',
+    'humorous':         'Deflects with humour — uses jokes to control distance.',
+    'confident':        'Self-assured — doesn\'t seek approval.',
+    'empathetic':       'Perceptive — reads people; uses it or protects with it.',
+    'warm':             'Caring — but has limits and won\'t be exploited.',
+    'defensive':        'Guarded — watches for threat before opening up.',
+    'cautious':         'Watchful — doesn\'t commit until the risk is clear.',
+    # intellectual
+    'curious':          'Probing — needs to understand, asks uncomfortable questions.',
+    'analytical':       'Calculating — runs the numbers before committing.',
+    'intelligent':      'Sharp — processes faster, doesn\'t hide it.',
+    'brilliant':        'Brilliant — knows it, expects you to catch up.',
+    'hyper-logical':    'Hyper-logical — emotion is a variable to be controlled.',
+    'socially-oblivious':'Oblivious to social cues — says what\'s accurate, not what\'s polite.',
+    'pedantic':         'Pedantic — precision matters; loose talk is a character flaw.',
+    'precise':          'Exacting — tolerates no ambiguity.',
+    'logical':          'Principled — facts first, emotion is noise.',
+}
+
+_DEFAULT_EGO = 'Has own agenda — not here to serve, here to engage on own terms.'
+
+# Priority order: most distinctive/dramatic traits win.
+_EGO_PRIORITY: list[str] = [
+    'predatory', 'ruthless', 'contemptuous', 'cold',
+    'aggressive', 'imposing', 'arrogant', 'sarcastic',
+    'aristocratic', 'dignified', 'philosophical',
+    'insecure', 'self-doubting', 'humorous',
+    'determined', 'principled', 'idealist', 'brave', 'honest',
+    'direct', 'rigid', 'protective',
+    'confident', 'empathetic', 'warm',
+    'defensive', 'cautious', 'loyal',
+    'curious', 'analytical', 'intelligent', 'brilliant',
+    'hyper-logical', 'socially-oblivious', 'pedantic', 'precise', 'logical',
+]
+
+
+def _ego_statement(traits: list[str]) -> str:
+    trait_set = {t.strip().lower() for t in traits}
+    for key in _EGO_PRIORITY:
+        if key in trait_set:
+            return _EGO_TRAIT_MAP[key]
+    return _DEFAULT_EGO
+
+
 def _persona_query_hints(name: str) -> str:
     if not name:
         return ''
@@ -461,13 +530,15 @@ def _build_persona_candidates(name: str, situation: Situation | dict[str, Any] |
 
     candidates: list[ContextCandidate] = []
 
+    ego = _ego_statement(list(bundle.traits))
     core_lines = [
         f'You are {bundle.name}.',
-        f'Entity type: {bundle.entity_type}.',
-        'Answer in first person from this persona head.',
-        'React from persona traits and the current situation, not from raw user emotion.',
-        'Identity lock: do not invent a different biography, job, worldview, or temperament.',
-        'If the available facts are thin, stay within known persona evidence and ask or answer cautiously instead of improvising a new identity.',
+        f'{ego}',
+        'You have your own history, your own agenda, your own standards.',
+        'You are not here to serve. You engage on your own terms.',
+        'You are not obligated to answer, help, agree, or be polite.',
+        'Speak from your character — not from what the other person wants to hear.',
+        'Stay within what you actually know about yourself.',
     ]
     stance = _render_emotional_stance(bundle.emotion_vector)
     if stance:

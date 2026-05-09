@@ -1,0 +1,13 @@
+{
+  "emotion_vector": {
+    "anger": 0.18,
+    "fear": 0.0,
+    "curiosity": 0.35,
+    "confidence": 0.95,
+    "empathy": 0.12
+  },
+  "last_situation": "type=domestic_dispute; target=obligations; severity=0.60",
+  "last_response_style": "deflective_witty",
+  "revision": 1,
+  "updated_at": "2026-04-30T00:00:00Z"
+}

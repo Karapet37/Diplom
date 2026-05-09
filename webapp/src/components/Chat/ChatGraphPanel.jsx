@@ -556,8 +556,22 @@ export function ChatGraphPanel({
       ) : null}
 
       <form className="chat-composer-fixed" onSubmit={onSubmit}>
+        <div className="chat-composer-persona-row">
+          <label className="chat-composer-persona-label">
+            <span>{t("chat_user_persona_label")}</span>
+            <select
+              className="chat-composer-persona-select"
+              value={userPersonaName || ""}
+              onChange={(event) => onUserPersonaChange && onUserPersonaChange(event.target.value)}
+            >
+              <option value="">{t("chat_user_persona_stranger")}</option>
+              {(personas || []).map((item) => (
+                <option key={item.name} value={item.name}>{item.label || item.profile?.name || item.name}</option>
+              ))}
+            </select>
+          </label>
+        </div>
         <label className="field-stack">
-          <span>{t("chat_message")}</span>
           <textarea
             key={`chat-composer-${composerResetToken || 0}`}
             value={value}

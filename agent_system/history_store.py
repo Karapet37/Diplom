@@ -599,8 +599,19 @@ def recent_dialogue(session_id: str, *, max_messages: int = 6, max_tokens_equiva
     for item in list(parsed.get('messages') or [])[-max_messages:]:
         role = str(item.get('role') or '').strip()
         message = _message_display_text(item).strip()
-        if role and message:
-            lines.append(f'{role}: {message}')
+        if not (role and message):
+            continue
+        if role == 'user':
+            # Показываем имя пользователя-персоны если оно задано
+            # Это позволяет ассистенту различать нескольких собеседников в одной сессии
+            user_persona = str(item.get('user_persona_name') or '').strip()
+            display_role = user_persona if user_persona else 'user'
+        elif role == 'assistant':
+            persona = str(item.get('persona_name') or '').strip()
+            display_role = persona if persona else 'assistant'
+        else:
+            display_role = role
+        lines.append(f'{display_role}: {message}')
     text = '\n'.join(lines).strip()
     max_chars = max_tokens_equivalent * 4
     return text[-max_chars:].strip() if len(text) > max_chars else text
@@ -616,7 +627,40 @@ def infer_current_entity(session_id: str) -> str:
     parsed = parse_active_session(session_id)
     if not parsed:
         return ''
-    for item in reversed(list(parsed.get('messages') or [])):
+    messages = list(parsed.get('messages') or [])
+
+    # Find the most recent user turn.
+    last_user_item: dict | None = None
+    for item in reversed(messages):
+        if str(item.get('role') or '').strip() == 'user':
+            last_user_item = item
+            break
+    if last_user_item is None:
+        return ''
+
+    # Modern history items carry user_persona_name (written by append_turn).
+    # If the field is present it's authoritative for the speaker identity:
+    #   - non-empty → that persona IS the current entity (return directly)
+    #   - empty    → anonymous sender; scan ONLY this turn's text so stale
+    #               persona names from previous turns don't bleed through
+    if 'user_persona_name' in last_user_item:
+        stored_persona = str(last_user_item['user_persona_name'] or '').strip()
+        if stored_persona:
+            return stored_persona
+        # Anonymous sender: look for topic entities in the current message only.
+        message = _message_display_text(last_user_item).strip()
+        for pattern in _ENTITY_PATTERNS:
+            match = pattern.search(message)
+            if match:
+                candidate = _clean_entity_candidate(match.group(1) or '')
+                if candidate:
+                    return candidate
+        phrases = [_clean_entity_candidate(token) for token in capitalized_entity_phrases(message)]
+        phrases = [token for token in phrases if token]
+        return phrases[-1] if phrases else ''
+
+    # Legacy history (no user_persona_name field): scan all user turns.
+    for item in reversed(messages):
         if str(item.get('role') or '').strip() != 'user':
             continue
         message = _message_display_text(item).strip()

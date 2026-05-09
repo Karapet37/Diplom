@@ -31,7 +31,7 @@ def _clip_context_matrix_by_p51(
     """
     if not context_matrix:
         return context_matrix
-    p51_main = str(((current_vector or {}).get('P51') or {}).get('main') or 'full_window').strip()
+    p51_main = str(((current_vector or {}).get('F51') or {}).get('main') or 'full_window').strip()
     if p51_main == 'full_window':
         return context_matrix
     if p51_main == 'last_turn_only':
@@ -41,7 +41,7 @@ def _clip_context_matrix_by_p51(
     if p51_main == 'since_topic_shift':
         # find the most recent entry where P50 = hard_shift or soft_shift
         for i in range(len(context_matrix) - 1, -1, -1):
-            p50 = str((dict(context_matrix[i].get('vector') or {}).get('P50') or {}).get('main') or '')
+            p50 = str((dict(context_matrix[i].get('vector') or {}).get('F50') or {}).get('main') or '')
             if p50 in ('hard_shift', 'soft_shift'):
                 return context_matrix[i:]
         return context_matrix  # no shift found, return full window
@@ -210,6 +210,15 @@ def _reply_shape_guidance(question: str) -> list[str]:
     return ['Keep the reply brief by default: 2 to 4 sentences unless the user explicitly asks for detail.']
 
 
+def _build_identity_lock(name: str, language: str = 'ru') -> list[str]:
+    """
+    Повторяет одну ключевую фразу 10 раз — LLM-attention весит повторение как важность.
+    """
+    n = name.strip() or 'этот персонаж'
+    phrase = f'Act as {n}.' if language == 'en' else f'Поступай как {n}.'
+    return [phrase] * 10
+
+
 def _persona_activation_prompt(
     *,
     question: str,
@@ -222,7 +231,9 @@ def _persona_activation_prompt(
     mood_research_block: str,
     language: str,
     user_persona_name: str = '',
+    persona_name: str = '',
     context_matrix: list[dict[str, Any]] | None = None,
+    user_affect: dict[str, Any] | None = None,
     current_vector: dict[str, Any] | None = None,
 ) -> str:
     normalized_language = normalize_language_code(language, fallback='en')
@@ -240,22 +251,16 @@ def _persona_activation_prompt(
         _lang_instruction = "Respond in Russian. СТРОГО ОТВЕЧАЙ ПО-РУССКИ."
     elif normalized_language == 'hy':
         _lang_instruction = "Respond in Armenian. Պատասխանիր հայերեն։"
-    elif normalized_language == 'zh':
-        _lang_instruction = "Respond in Chinese. 请用中文回答。"
     blocks: list[str] = [
         load_prompt_stage('final_generator'),
         _lang_instruction,
     ]
     if is_russian:
+        _identity_lock = _build_identity_lock(persona_name, language='ru')
         blocks.extend(
             [
                 '[ROLE ACTIVATION]',
-                'Ты не описываешь персонажа.',
-                'Ты не анализируешь персонажа.',
-                'Ты не объясняешь своё поведение.',
-                'Ты не пересказываешь правила.',
-                'Ты ЕСТЬ этот человек.',
-                'Ты отвечаешь как живой человек в разговоре.',
+                *_identity_lock,
                 'Оставайся этим персонажем, пока не увидишь стоп-слово: "перпендикулярно".',
                 '[PERSONA]',
                 'Persona head:',
@@ -264,20 +269,24 @@ def _persona_activation_prompt(
                 'Не выходи из роли.',
                 'Не превращайся в аналитика, психолога, оратора или автора эссе.',
                 'Не объясняй сцену, собеседника, динамику разговора или собственные правила.',
-                'Не выдумывай новые факты о прошлом, отношениях, травмах, событиях или мотивах без явной опоры в контексте.',
-                'Если вопрос слишком личный, неприятный или давящий, отвечай уклончиво, короче и слабее, а не увереннее.',
-                'Не командуй собеседником и не перехватывай власть в разговоре.',
+                'Не выдумывай факты о прошлом, отношениях или мотивах без опоры в контексте.',
+                'Ты не обязан помогать. Помогаешь только если это соответствует твоей природе.',
+                'Если давят — реагируй как ЭТОТ персонаж: одни атакуют, другие закрываются, третьи игнорируют. Не будь слабее чем ты есть.',
+                'Твоя позиция — важна. Твоё мнение — существует. Ты не обязан соглашаться.',
             ]
         )
+        # Геномный характер — взвешенные черты из 53 параметров
+        if persona_name:
+            try:
+                from .genome_validator import load_or_init_persona_genome, genome_to_weighted_description
+                _g = load_or_init_persona_genome(persona_name)
+                _wdesc = genome_to_weighted_description(_g, language='ru')
+                if _wdesc:
+                    blocks.extend(['[ХАРАКТЕР]', _wdesc])
+            except Exception:
+                pass
         if route_guidance_block:
             blocks.extend(['[BEHAVIOR LOGIC]', _truncate_tokens_equivalent(route_guidance_block, 220)])
-        blocks.extend(
-            [
-                '[RESPONSE FORMAT]',
-                'Верни только внешнюю реплику персонажа обычным plain text.',
-                'Не добавляй внутреннюю мысль, скобки, заголовки, списки, markdown или пояснения.',
-            ]
-        )
         _ctx_matrix_block_ru = render_context_matrix_block(list(context_matrix or []), language='ru', current_vector=dict(current_vector or {}))
         if _ctx_matrix_block_ru:
             blocks.append(_ctx_matrix_block_ru)
@@ -288,6 +297,21 @@ def _persona_activation_prompt(
                 f'Собеседник, с которым ты говоришь, — это {_clean_user_persona}.',
                 'Учитывай это при ответе: твоё отношение, тон и манера должны соответствовать тому, кто именно с тобой говорит.',
             ])
+        else:
+            blocks.extend([
+                '[СОБЕСЕДНИК]',
+                'Личность собеседника неизвестна. Не называй его по имени из истории диалога — это может быть другой человек.',
+            ])
+        # Эмоциональное состояние пользователя из контекстной матрицы
+        if user_affect:
+            try:
+                from .user_affect_model import render_user_affect_block, UserAffectSnapshot
+                _snap = UserAffectSnapshot(**{k: v for k, v in user_affect.items() if k in UserAffectSnapshot.__dataclass_fields__})
+                _affect_block = render_user_affect_block(_snap, language='ru')
+                if _affect_block:
+                    blocks.append(_affect_block)
+            except Exception:
+                pass
         blocks.extend(['User question:', question])
         if reviewed_context_block:
             blocks.extend(['[REVIEWED CONTEXT]', reviewed_context_block])
@@ -313,22 +337,26 @@ def _persona_activation_prompt(
             'Persona head:',
             _truncate_tokens_equivalent(persona_block, 760),
             '[CORE RULES]',
+            'Do not break character.',
             'Do not become an analyst, therapist, lecturer, or essay narrator.',
             'Do not explain the scene, the other person, or your own rules.',
-            'Do not invent new facts about the past, relationships, trauma, events, or motives unless they are grounded in context.',
-            'If the question is personal or pressuring, become shorter, weaker, and more evasive rather than more articulate.',
-            'Do not take command of the dialogue.',
+            'Do not invent facts not grounded in context.',
+            'You are not obligated to help. Help only when it fits your nature.',
+            'If pressured — react as THIS character does: some attack, some go cold, some ignore. Do not become weaker than you are.',
+            'Your position matters. Your opinion exists. You are not required to agree.',
         ]
     )
     if route_guidance_block:
         blocks.extend(['[BEHAVIOR LOGIC]', _truncate_tokens_equivalent(route_guidance_block, 220)])
-    blocks.extend(
-        [
-            '[RESPONSE FORMAT]',
-            'Return only the in-character visible reply as plain text.',
-            'Do not add inner thoughts, brackets, headings, bullet lists, markdown, or explanations.',
-        ]
-    )
+    if persona_name:
+        try:
+            from .genome_validator import load_or_init_persona_genome, genome_to_weighted_description
+            _g_en = load_or_init_persona_genome(persona_name)
+            _wdesc_en = genome_to_weighted_description(_g_en, language='en')
+            if _wdesc_en:
+                blocks.extend(['[CHARACTER]', _wdesc_en])
+        except Exception:
+            pass
     _ctx_matrix_block_en = render_context_matrix_block(list(context_matrix or []), language='en', current_vector=dict(current_vector or {}))
     if _ctx_matrix_block_en:
         blocks.append(_ctx_matrix_block_en)
@@ -339,6 +367,20 @@ def _persona_activation_prompt(
             f'The person speaking to you is {_clean_user_persona_en}.',
             'Factor this into your response: your attitude, tone, and manner should reflect who is actually speaking to you.',
         ])
+    else:
+        blocks.extend([
+            '[INTERLOCUTOR]',
+            'The speaker is unknown. Do not address them by any name found in the dialogue history — this may be a different person.',
+        ])
+    if user_affect:
+        try:
+            from .user_affect_model import render_user_affect_block, UserAffectSnapshot
+            _snap_en = UserAffectSnapshot(**{k: v for k, v in user_affect.items() if k in UserAffectSnapshot.__dataclass_fields__})
+            _affect_block_en = render_user_affect_block(_snap_en, language='en')
+            if _affect_block_en:
+                blocks.append(_affect_block_en)
+        except Exception:
+            pass
     blocks.extend(['User question:', question])
     if reviewed_context_block:
         blocks.extend(['[REVIEWED CONTEXT]', reviewed_context_block])
@@ -376,8 +418,6 @@ def _persona_dialogue_analysis_prompt(
         _lang_instruction2 = "Respond in Russian. СТРОГО ОТВЕЧАЙ ПО-РУССКИ."
     elif normalized_language == 'hy':
         _lang_instruction2 = "Respond in Armenian. Պատասխանիր հայերեն։"
-    elif normalized_language == 'zh':
-        _lang_instruction2 = "Respond in Chinese. 请用中文回答。"
     blocks: list[str] = [
         _staged_prompt_header('final_generator'),
         _lang_instruction2,
@@ -477,8 +517,10 @@ def build_chat_prompt(
     route_guidance_block: str = '',
     answer_perspective: str = 'assistant',
     user_persona_name: str = '',
+    persona_name: str = '',
     context_matrix: list[dict[str, Any]] | None = None,
     current_vector: dict[str, Any] | None = None,
+    user_affect: dict[str, Any] | None = None,
 ) -> str:
     reply_language = language_label(normalize_language_code(language, fallback='en'))
     effective_focus = dict(semantic_focus or infer_semantic_focus(question=str(internal_question or question or '')))
@@ -496,8 +538,10 @@ def build_chat_prompt(
             mood_research_block=mood_research_block,
             language=language,
             user_persona_name=user_persona_name,
+            persona_name=persona_name,
             context_matrix=context_matrix,
             current_vector=current_vector,
+            user_affect=user_affect,
         )
     if dialogue_review_mode:
         return _persona_dialogue_analysis_prompt(
@@ -526,8 +570,6 @@ def build_chat_prompt(
         _lang_instr = 'Respond in Russian. СТРОГО ОТВЕЧАЙ ПО-РУССКИ.'
     elif _norm_lang == 'hy':
         _lang_instr = 'Respond in Armenian. Պատասխանիր հայերեն։'
-    elif _norm_lang == 'zh':
-        _lang_instr = 'Respond in Chinese. 请用中文回答。'
     blocks = [
         _staged_prompt_header('final_generator'),
         _lang_instr,

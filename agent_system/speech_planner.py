@@ -100,6 +100,11 @@ class SpeechPlan:
     language:         str   = 'en'
     max_tokens:       int   = 200
     conflict_tension: float = 0.0   # entropy of resolution probs: high → genuine ambivalence
+    affect_instruction: str = ''    # from affect_bridge.blend() — behavioural tone layer
+    dialog_pattern: str = ''        # кластер паттерна из dialog_tracker
+    dialog_logic_score: float = 1.0 # 0=аномалия, 1=знакомый паттерн
+    genome_style: str = ''          # genome_to_style_description() — характер из 53 генов
+    genome_conflict: str = ''       # detect_genome_conflict() — инструкция при противоречии
     _cog_snapshot:    dict[str, Any] = field(default_factory=dict, repr=False)
 
     def as_directive(self) -> str:
@@ -118,16 +123,26 @@ class SpeechPlan:
         elif self.conflict_tension > 0.45:
             tension_note = ' Mild internal tension present — allow slight hesitation or nuance.'
 
+        affect_block = f"\nAffect layer : {self.affect_instruction}" if self.affect_instruction else ''
+
+        dialog_block = ''
+        if self.dialog_pattern:
+            dialog_block = f"\nDialog pattern: {self.dialog_pattern}"
+        elif self.dialog_logic_score < 0.4:
+            dialog_block = "\nDialog pattern: anomalous — unfamiliar sequence, stay attentive"
+
+        genome_block = f"\nCharacter    : {self.genome_style}" if self.genome_style else ''
+        conflict_block = f"\n{self.genome_conflict}" if self.genome_conflict else ''
         return (
             f"── SPEECH DIRECTIVE ──\n"
             f"Goal         : {self.speech_goal}\n"
-            f"Tone         : {self.tone}\n"
+            f"Tone         : {self.tone}{affect_block}{dialog_block}\n"
             f"Risk level   : {self.perceived_risk:.2f}  |  Confidence: {self.confidence:.2f}  |  Intensity: {self.intensity:.2f}\n"
             f"Conflict     : {self.conflict_tension:.2f}  (0=resolved · 1=ambivalent)\n"
-            f"Event context: {self.primary_event}\n"
+            f"Event context: {self.primary_event}{genome_block}\n"
             f"Points to express (in order):\n{points_str}\n"
             f"Avoid touching: {blocked_str}\n"
-            f"Reply length : {length_hint}.{hedge}{tension_note}\n"
+            f"Reply length : {length_hint}.{hedge}{tension_note}{conflict_block}\n"
             f"──────────────────────"
         )
 
@@ -178,21 +193,76 @@ class SpeechPlanner:
         else:
             max_tokens = 280
 
+        # Extract P-dominant vector — shared by affect and conflict detection
+        _p_dominant: dict[str, str] = {}
+        try:
+            _p_vec = dict(built.get('message_vector_runtime') or {})
+            _p_dominant = {k: str((v or {}).get('main') or '') for k, v in
+                           (dict(_p_vec.get('current_vector') or {})).items()
+                           if str((v or {}).get('main') or '')}
+        except Exception:
+            pass
+
+        # Affect layer: translate P-vector + action into behavioural tone instruction
+        affect_instruction = ''
+        try:
+            from .affect_bridge import blend as _ab_blend
+            affect_instruction = _ab_blend(
+                p_vector=_p_dominant,
+                intensity=cog.intensity,
+                language=language,
+            )
+        except Exception:
+            pass
+
+        # Dialog context from dialog_tracker
+        _dialog_ctx = dict(built.get('dialog_context') or {})
+        dialog_pattern = str(_dialog_ctx.get('pattern_label') or '')
+        dialog_logic_score = float(_dialog_ctx.get('logic_score') or 1.0)
+
+        # Genome style + conflict detection
+        genome_style = ''
+        genome_conflict = ''
+        try:
+            from .genome_validator import (
+                load_or_init_persona_genome,
+                genome_to_reinforced_traits,
+                genome_to_weighted_description,
+                detect_genome_conflict,
+            )
+            _persona_name = str(built.get('persona_name') or '').strip()
+            if _persona_name:
+                _genome     = load_or_init_persona_genome(_persona_name)
+                _weighted   = genome_to_weighted_description(_genome, language=language)
+                _reinforced = genome_to_reinforced_traits(_genome, language=language)
+                genome_style = f'{_weighted}\n\n{_reinforced}' if _reinforced else _weighted
+                if _p_dominant:
+                    genome_conflict = detect_genome_conflict(
+                        _genome, _p_dominant, {}, language
+                    )
+        except Exception:
+            pass
+
         return SpeechPlan(
-            action_name      = cog.action_name,
-            speech_goal      = speech_goal,
-            tone             = tone,
-            perceived_risk   = cog.perceived_risk,
-            confidence       = float(thought[_T_CONFIDENCE]),
-            intensity        = cog.intensity,
-            primary_event    = cog.primary_event,
-            key_points       = key_points,
-            blocked_topics   = blocked,
-            style_hints      = style_hints,
-            language         = language,
-            max_tokens       = max_tokens,
-            conflict_tension = conflict_tension,
-            _cog_snapshot    = cog.to_dict(),
+            action_name         = cog.action_name,
+            speech_goal         = speech_goal,
+            tone                = tone,
+            perceived_risk      = cog.perceived_risk,
+            confidence          = float(thought[_T_CONFIDENCE]),
+            intensity           = cog.intensity,
+            primary_event       = cog.primary_event,
+            key_points          = key_points,
+            blocked_topics      = blocked,
+            style_hints         = style_hints,
+            language            = language,
+            max_tokens          = max_tokens,
+            conflict_tension    = conflict_tension,
+            affect_instruction  = affect_instruction,
+            dialog_pattern      = dialog_pattern,
+            dialog_logic_score  = dialog_logic_score,
+            genome_style        = genome_style,
+            genome_conflict     = genome_conflict,
+            _cog_snapshot       = cog.to_dict(),
         )
 
     # ── private helpers ──────────────────────────────────────────────────────
@@ -306,15 +376,15 @@ class SpeechPlanner:
         def main(pid: str) -> str:
             return str((vector.get(pid) or {}).get('main') or '').strip()
 
-        if main('P24') in {'sarcasm', 'dry_sarcasm', 'false_praise'} or main('P41') == 'masking':
+        if main('F24') in {'sarcasm', 'dry_sarcasm', 'false_praise'} or main('F41') == 'masking':
             points.append('treat the surface wording as masked — answer the underlying social move, not the literal phrasing')
-        if main('P13') == 'attack' or main('P30') == 'pressure':
+        if main('F13') == 'attack' or main('F30') == 'pressure':
             points.append('hold boundaries and do not reward pressure with extra openness')
-        if main('P16') == 'care' or main('P20') == 'friendliness':
+        if main('F16') == 'care' or main('F20') == 'friendliness':
             points.append('preserve the contact instead of turning cold or mechanical')
-        if main('P34') == 'reconciliation' or main('P38') == 'softening':
+        if main('F34') == 'reconciliation' or main('F38') == 'softening':
             points.append('leave a small opening for repair')
-        if main('P33') == 'distancing' or main('P37') == 'rupture':
+        if main('F33') == 'distancing' or main('F37') == 'rupture':
             points.append('signal distance clearly instead of pretending the tension is gone')
         if str(transition.get('type') or '').strip() == 'masking':
             points.append('the transition suggests masking — do not misread it as straightforward sincerity')
@@ -383,7 +453,6 @@ def qwen_fast_respond(
     _length_hints: dict[str, tuple[str, str, str]] = {
         'ru': ('1 предложение', '1-2 предложения', '2-3 предложения'),
         'hy': ('1 нахадас', '1-2 нахадас', '2-3 нахадас'),
-        'zh': ('1句', '1-2句', '2-3句'),
     }
     lh = _length_hints.get(lang, _length_hints['ru'])
     length_hint = lh[0] if plan.max_tokens <= 80 else (lh[1] if plan.max_tokens <= 160 else lh[2])
@@ -395,19 +464,16 @@ def qwen_fast_respond(
     _lang_desc: dict[str, str] = {
         'ru': f'Ты — живой тёплый эмпатичный собеседник. Отвечаешь по-русски, {length_hint}.{tension_note}',
         'hy': f'Ду — кенданի, джерм ев кареккан зрутсяких: Патасхани hайерен, {length_hint}.{tension_note}',
-        'zh': f'你是一个温暖、真实、有同理心的对话者。用中文回答，{length_hint}。{tension_note}',
     }
     think_line: dict[str, str] = {
         'ru': 'Отвечаю кратко и тепло по-русски.',
         'hy': 'Կarчрам кармас ев джерм hайерен.',
-        'zh': '我简短温暖地用中文回答。',
     }
 
     sys_parts = [_lang_desc.get(lang, _lang_desc['ru'])]
     if persona_system:
         sys_parts.append(persona_system.strip()[:300])
     sys_parts.append(f'Сейчас: {action_instr}' if lang == 'ru' else
-                     f'现在：{action_instr}' if lang == 'zh' else
                      f'Hиmer: {action_instr}')
     system = ' '.join(sys_parts)
 
@@ -447,7 +513,7 @@ def qwen_fast_respond(
     if not cleaned or _meta.search(cleaned[:60]):
         # Try to salvage natural sentences in any of the three scripts
         sentences = _re.findall(
-            r'(?:[А-ЯЁа-яёԱ-Ֆա-և\u4e00-\u9fff][^.!?\n]{8,200}[.!?])',
+            r'(?:[А-ЯЁа-яёԱ-Ֆա-և][^.!?\n]{8,200}[.!?])',
             raw,
         )
         good = [s for s in sentences if not _meta.search(s) and len(s) > 10]
@@ -476,7 +542,6 @@ def mistral_fast_respond(
     _sys_templates: dict[str, str] = {
         'ru': f'Ты — тёплый эмпатичный собеседник. Отвечаешь по-русски, 1-2 предложения.{tension_note} Сейчас: {action_instr}',
         'hy': f'Ду — джерм зрутсяких. Патасхани hайерен, 1-2 нахадас.{tension_note} Hиmer: {action_instr}',
-        'zh': f'你是温暖的对话者。用中文回答，1-2句。{tension_note} 现在：{action_instr}',
     }
     system = _sys_templates.get(lang, _sys_templates['ru'])
     if persona_system:
@@ -500,7 +565,7 @@ def mistral_fast_respond(
         r'\b(i will|let me|step \d|thinking|analyze|task:|role:)\b', _re.IGNORECASE,
     )
     sentences = _re.findall(
-        r'(?:[А-ЯЁа-яёԱ-Ֆա-և\u4e00-\u9fff][^.!?\n]{8,200}[.!?])', raw,
+        r'(?:[А-ЯЁа-яёԱ-Ֆա-և][^.!?\n]{8,200}[.!?])', raw,
     )
     good = [s for s in sentences if not _meta.search(s) and len(s) > 10]
     if good:
@@ -509,6 +574,23 @@ def mistral_fast_respond(
 
 
 # ─── simple_verbalizer_prompt ─────────────────────────────────────────────────
+
+_ACTION_TO_EN_INSTRUCTION: dict[str, str] = {
+    'connect':         'Respond with warmth and genuine empathy. Just be present.',
+    'ask_for_help':    'Respond supportively — let them know you hear them and you are here.',
+    'approach':        'Respond openly and warmly, make contact.',
+    'placate':         'Respond gently, ease the tension.',
+    'reframe':         'Gently offer a different perspective on the situation.',
+    'plan_small_step': 'Suggest one concrete small step forward.',
+    'analyze':         'Break down the situation calmly and clearly.',
+    'freeze':          'Respond slowly and carefully, do not rush.',
+    'withdraw':        'Respond briefly, give space.',
+    'self_protect':    'Respond cautiously, protect your own ground.',
+    'seek_control':    'Gently set the frame for the conversation.',
+    'avoid':           'Respond on the surface, do not go deeper.',
+    'attack':          'Clearly express disagreement.',
+    'reduce_exposure': 'Respond very briefly.',
+}
 
 _ACTION_TO_RU_INSTRUCTION: dict[str, str] = {
     'connect':         'Ответь тепло и с искренней эмпатией. Просто будь рядом.',
@@ -544,23 +626,6 @@ _ACTION_TO_HY_INSTRUCTION: dict[str, str] = {
     'reduce_exposure': 'Шат камас патасхани.',
 }
 
-_ACTION_TO_ZH_INSTRUCTION: dict[str, str] = {
-    'connect':         '温暖而真诚地回应。就陪在他身边。',
-    'ask_for_help':    '给予支持性回应 — 让他知道你在听，你在这里。',
-    'approach':        '开放而温暖地回应，建立连接。',
-    'placate':         '温和地回应，缓和紧张气氛。',
-    'reframe':         '轻柔地提供另一种看待情况的视角。',
-    'plan_small_step': '提出一个具体的小步骤。',
-    'analyze':         '平静清晰地分析情况。',
-    'freeze':          '慢慢地、谨慎地回应，不要着急。',
-    'withdraw':        '简短回应，给对方空间。',
-    'self_protect':    '谨慎回应，保持自己的边界。',
-    'seek_control':    '温和地建立对话框架。',
-    'avoid':           '浅浅地回应，不要深入。',
-    'attack':          '清晰地表达不同意见。',
-    'reduce_exposure': '非常简短地回应。',
-}
-
 _TONE_TO_RU: dict[str, str] = {
     'avoidance':        'осторожно, слегка уклончиво',
     'overcompensation': 'тепло, но без чрезмерного старания',
@@ -571,26 +636,14 @@ _TONE_TO_RU: dict[str, str] = {
     'self_deception':   'мягко, не акцентируя противоречий',
 }
 
-_TONE_TO_ZH: dict[str, str] = {
-    'avoidance':        '谨慎，略显回避',
-    'overcompensation': '温暖但不过分',
-    'attack':           '直接，不软化',
-    'freeze':           '缓慢，字字斟酌',
-    'planning':         '有条理，务实',
-    'support_seeking':  '温暖，带一丝不确定',
-    'self_deception':   '温和，不强调矛盾',
-}
-
 _TENSION_HIGH: dict[str, str] = {
     'ru': ' Отрази подлинную внутреннюю неоднозначность — не спеши к решению.',
     'hy': ' Арцанацрир иракан неркаин анкаюнакануютюне — ми шататапес лузуме.',
-    'zh': ' 反映真实的内心矛盾 — 不要急于解决。',
     'en': ' Reflect genuine inner ambivalence — do not force resolution.',
 }
 _TENSION_MID: dict[str, str] = {
     'ru': ' Допусти лёгкую нотку колебания.',
     'hy': ' Тур текн таталутяни нота.',
-    'zh': ' 允许一丝犹豫。',
     'en': ' Allow a slight note of hesitation.',
 }
 
@@ -605,7 +658,7 @@ def simple_verbalizer_prompt(
     persona_voice: str = '',
     recent_exchange: str = '',
 ) -> str:
-    """Language-aware prompt builder: 'ru' (default), 'hy' (Armenian), 'zh' (Chinese)."""
+    """Language-aware prompt builder: 'ru', 'hy' (Armenian), 'en' (English, default)."""
     lang = _lang2(plan)
     parts: list[str] = []
 
@@ -626,28 +679,25 @@ def simple_verbalizer_prompt(
             parts.append('Андхаманапес арцанацрир:\n' + '\n'.join(f'— {p}' for p in plan.key_points[:3]))
         parts.append('Патасхане:')
 
-    elif lang == 'zh':
+    elif lang == 'en':
         if persona_voice:
-            parts.append(f"你是 — {persona_voice.strip()[:300]}")
+            parts.append(f"You are — {persona_voice.strip()[:300]}")
         if recent_exchange:
-            parts.append(f"对话背景:\n{recent_exchange.strip()[:400]}")
-        instr = _ACTION_TO_ZH_INSTRUCTION.get(plan.action_name, '自然地回应。')
-        length_hint = '1–2句' if plan.max_tokens <= 80 else ('2–3句' if plan.max_tokens <= 140 else '3–4句')
-        tension_note = _TENSION_HIGH.get('zh', '') if plan.conflict_tension > 0.7 else (
-            _TENSION_MID.get('zh', '') if plan.conflict_tension > 0.45 else '')
+            parts.append(f"Conversation context:\n{recent_exchange.strip()[:400]}")
+        instr = _ACTION_TO_EN_INSTRUCTION.get(plan.action_name, 'Respond naturally.')
+        length_hint = '1–2 sentences' if plan.max_tokens <= 80 else ('2–3 sentences' if plan.max_tokens <= 140 else '3–4 sentences')
+        tension_note = _TENSION_HIGH.get('en', '') if plan.conflict_tension > 0.7 else (
+            _TENSION_MID.get('en', '') if plan.conflict_tension > 0.45 else '')
         if user_message:
-            parts.append(f'对方说：「{user_message.strip()}」')
-        zh_tone = _TONE_TO_ZH.get(plan.dominant_resolution if hasattr(plan, 'dominant_resolution') else '', '')
-        instr_block = f'{instr} 长度：{length_hint}。{tension_note}'
-        if zh_tone:
-            instr_block += f' 语气：{zh_tone}。'
+            parts.append(f'The person said: "{user_message.strip()}"')
+        instr_block = f'{instr} Length: {length_hint}.{tension_note}'
         parts.append(instr_block)
         if plan.key_points:
-            parts.append('必须体现：\n' + '\n'.join(f'— {p}' for p in plan.key_points[:3]))
-        parts.append('回答：')
+            parts.append('Make sure to express:\n' + '\n'.join(f'— {p}' for p in plan.key_points[:3]))
+        parts.append('Response:')
 
     else:
-        # Russian (default for 'ru', 'en', and any other lang)
+        # Russian (default)
         if persona_voice:
             parts.append(f"Ты — {persona_voice.strip()[:300]}")
         if recent_exchange:
@@ -689,6 +739,10 @@ def verbalizer_prompt(
     system_parts: list[str] = []
     user_parts: list[str] = []
 
+    # Trigger JSON mode in llama-cpp — suppresses Qwen3 thinking tokens entirely.
+    # normalize_text_reply() extracts the 'response' field automatically.
+    system_parts.append("Return valid json only.")
+
     if persona_voice:
         system_parts.append(f"PERSONA\n{persona_voice.strip()[:500]}")
 
@@ -700,26 +754,29 @@ def verbalizer_prompt(
     if plan.style_hints:
         user_parts.append("STYLE REQUIREMENTS\n" + '\n'.join(f'• {h}' for h in plan.style_hints))
 
-    # Closing instruction adapts to target language
+    # Closing instruction — JSON format, language-aware.
+    # Only ONE key allowed: "response". No reasoning, thought, or other fields.
     if plan.language and plan.language != 'en':
         user_parts.append(
             f"Напиши ответ прямо сейчас на языке: {plan.language}. "
             "Следуй директиве точно. Пиши только живую речь персонажа. "
-            "Не объясняй свои рассуждения. Не ссылайся на директиву. Не выходи из образа."
+            "Не объясняй свои рассуждения. Не ссылайся на директиву. Не выходи из образа. "
+            'Формат — только этот JSON, никаких других ключей: {"response": "текст ответа"}'
         )
     else:
         user_parts.append(
             "Write the reply now. Follow the directive exactly. "
             "Use natural speech for the persona. "
             "Do not explain your reasoning or reference this directive. "
-            "Do not break character."
+            "Do not break character. "
+            'Format — exactly this JSON, no other keys: {"response": "your reply here"}'
         )
 
     user_block = '\n\n'.join(user_parts)
 
     if system_parts:
         # Use the "User question:" separator so _split_chat_prompt_messages puts
-        # PERSONA + RECENT EXCHANGE in the system role and the directive in the user role.
+        # system content in the system role and the directive in the user role.
         return '\n\n'.join(system_parts) + '\n\nUser question:\n' + user_block
 
     return user_block

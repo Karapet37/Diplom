@@ -118,9 +118,9 @@ def test_chat_engine_injects_message_vector_runtime_guidance_into_prompt(tmp_pat
         session_id='vector_runtime_prompt',
         message_payload=last_assistant,
         coordinates={
-            'P24': {'main': 'false_praise', 'extra': ['sarcasm']},
-            'P35': {'main': 'escalation', 'extra': []},
-            'P49': {'main': 'toward_escalation', 'extra': []},
+            'F24': {'main': 'false_praise', 'extra': ['sarcasm']},
+            'F35': {'main': 'escalation', 'extra': []},
+            'F49': {'main': 'toward_escalation', 'extra': []},
         },
         context_window=last_assistant['context_window'],
         context_matrix=last_assistant['context_matrix'],
@@ -151,7 +151,7 @@ def test_chat_engine_injects_message_vector_runtime_guidance_into_prompt(tmp_pat
     vector_runtime = result['context_preview']['message_vector_runtime']
     assert '[P-COORDINATE LAYER]' in captured['route_guidance_block']
     assert 'Context matrix:' in captured['route_guidance_block']
-    assert vector_runtime['context_matrix'][-1]['vector']['P35']['main'] == 'escalation'
+    assert vector_runtime['context_matrix'][-1]['vector']['F35']['main'] == 'escalation'
     assert vector_runtime['transition_interpretation']['type'] in {'masking', 'escalation'}
     assert result['behavior_trace']['message_vector_runtime']['current_vector']
 

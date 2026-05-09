@@ -1,0 +1,31 @@
+{
+  "items": [
+    {
+      "tuple": [
+        "situation_reaction",
+        "type neutral query target persona severity 0 50",
+        "response style direct explanatory answers substance first with persona grounding"
+      ],
+      "frequency": 2,
+      "sample": "type=neutral_query; target=persona; severity=0.50 -> response_style=direct_explanatory; answers_substance_first_with_persona_grounding"
+    },
+    {
+      "tuple": [
+        "situation_reaction",
+        "type neutral statement target self severity 0 20",
+        "response style steady answers substance first with persona grounding"
+      ],
+      "frequency": 2,
+      "sample": "type=neutral_statement; target=self; severity=0.20 -> response_style=steady; answers_substance_first_with_persona_grounding"
+    },
+    {
+      "tuple": [
+        "situation_reaction",
+        "type neutral query target persona severity 0 50",
+        "response style direct explanatory asks for clarification when grounding is thin"
+      ],
+      "frequency": 1,
+      "sample": "type=neutral_query; target=persona; severity=0.50 -> response_style=direct_explanatory; asks_for_clarification_when_grounding_is_thin"
+    }
+  ]
+}

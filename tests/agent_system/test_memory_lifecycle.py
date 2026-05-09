@@ -128,6 +128,42 @@ def test_infer_current_entity_keeps_multiword_name_from_last_user_turn(tmp_path,
     assert infer_current_entity('entity_multiword') == 'Jack Sparrow'
 
 
+def test_infer_current_entity_does_not_bleed_named_persona_into_anonymous_turn(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+
+    create_session('persona_bleed', 'Persona Bleed')
+    # Turn 1: Ron Weasley speaks (named persona)
+    append_turn(
+        'persona_bleed',
+        'ты такой скучный',
+        'Interesting perspective.',
+        user_persona_name='Ron Weasley',
+    )
+    # Turn 2: anonymous user speaks — entity must NOT bleed 'Ron Weasley'
+    append_turn(
+        'persona_bleed',
+        'ты такой скучный',
+        'Another response.',
+        user_persona_name='',
+    )
+
+    assert infer_current_entity('persona_bleed') == ''
+
+
+def test_infer_current_entity_returns_named_persona_when_set(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
+
+    create_session('persona_set', 'Persona Set')
+    append_turn(
+        'persona_set',
+        'привет',
+        'Привет, Рон!',
+        user_persona_name='Ron Weasley',
+    )
+
+    assert infer_current_entity('persona_set') == 'Ron Weasley'
+
+
 def test_delete_session_removes_text_route_state_uploads_and_archive(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv('COGNITIVE_MEMORY_ROOT', str(tmp_path / 'memory'))
 

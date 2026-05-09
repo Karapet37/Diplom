@@ -1,0 +1,9 @@
+{
+  "examples": [],
+  "situation_reactions": [
+    {
+      "situation": "type=neutral_statement; target=self; severity=0.20",
+      "reaction": "response_style=steady; answers_substance_first_with_persona_grounding"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "items": [
+    {
+      "tuple": [
+        "utterance_pattern",
+        "dracula feeds on humans"
+      ],
+      "frequency": 1,
+      "sample": "Dracula feeds on humans."
+    },
+    {
+      "tuple": [
+        "utterance_pattern",
+        "entity dracula fact dracula feeds on humans"
+      ],
+      "frequency": 1,
+      "sample": "{'entity': 'Dracula', 'fact': 'Dracula feeds on humans.'}"
+    }
+  ]
+}

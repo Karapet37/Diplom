@@ -116,8 +116,8 @@ def _minimum_output_budget(mode: str, *, role: str) -> int:
     if mode_key == 'knowledge':
         return 384 if role_key == 'analyst' else 448
     if mode_key == 'chat':
-        return 256 if role_key == 'analyst' else 320
-    return 256
+        return 200
+    return 200
 
 
 def plan_model_budget(
@@ -304,6 +304,33 @@ def extract_json_block(text: str) -> Any | None:
     return None
 
 
+_JSON_RESP_KEY_RE = re.compile(
+    r'"(?:response|reply|text|message|content|assistant_reply)"\s*:\s*"((?:[^"\\]|\\.)*)',
+    re.DOTALL,
+)
+
+_SENT_SPLIT_RE = re.compile(r'(?<=[.!?…])\s+')
+
+
+def _dedup_repeated_sentences(text: str) -> str:
+    """Truncate text when a sentence repeats 3+ times — classic small-LLM loop fix."""
+    sentences = _SENT_SPLIT_RE.split(text.strip())
+    seen: dict[str, int] = {}
+    result: list[str] = []
+    for s in sentences:
+        key = s.strip().lower()
+        if not key:
+            result.append(s)
+            continue
+        count = seen.get(key, 0) + 1
+        seen[key] = count
+        if count <= 2:
+            result.append(s)
+        else:
+            break
+    return ' '.join(result).strip()
+
+
 def normalize_text_reply(value: Any) -> str:
     raw = str(value or '').strip()
     if not raw or raw in {'{}', '[]', SAFE_ERROR_REPLY}:
@@ -313,12 +340,20 @@ def normalize_text_reply(value: Any) -> str:
         for key in ('assistant_reply', 'reply', 'text', 'message', 'content', 'response'):
             candidate = normalize_text_reply(payload.get(key))
             if candidate:
-                return candidate
+                return _dedup_repeated_sentences(candidate)
+    # Fallback: regex extraction for truncated JSON — when the LLM ran out of tokens
+    # mid-JSON and json.loads() fails, pull text from the "response" key directly.
+    if raw.lstrip().startswith('{'):
+        m = _JSON_RESP_KEY_RE.search(raw)
+        if m:
+            extracted = m.group(1).replace('\\"', '"').replace('\\n', '\n').replace('\\\\', '\\').strip()
+            if extracted:
+                return extracted
     cleaned = _sanitize_visible_reply(raw)
     lowered = cleaned.lower()
     if not cleaned or any(marker in lowered for marker in PROMPT_LEAK_MARKERS):
         return ''
-    return cleaned
+    return _dedup_repeated_sentences(cleaned)
 
 
 def _strip_leading_leak_lines(text: str) -> str:

@@ -40,7 +40,7 @@ _CURRENT_CONTEXT_LOCK = Lock()
 
 
 def _enabled_model_stages() -> set[str]:
-    raw = str(os.getenv('COGNITIVE_STAGE_MODEL_STEPS', 'response_shaper') or '').strip().lower()
+    raw = str(os.getenv('COGNITIVE_STAGE_MODEL_STEPS', 'none') or '').strip().lower()
     if not raw:
         return set()
     return {item.strip() for item in raw.split(',') if item.strip()}

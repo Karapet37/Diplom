@@ -111,6 +111,14 @@ class SessionRequest(BaseModel):
     title: str = ''
 
 
+class DirectLLMRequest(BaseModel):
+    message: str
+    persona_description: str = ''
+    persona_name: str = ''
+    language: str = 'en'
+    history: list[dict[str, str]] = Field(default_factory=list)
+
+
 class ChatRequest(BaseModel):
     session_id: str = ''
     message: str
@@ -383,6 +391,40 @@ def create_router() -> APIRouter:
             raise HTTPException(status_code=404, detail='Session not found')
         forget_session_runtime_state(session_id)
         return result
+
+    @router.post('/chat/direct')
+    def direct_llm_endpoint(request: DirectLLMRequest) -> dict[str, Any]:
+        from .llm import _call_model, normalize_text_reply
+        persona_name = str(request.persona_name or '').strip() or 'Assistant'
+        desc = str(request.persona_description or '').strip()
+        lang = str(request.language or 'en').strip() or 'en'
+        lang_hint = (
+            'Отвечай только по-русски, коротко, без метакомментариев.'
+            if lang == 'ru' else
+            'Reply in English only. No meta-commentary, no analysis, no self-description.'
+        )
+        # Build conversation context from history
+        history_block = ''
+        for turn in (request.history or [])[-6:]:
+            role = str(turn.get('role') or '').strip()
+            content = str(turn.get('content') or '').strip()
+            if role == 'user':
+                history_block += f'\nUser: {content}'
+            elif role == 'assistant':
+                history_block += f'\n{persona_name}: {content}'
+        system_block = f'You are {persona_name}.'
+        if desc:
+            system_block += f' {desc}'
+        prompt = (
+            f'{system_block}\n'
+            f'{history_block}\n'
+            f'User: {request.message}\n\n'
+            f'{lang_hint}\n\n'
+            f'{persona_name}:'
+        )
+        raw = _call_model(prompt, mode='chat', role='general')
+        reply = normalize_text_reply(raw) or raw.strip() or '...'
+        return {'ok': True, 'reply': reply, 'persona_name': persona_name}
 
     @router.post('/chat/respond')
     def chat_endpoint(request: ChatRequest) -> dict[str, Any]:

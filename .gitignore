@@ -1,11 +1,11 @@
-# Environment and local tooling
+# ── Environment and local tooling ─────────────────────────────────────────────
 .env
 .env.local
 .venv/
 .idea/
 .vscode/
 
-# Python cache/build artifacts
+# ── Python cache/build artifacts ──────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.so
@@ -14,11 +14,11 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
-# Web UI
+# ── Web UI ─────────────────────────────────────────────────────────────────────
 webapp/node_modules/
 webapp/dist/
 
-# Runtime databases and snapshots
+# ── Runtime databases and snapshots ───────────────────────────────────────────
 *.db
 *.db-*
 *.sqlite3
@@ -29,34 +29,69 @@ data/*.sqlite3
 data/*.sqlite3-*
 data/autonomous_graph_snapshot.json
 
-# Runtime-generated graph/session artifacts
+# ── Runtime-generated graph/session/persona artifacts ─────────────────────────
 data/project_backups/*.json
 data/sessions/*.json
 !data/sessions/.gitkeep
 memory/sessions/*.txt
+memory/sessions/_messages/
+memory/sessions/_route_state/
 !memory/sessions/.gitkeep
+memory/importance_learner/
+memory/mood_research/
 memory/graphs/*.json
 !memory/graphs/.gitkeep
 memory/personalities/proposals/*.json
 !memory/personalities/proposals/.gitkeep
 memory/graph_history/**
 !memory/graph_history/.gitkeep
+memory/archive/
 runtime/**
 !runtime/.gitkeep
 
-# Generated exports and reports
+# ── Generated exports and reports ─────────────────────────────────────────────
 reports/
 data/profile_exports/
 
-# Large local models
+# ── Large local models (GGUF + trained sklearn/RF pickles) ────────────────────
 models/*.gguf
 models/**/*.gguf
+models/p_subsystems/
+models/p2_tone_clf.pkl
+models/p51_response_gate.pkl
+*.pkl
 
-# TLS certificates
+# ── Large training / dataset files ────────────────────────────────────────────
+# Raw datasets (large, not source code)
+DataSets/dataset.json
+DataSets/everyday_conversations.jsonl
+DataSets/everyday_conversations_test.jsonl
+DataSets/armenian_intonation/
+# Generated training examples (1.5 GB)
+training/p_examples/
+# Generated test outputs
+presentation_test_results.json
+presentation_test_log.md
+
+# ── TLS certificates ──────────────────────────────────────────────────────────
 infra/nginx/certs/*.pem
 infra/nginx/certs/*.key
 infra/nginx/certs/*.crt
 
-# OS files
+# ── OS / editor files ─────────────────────────────────────────────────────────
 .DS_Store
+Thumbs.db
+
+# ── Temporary / one-off scripts ───────────────────────────────────────────────
+_fix_alpha.py
 mylittletest.py
+
+# ── Diploma / presentation artifacts (not part of the project) ────────────────
+"KK (1) (1) (1).pdf"
+KK*.pdf
+ExamplesForDiplom.md
+scripts/build_diplom_presentation_scenario.py
+scripts/fix_diplom_presentation.py
+scripts/insert_slide11_example_triplet.py
+scripts/update_slide11_examples.py
+scripts/update_slides11_13_examples.py

@@ -723,8 +723,8 @@ _SYSTEM_PERSONA_NAMES_ROUTE = frozenset({
     'unnamed', 'unknown', 'default', 'assistant', 'persona',
 })
 _VECTOR_GUIDANCE_INTERPRETERS = (
-    'P1', 'P4', 'P8', 'P11', 'P13', 'P16', 'P18', 'P20', 'P24', 'P29',
-    'P30', 'P34', 'P35', 'P36', 'P38', 'P39', 'P40', 'P41', 'P48', 'P49',
+    'F1', 'F4', 'F8', 'F11', 'F13', 'F16', 'F18', 'F20', 'F24', 'F29',
+    'F30', 'F34', 'F35', 'F36', 'F38', 'F39', 'F40', 'F41', 'F48', 'F49',
 )
 _VECTOR_GUIDANCE_HIDDEN = frozenset({
     'absent', 'neutral', 'unclear', 'continuation', 'defined', 'direct',
@@ -1072,13 +1072,13 @@ def _model_budget_trace_meta(model_budget: dict[str, Any]) -> dict[str, Any]:
 def _route_output_budget(route: RouteDecision, *, repair: bool = False) -> int:
     selected = str(route.selected_route or '').strip()
     if selected == 'persona_graph_reasoning':
-        return 2048 if repair else 1536
+        return 512 if repair else 320
     if selected == 'persona_chat_fast_path':
-        return 1024 if repair else 768
+        return 448 if repair else 280
     if selected == 'persona_dialogue_analysis':
-        return 2048 if repair else 1536
+        return 512 if repair else 320
     if selected in {'hypothetical_roleplay', 'project_document_analysis'}:
-        return 1024 if repair else 768
+        return 448 if repair else 280
     if selected == 'meta_previous_answer':
         return 704 if repair else 512
     if selected == 'factual_answer':
@@ -1087,9 +1087,10 @@ def _route_output_budget(route: RouteDecision, *, repair: bool = False) -> int:
 
 
 def _answer_perspective_for_route(route: RouteDecision) -> str:
-    if route.selected_route in {'persona_graph_reasoning', 'persona_chat_fast_path', 'hypothetical_roleplay'}:
+    # Any route with a persona selected → speak AS the persona, not as an assistant
+    if route.requires_persona:
         return 'persona'
-    if route.selected_route == 'lightweight_conversation' and route.requires_persona:
+    if route.selected_route in {'persona_graph_reasoning', 'persona_chat_fast_path', 'hypothetical_roleplay'}:
         return 'persona'
     if route.selected_route == 'persona_dialogue_analysis':
         return 'persona_review'
@@ -2059,6 +2060,30 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             vector_guidance = _render_message_vector_guidance(message_vector_runtime_payload)
             if vector_guidance:
                 route_guidance = (route_guidance + '\n\n' + vector_guidance).strip()
+
+            # ── DIALOG CONTEXT MATRIX ─────────────────────────────────────
+            # Записываем ход в контекстную матрицу сессии, получаем logic_ctx.
+            try:
+                from .dialog_tracker import record_turn as _record_turn
+                _dialog_ctx = _record_turn(
+                    clean_session_id,
+                    text=clean_message,
+                    speaker='user',
+                )
+                built['dialog_context'] = _dialog_ctx
+
+                # F7 прагматический подтекст → route_guidance
+                _f7_sub = str(_dialog_ctx.get('f7_subtext') or '').strip()
+                _f6_dir = str(_dialog_ctx.get('f6_directive') or '').strip()
+                if _f7_sub:
+                    _subtext_block = f'[Прагматический подтекст: {_f7_sub[:300]}]'
+                    route_guidance = (route_guidance + '\n\n' + _subtext_block).strip()
+                if _f6_dir and _f6_dir != 'respond_normal':
+                    _dir_block = f'[F6-директива: {_f6_dir}]'
+                    route_guidance = (route_guidance + '\n' + _dir_block).strip()
+            except Exception:
+                built['dialog_context'] = {}
+
             context_sources_used = [
                 source
                 for source, enabled in (
@@ -2069,13 +2094,11 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 )
                 if enabled
             ]
-            if _cog_output is not None and route.requires_llm and _cog_mode == 'planner':
-                # ── SPEECH PLANNER PATH ──────────────────────────────────────
-                # Only active in 'planner' mode (score ≥ 0.55): the pipeline
-                # has enough grounded data to fully control content.
-                # In 'hint' mode the cognitive hint is already in route_guidance
-                # and the legacy prompt handles the rest.  In 'pure_llm' mode
-                # the LLM answers freely with no pipeline interference.
+            if _cog_output is not None and route.requires_llm:
+                # ── SPEECH PLANNER PATH (mandatory) ─────────────────────────
+                # P1–P6 pipeline is the decision-maker; LLM only verbalizes.
+                # _cog_mode is still recorded for logging but no longer gates
+                # this path — SpeechPlan is always used when cog output exists.
                 from .speech_planner import SpeechPlanner, verbalizer_prompt as _vp
                 _speech_plan = SpeechPlanner().build(
                     _cog_output,
@@ -2103,8 +2126,10 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                     route_guidance_block=route_guidance,
                     answer_perspective=_answer_perspective_for_route(route),
                     user_persona_name=str(request.user_persona_name or '').strip(),
+                    persona_name=str(built.get('persona_name') or simple_selected_persona or '').strip(),
                     context_matrix=list(_mvr.get('context_matrix') or []),
                     current_vector=dict(_mvr.get('current_vector') or {}),
+                    user_affect=dict(built.get('dialog_context', {}).get('user_affect') or {}),
                 )
             logical_context = _logical_context_snapshot(built)
             simple_persona_selected = bool(simple_selected_persona)
@@ -2238,6 +2263,23 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                     else ('no_grounding' if fallback_reason == 'no_grounding' else 'generation_bypassed')
                 ),
             )
+            # Genome fit check: P1-51 семьи проверяют ответ против 53 генов персоны
+            _genome_repair_block = ''
+            if str(assistant_reply or '').strip() and route.requires_persona:
+                try:
+                    from .genome_validator import (
+                        load_or_init_persona_genome,
+                        p51_gate,
+                    )
+                    _g_name = str(built.get('persona_name') or simple_selected_persona or '').strip()
+                    if _g_name:
+                        _g = load_or_init_persona_genome(_g_name)
+                        _p51, _genome_repair_block = p51_gate(
+                            assistant_reply, _g, language=response_language
+                        )
+                except Exception:
+                    pass
+
             validation = observability.time_stage(
             trace,
             'response_validation',
@@ -2261,15 +2303,30 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                 'repair_strategy': item.repair_strategy,
             },
             )
+            # Если genome check провалился но validation была OK → форсируем repair
+            if validation.ok and _genome_repair_block:
+                from .models import ResponseValidation as _RV
+                validation = _RV(
+                    ok=False,
+                    validation_mode=validation.validation_mode,
+                    route_match=validation.route_match,
+                    fallback_triggered=validation.fallback_triggered,
+                    fallback_reason_code=validation.fallback_reason_code,
+                    mismatch_reason='genome_character_mismatch',
+                    repair_strategy='regenerate_with_budget',
+                    used_persona=bool(getattr(validation, 'used_persona', False)),
+                )
+
             if not validation.ok:
                 repaired_reply = ''
                 if validation.repair_strategy == 'deterministic_clarification':
                     repaired_reply = deterministic_reply(route, language=response_language, history_available=history_available)
                 elif validation.repair_strategy == 'regenerate_with_budget':
-                    if _cog_output is not None and _cog_mode == 'planner':
+                    if _cog_output is not None:
                         from .speech_planner import SpeechPlanner, verbalizer_prompt as _vp
                         _rplan = SpeechPlanner().build(_cog_output, built=built, user_text=clean_message, language=response_language)
-                        repaired_prompt = _vp(_rplan, persona_voice=str(built.get('persona_block') or '')[:500], recent_exchange=str(built.get('recent_dialogue') or '')[:600])
+                        _base_prompt = _vp(_rplan, persona_voice=str(built.get('persona_block') or '')[:500], recent_exchange=str(built.get('recent_dialogue') or '')[:600])
+                        repaired_prompt = (_base_prompt + '\n\n' + _genome_repair_block).strip() if _genome_repair_block else _base_prompt
                     else:
                         repaired_prompt = _call_build_chat_prompt_compat(
                             question=clean_message,
@@ -2293,7 +2350,7 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
                         role_override=str(chat_orchestration.get('reviewer_role') or simple_chat_role).strip() or simple_chat_role,
                     )
                 elif validation.repair_strategy == 'regenerate_style_guard':
-                    if _cog_output is not None and _cog_mode == 'planner':
+                    if _cog_output is not None:
                         from .speech_planner import SpeechPlanner, verbalizer_prompt as _vp
                         _rplan = SpeechPlanner().build(_cog_output, built=built, user_text=clean_message, language=response_language)
                         repaired_prompt = _vp(_rplan, persona_voice=str(built.get('persona_block') or '')[:500], recent_exchange=str(built.get('recent_dialogue') or '')[:600])
@@ -2764,6 +2821,19 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
         vector_guidance = _render_message_vector_guidance(message_vector_runtime_payload)
         if vector_guidance:
             route_guidance = (route_guidance + '\n\n' + vector_guidance).strip()
+
+        # ── DIALOG CONTEXT MATRIX ─────────────────────────────────────────
+        try:
+            from .dialog_tracker import record_turn as _record_turn
+            _dialog_ctx = _record_turn(
+                clean_session_id,
+                text=clean_message,
+                speaker='user',
+            )
+            built['dialog_context'] = _dialog_ctx
+        except Exception:
+            built['dialog_context'] = {}
+
         working_context = observability.time_stage(
             trace,
             'working_context_construction',
@@ -2829,9 +2899,9 @@ def run_chat_turn(request: ChatTurnRequest) -> ChatTurnResult:
             },
         )
         side_effects.current_context_path = str(current_context_json_path or '')
-        if _cog_output is not None and _cog_mode == 'planner':
-            # ── SPEECH PLANNER PATH (persona route, planner mode only) ──────
-            # Only when score ≥ 0.55: pipeline controls content, LLM verbalizes.
+        if _cog_output is not None:
+            # ── SPEECH PLANNER PATH (mandatory for persona route) ────────────
+            # Pipeline controls content, LLM only verbalizes.
             # social_role, mood, reviewed_context inform the SpeechPlan style.
             from .speech_planner import SpeechPlanner, verbalizer_prompt as _vp
             _persona_built = dict(built)

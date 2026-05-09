@@ -1,0 +1,14 @@
+{
+  "name": "Dracula",
+  "slug": "dracula",
+  "entity_type": "FICTIONAL_CHARACTER",
+  "traits": [],
+  "aliases": [
+    "Count Dracula"
+  ],
+  "relations": [],
+  "knowledge": "Fictional vampire nobleman.\nDracula feeds on humans.",
+  "revision": 1,
+  "updated_at": "2026-05-08T22:43:15Z",
+  "source": "materialize"
+}

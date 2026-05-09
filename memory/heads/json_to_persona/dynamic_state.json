@@ -1,0 +1,13 @@
+{
+  "emotion_vector": {
+    "anger": 0.1,
+    "fear": 0.1,
+    "curiosity": 0.55,
+    "confidence": 0.55,
+    "empathy": 0.45
+  },
+  "last_situation": "",
+  "last_response_style": "",
+  "revision": 1,
+  "updated_at": "2026-05-08T22:40:20Z"
+}

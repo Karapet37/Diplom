@@ -624,37 +624,37 @@ class CoordinateTrainingRecord:
 
 # EmpatheticDialogues 31 emotions → {P_id: label} partial overrides
 EMOTION_TO_PVECTOR: dict[str, dict[str, str]] = {
-    'angry':        {'P13': 'attack', 'P22': 'dominance', 'P35': 'escalation', 'P15': 'tense'},
-    'furious':      {'P13': 'attack', 'P22': 'dominance', 'P35': 'escalation', 'P15': 'overloaded'},
-    'afraid':       {'P12': 'vulnerability', 'P11': 'defense', 'P15': 'tense'},
-    'terrified':    {'P12': 'vulnerability', 'P37': 'rupture', 'P15': 'overloaded'},
-    'caring':       {'P16': 'care', 'P20': 'friendliness', 'P32': 'approach'},
-    'disgusted':    {'P18': 'devaluation', 'P33': 'distancing'},
-    'annoyed':      {'P13': 'attack', 'P15': 'tense', 'P33': 'distancing'},
-    'sad':          {'P12': 'vulnerability', 'P33': 'distancing'},
-    'lonely':       {'P12': 'vulnerability', 'P33': 'distancing', 'P37': 'rupture'},
-    'grateful':     {'P16': 'care', 'P20': 'friendliness', 'P32': 'approach', 'P17': 'respect'},
-    'joyful':       {'P20': 'friendliness', 'P32': 'approach', 'P9': 'confidence'},
-    'excited':      {'P20': 'friendliness', 'P32': 'approach', 'P9': 'confidence'},
-    'impressed':    {'P17': 'respect', 'P32': 'approach'},
-    'ashamed':      {'P12': 'vulnerability', 'P42': 'admission', 'P11': 'defense'},
-    'guilty':       {'P12': 'vulnerability', 'P42': 'admission'},
-    'embarrassed':  {'P12': 'vulnerability', 'P11': 'defense'},
-    'trusting':     {'P17': 'respect', 'P40': 'sincerity', 'P32': 'approach'},
-    'faithful':     {'P40': 'sincerity', 'P39': 'contact_maintenance', 'P32': 'approach'},
-    'jealous':      {'P21': 'hidden_hostility', 'P33': 'distancing', 'P36': 'sharpening'},
-    'anxious':      {'P8': 'doubt', 'P12': 'vulnerability', 'P15': 'tense'},
-    'apprehensive': {'P8': 'doubt', 'P15': 'tense'},
-    'disappointed': {'P18': 'devaluation', 'P33': 'distancing', 'P12': 'vulnerability'},
-    'hopeful':      {'P9': 'confidence', 'P32': 'approach'},
-    'confident':    {'P9': 'confidence'},
-    'proud':        {'P9': 'confidence', 'P22': 'dominance'},
-    'anticipating': {'P9': 'confidence', 'P32': 'approach'},
-    'prepared':     {'P9': 'confidence'},
-    'surprised':    {'P15': 'tense', 'P8': 'doubt'},
-    'content':      {'P15': 'calm', 'P20': 'friendliness'},
-    'nostalgic':    {'P44': 'reframing', 'P40': 'sincerity'},
-    'sentimental':  {'P40': 'sincerity', 'P12': 'vulnerability'},
+    'angry':        {'F13': 'attack', 'F22': 'dominance', 'F35': 'escalation', 'F15': 'tense'},
+    'furious':      {'F13': 'attack', 'F22': 'dominance', 'F35': 'escalation', 'F15': 'overloaded'},
+    'afraid':       {'F12': 'vulnerability', 'F11': 'defense', 'F15': 'tense'},
+    'terrified':    {'F12': 'vulnerability', 'F37': 'rupture', 'F15': 'overloaded'},
+    'caring':       {'F16': 'care', 'F20': 'friendliness', 'F32': 'approach'},
+    'disgusted':    {'F18': 'devaluation', 'F33': 'distancing'},
+    'annoyed':      {'F13': 'attack', 'F15': 'tense', 'F33': 'distancing'},
+    'sad':          {'F12': 'vulnerability', 'F33': 'distancing'},
+    'lonely':       {'F12': 'vulnerability', 'F33': 'distancing', 'F37': 'rupture'},
+    'grateful':     {'F16': 'care', 'F20': 'friendliness', 'F32': 'approach', 'F17': 'respect'},
+    'joyful':       {'F20': 'friendliness', 'F32': 'approach', 'F9': 'confidence'},
+    'excited':      {'F20': 'friendliness', 'F32': 'approach', 'F9': 'confidence'},
+    'impressed':    {'F17': 'respect', 'F32': 'approach'},
+    'ashamed':      {'F12': 'vulnerability', 'F42': 'admission', 'F11': 'defense'},
+    'guilty':       {'F12': 'vulnerability', 'F42': 'admission'},
+    'embarrassed':  {'F12': 'vulnerability', 'F11': 'defense'},
+    'trusting':     {'F17': 'respect', 'F40': 'sincerity', 'F32': 'approach'},
+    'faithful':     {'F40': 'sincerity', 'F39': 'contact_maintenance', 'F32': 'approach'},
+    'jealous':      {'F21': 'hidden_hostility', 'F33': 'distancing', 'F36': 'sharpening'},
+    'anxious':      {'F8': 'doubt', 'F12': 'vulnerability', 'F15': 'tense'},
+    'apprehensive': {'F8': 'doubt', 'F15': 'tense'},
+    'disappointed': {'F18': 'devaluation', 'F33': 'distancing', 'F12': 'vulnerability'},
+    'hopeful':      {'F9': 'confidence', 'F32': 'approach'},
+    'confident':    {'F9': 'confidence'},
+    'proud':        {'F9': 'confidence', 'F22': 'dominance'},
+    'anticipating': {'F9': 'confidence', 'F32': 'approach'},
+    'prepared':     {'F9': 'confidence'},
+    'surprised':    {'F15': 'tense', 'F8': 'doubt'},
+    'content':      {'F15': 'calm', 'F20': 'friendliness'},
+    'nostalgic':    {'F44': 'reframing', 'F40': 'sincerity'},
+    'sentimental':  {'F40': 'sincerity', 'F12': 'vulnerability'},
 }
 
 # Archive DailyDialog: act (1-4) → P1 label
@@ -668,12 +668,12 @@ ARCHIVE_ACT_TO_P1: dict[int, str] = {
 # Archive DailyDialog: emotion (0-6) → partial P-vector
 ARCHIVE_EMOTION_TO_PVECTOR: dict[int, dict[str, str]] = {
     0: {},
-    1: {'P18': 'devaluation', 'P33': 'distancing'},
-    2: {'P15': 'tense'},
-    3: {'P12': 'vulnerability', 'P15': 'tense'},
-    4: {'P20': 'friendliness', 'P32': 'approach'},
-    5: {'P12': 'vulnerability', 'P33': 'distancing'},
-    6: {'P13': 'attack', 'P22': 'dominance', 'P15': 'tense'},
+    1: {'F18': 'devaluation', 'F33': 'distancing'},
+    2: {'F15': 'tense'},
+    3: {'F12': 'vulnerability', 'F15': 'tense'},
+    4: {'F20': 'friendliness', 'F32': 'approach'},
+    5: {'F12': 'vulnerability', 'F33': 'distancing'},
+    6: {'F13': 'attack', 'F22': 'dominance', 'F15': 'tense'},
 }
 
 
@@ -854,7 +854,7 @@ def load_archive_coordinate_vectors(
                     emotion = emos[idx]
                     act     = acts[idx] if idx < len(acts) else acts[-1]
                     p1_label = ARCHIVE_ACT_TO_P1.get(act, 'statement')
-                    partial: dict[str, str] = {'P1': p1_label}
+                    partial: dict[str, str] = {'F1': p1_label}
                     partial.update(ARCHIVE_EMOTION_TO_PVECTOR.get(emotion, {}))
                     vector = _partial_pvector(partial)
                     records.append(CoordinateTrainingRecord(
@@ -902,7 +902,7 @@ def load_correction_coordinate_vectors() -> list[CoordinateTrainingRecord]:
                     text=input_text[:500],
                     role='user',
                     context_matrix=[],
-                    vector=_partial_pvector({'P1': 'question', 'P5': 'independent'}),
+                    vector=_partial_pvector({'F1': 'question', 'F5': 'independent'}),
                     confidence=1.0,
                     session_id=session_id,
                     persona_name=persona_name,
@@ -911,11 +911,11 @@ def load_correction_coordinate_vectors() -> list[CoordinateTrainingRecord]:
             if correct_output:
                 # Correct assistant response should be direct, sincere, not masking
                 vector = _partial_pvector({
-                    'P1': 'statement',
-                    'P2': 'direct',
-                    'P3': 'literal',
-                    'P40': 'sincerity',
-                    'P41': 'unclear',
+                    'F1': 'statement',
+                    'F2': 'direct',
+                    'F3': 'literal',
+                    'F40': 'sincerity',
+                    'F41': 'unclear',
                 })
                 records.append(CoordinateTrainingRecord(
                     source='correction',

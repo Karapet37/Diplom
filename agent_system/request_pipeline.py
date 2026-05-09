@@ -1299,7 +1299,11 @@ def select_route(
         or followup in {'followup_on_previous_topic', 'followup_on_persona'}
         or bool(preprocessing.hypothetical_continuation)
     )
-    requires_persona = selected_route in {'persona_graph_reasoning', 'persona_assignment', 'persona_chat_fast_path'} or (selected_route in {'hypothetical_roleplay', 'persona_dialogue_analysis', 'lightweight_conversation'} and has_persona)
+    _system_routes = {'persona_specification', 'persona_assignment', 'clarification_request'}
+    requires_persona = (
+        selected_route in {'persona_graph_reasoning', 'persona_assignment', 'persona_chat_fast_path'}
+        or (has_persona and selected_route not in _system_routes)
+    )
     requires_graph = selected_route in {'factual_answer', 'project_document_analysis', 'persona_graph_reasoning'}
     requires_llm = selected_route not in {'clarification_request', 'persona_specification', 'persona_assignment'}
     strict_grounding = selected_route in {'factual_answer', 'project_document_analysis', 'persona_graph_reasoning'}

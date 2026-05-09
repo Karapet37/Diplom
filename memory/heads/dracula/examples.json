@@ -1,0 +1,7 @@
+{
+  "examples": [
+    "{'entity': 'Dracula', 'fact': 'Dracula feeds on humans.'}",
+    "Dracula feeds on humans."
+  ],
+  "situation_reactions": []
+}

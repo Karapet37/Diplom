@@ -66,17 +66,17 @@ def _prioritized_recommendations(payload: dict[str, Any]) -> list[tuple[str, str
 
     prioritized: list[tuple[str, str]] = []
     for item in recommendations:
-        priority = 'P2'
+        priority = 'F2'
         lowered = item.lower()
         if (not startup.get('startup_success')) or 'startup' in lowered or 'live backend' in lowered:
-            priority = 'P0'
+            priority = 'F0'
         elif (
             diagnostics.get('runtime_status', {}).get('mode') == 'degraded'
             or 'leaks generic assistant' in lowered
             or 'latency' in lowered
             or 'cross-turn recall' in lowered
         ):
-            priority = 'P1'
+            priority = 'F1'
         prioritized.append((priority, item))
     return prioritized
 

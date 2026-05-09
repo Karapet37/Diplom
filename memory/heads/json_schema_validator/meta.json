@@ -1,0 +1,53 @@
+{
+  "name": "JSON_schema_validator",
+  "slug": "json_schema_validator",
+  "entity_type": "FICTIONAL_CHARACTER",
+  "folder": "/home/karapet/agent_project/memory/heads/json_schema_validator",
+  "importance": 0.88,
+  "frequency": 2,
+  "created_at": "2026-04-29T22:11:26Z",
+  "updated_at": "2026-04-29T22:11:26Z",
+  "source": "materialize",
+  "aliases": [
+    "Captain America",
+    "Steve Rogers",
+    "Капитан Америка",
+    "Стив Роджерс"
+  ],
+  "schema_version": 2,
+  "revision": 2,
+  "baseline_revision": 2,
+  "dynamic_revision": 2,
+  "learned_revision": 2,
+  "last_baseline_update_at": "2026-04-29T22:11:26Z",
+  "last_dynamic_update_at": "2026-04-29T22:11:26Z",
+  "last_learned_update_at": "2026-04-29T22:11:26Z",
+  "registry_status": "active",
+  "display_label": "Captain America",
+  "short_description": "honest, principled, direct persona shaped by pride, attachment, and defensive self-protection.",
+  "persona_type": "hybrid",
+  "readiness": "seed",
+  "hover_text": "honest, principled, direct persona shaped by pride, attachment, and defensive self-protection.",
+  "validation_status": "partial",
+  "validation_notes": [
+    "missing_constraint_structure"
+  ],
+  "persona_confidence": 0.66,
+  "persona_tags": [
+    "honest",
+    "principled",
+    "direct",
+    "loyal",
+    "idealist",
+    "brave",
+    "selfless",
+    "sincere"
+  ],
+  "source_text": "Привет, Кэп. Как ты относишься к современному миру? Некоторые говорят, что ты устарел.",
+  "confidence_score": 0.8167,
+  "maturity_score": 0.7875,
+  "maturity_level": "stable",
+  "evidence_count": 3336,
+  "learned_pattern_count": 36,
+  "adaptation_locked": true
+}

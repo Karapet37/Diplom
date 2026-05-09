@@ -680,7 +680,20 @@ def _build_llm_for_path(model_path: str, *, n_ctx: int | None = None) -> "Llama"
     )
 
 
+def _active_model_supports_json_mode() -> bool:
+    """JSON mode (response_format) only works reliably on Qwen3-series models.
+    Mistral and other models ignore it or produce garbage."""
+    path = str(os.getenv("LOCAL_GGUF_MODEL", "") or os.getenv("LOCAL_ANALYST_GGUF_MODEL", "") or "").lower()
+    if not path:
+        return True  # unknown → try JSON mode
+    # Mistral, Llama, Gemma — don't use JSON mode via llama-cpp
+    non_json_families = ("mistral", "llama", "gemma", "nanbeige", "phi")
+    return not any(f in path for f in non_json_families)
+
+
 def _prompt_prefers_json_output(prompt: str) -> bool:
+    if not _active_model_supports_json_mode():
+        return False
     lowered = str(prompt or "").strip().lower()
     return any(hint in lowered for hint in _JSON_PROMPT_HINTS)
 
@@ -720,15 +733,18 @@ def _make_raw_llm_fn(llm: "Llama", *, max_tokens: int | None = None) -> Callable
             "total_tokens": 0,
         }
         messages = _split_chat_prompt_messages(prompt)
-        # Qwen3 no-think mode: if system prompt starts with /no_think, prefill the
-        # assistant turn with </think> so the model skips its reasoning block entirely.
+        # Qwen3 no-think mode: prefill assistant with a complete empty <think></think> block
+        # so the model skips deep reasoning and produces the response directly.
+        # Using only </think> causes 0 completion tokens on Qwen3.5-2B.
+        # The full <think>\n</think>\n prefill signals "thinking done" and produces output.
         _first_msg_content = str((messages[0] if messages else {}).get("content") or "")
         if _first_msg_content.lstrip().startswith("/no_think"):
-            messages = messages + [{"role": "assistant", "content": "</think>\n"}]
+            messages = list(messages) + [{"role": "assistant", "content": "<think>\n</think>\n"}]
         kwargs = {
             "max_tokens": resolved_max_tokens,
             "temperature": float(os.getenv("LOCAL_GGUF_TEMPERATURE", "0.15")),
             "top_p": float(os.getenv("LOCAL_GGUF_TOP_P", "0.9")),
+            "repeat_penalty": float(os.getenv("LOCAL_GGUF_REPEAT_PENALTY", "1.18")),
             "stop": ["\nUser question:"],
         }
         if _prompt_prefers_json_output(prompt):
@@ -767,7 +783,15 @@ def _make_raw_llm_fn(llm: "Llama", *, max_tokens: int | None = None) -> Callable
             )
             result_text = choice.get("message", {}).get("content")
         except Exception as inner_exc:
-            if len(messages) > 1 and 'system role not supported' in str(inner_exc).lower():
+            _exc_str = str(inner_exc).lower()
+            _needs_merge = (
+                len(messages) > 1 and (
+                    'system role not supported' in _exc_str
+                    or 'roles must alternate' in _exc_str
+                    or 'role not supported' in _exc_str
+                )
+            )
+            if _needs_merge:
                 fallback_messages = [
                     {
                         "role": "user",

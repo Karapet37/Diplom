@@ -52,7 +52,7 @@ def test_annotation_workspace_builds_registry_vector_and_context_matrix(tmp_path
     assert len(latest['context_matrix']) == 3
     assert latest['context_window'] == [row['message_id'] for row in workspace['messages'][-4:-1]]
     assert set(latest['vector'].keys()) == {f'P{index}' for index in range(1, 50)}
-    assert {'main', 'extra'} <= set(latest['vector']['P1'].keys())
+    assert {'main', 'extra'} <= set(latest['vector']['F1'].keys())
     assert isinstance(latest['transition_interpretation'], dict)
 
 
@@ -70,10 +70,10 @@ def test_annotation_store_saves_correction_layer_separately(tmp_path, monkeypatc
         session_id='annotation_api',
         message_payload=latest,
         coordinates={
-            'P1': {'main': 'statement', 'extra': ['question']},
-            'P24': {'main': 'false_praise', 'extra': ['sarcasm']},
-            'P46': {'main': 'false_praise', 'extra': []},
-            'P49': {'main': 'toward_masking', 'extra': []},
+            'F1': {'main': 'statement', 'extra': ['question']},
+            'F24': {'main': 'false_praise', 'extra': ['sarcasm']},
+            'F46': {'main': 'false_praise', 'extra': []},
+            'F49': {'main': 'toward_masking', 'extra': []},
         },
         context_window=latest['context_window'],
         context_matrix=latest['context_matrix'],
@@ -89,8 +89,8 @@ def test_annotation_store_saves_correction_layer_separately(tmp_path, monkeypatc
     saved_latest = saved_workspace['messages'][-1]
 
     assert saved_latest['has_correction'] is True
-    assert saved_latest['vector']['P24']['main'] == 'false_praise'
-    assert saved_latest['vector']['P24']['extra'] == ['sarcasm']
+    assert saved_latest['vector']['F24']['main'] == 'false_praise'
+    assert saved_latest['vector']['F24']['extra'] == ['sarcasm']
     assert saved_latest['transition_interpretation']['type'] == 'masking'
 
     annotation_file = Path(tmp_path / 'memory' / 'message_annotations' / 'annotation_api.json')
@@ -112,9 +112,9 @@ def test_runtime_message_vector_payload_uses_corrected_context_matrix(tmp_path, 
         session_id='annotation_runtime',
         message_payload=last_assistant,
         coordinates={
-            'P13': {'main': 'attack', 'extra': []},
-            'P35': {'main': 'escalation', 'extra': []},
-            'P49': {'main': 'toward_escalation', 'extra': []},
+            'F13': {'main': 'attack', 'extra': []},
+            'F35': {'main': 'escalation', 'extra': []},
+            'F49': {'main': 'toward_escalation', 'extra': []},
         },
         context_window=last_assistant['context_window'],
         context_matrix=last_assistant['context_matrix'],
@@ -134,6 +134,6 @@ def test_runtime_message_vector_payload_uses_corrected_context_matrix(tmp_path, 
     )
 
     assert runtime_payload['context_window']
-    assert runtime_payload['context_matrix'][-1]['vector']['P35']['main'] == 'escalation'
-    assert runtime_payload['context_matrix'][-1]['vector']['P49']['main'] == 'toward_escalation'
-    assert runtime_payload['current_vector']['P1']['main'] in {'question', 'statement'}
+    assert runtime_payload['context_matrix'][-1]['vector']['F35']['main'] == 'escalation'
+    assert runtime_payload['context_matrix'][-1]['vector']['F49']['main'] == 'toward_escalation'
+    assert runtime_payload['current_vector']['F1']['main'] in {'question', 'statement'}

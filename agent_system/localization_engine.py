@@ -58,7 +58,7 @@ _LATIN_RE     = re.compile(r'[a-zA-Z]')
 def detect_language(text: str) -> str:
     """
     Detect dominant language from character distribution.
-    Returns ISO 639-1 code: 'ru', 'hy', 'ar', 'zh', 'en', or 'unknown'.
+    Returns ISO 639-1 code: 'ru', 'hy', 'en'.
 
     Deterministic. No ML. Falls back to 'en' for ambiguous/Latin text.
     """
@@ -68,25 +68,13 @@ def detect_language(text: str) -> str:
 
     cyrillic_count  = len(_CYRILLIC_RE.findall(text))
     armenian_count  = len(_ARMENIAN_RE.findall(text))
-    arabic_count    = len(_ARABIC_RE.findall(text))
-    cjk_count       = len(_CJK_RE.findall(text))
     total_chars     = max(len(text.replace(' ', '')), 1)
 
-    ratios = {
-        'ru': cyrillic_count / total_chars,
-        'hy': armenian_count / total_chars,
-        'ar': arabic_count   / total_chars,
-        'zh': cjk_count      / total_chars,
-    }
-
-    dominant, ratio = max(ratios.items(), key=lambda x: x[1])
-    if ratio >= 0.25:
-        # Distinguish Russian/Ukrainian/Bulgarian — all use Cyrillic
-        # Minimal heuristic: Armenian letters are unmistakable
-        if dominant == 'ru' and armenian_count > 5:
-            return 'hy'
-        return dominant
-
+    # Armenian takes priority (unmistakable script)
+    if armenian_count / total_chars >= 0.15:
+        return 'hy'
+    if cyrillic_count / total_chars >= 0.25:
+        return 'ru'
     return 'en'
 
 
@@ -258,51 +246,6 @@ _PROFILES: dict[str, LanguageProfile] = {
         },
     ),
 
-    'es': LanguageProfile(
-        name='Spanish',
-        code='es',
-        avoid_rules=[
-            'No calques del inglés.',
-            'No "por supuesto" al inicio — suena traducido.',
-            'Usa la prosodia natural del español hablado.',
-        ],
-        rhythm_notes='El español tiene ritmo silábico, no acentual. Las frases se encadenan naturalmente.',
-        distance_map={
-            'formal':   'Usted. Registro formal, oraciones completas.',
-            'neutral':  'Tú o usted según contexto.',
-            'informal': 'Tú. Coloquial, contracciones, jerga moderada.',
-            'intimate': 'Tú. Cálido, personal, directo.',
-        },
-        warmth_adjustments={
-            'cold':     'Conciso, factual.',
-            'reserved': 'Contenido, reflexivo.',
-            'warm':     'Vivo, expresivo.',
-            'tender':   'Suave, cuidadoso.',
-        },
-    ),
-
-    'fr': LanguageProfile(
-        name='French',
-        code='fr',
-        avoid_rules=[
-            'Pas de calque de l\'anglais.',
-            'Évite "bien sûr!" — sonne comme une traduction.',
-            'Respecte la logique de la phrase française (groupe verbal, inversion).',
-        ],
-        rhythm_notes='Le français aime les phrases bien construites. Le rythme ternaire est naturel.',
-        distance_map={
-            'formal':   'Vous. Registre soutenu.',
-            'neutral':  'Vous ou tu selon le contexte.',
-            'informal': 'Tu. Familier, naturel.',
-            'intimate': 'Tu. Chaleureux, direct.',
-        },
-        warmth_adjustments={
-            'cold':     'Concis, neutre.',
-            'reserved': 'Sobre, mesuré.',
-            'warm':     'Vivant, engagé.',
-            'tender':   'Doux, attentionné.',
-        },
-    ),
 }
 
 # Default profile for unsupported languages

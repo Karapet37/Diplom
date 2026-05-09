@@ -1,0 +1,483 @@
+{
+  "persona_id": "sheldon_cooper",
+  "version": 0,
+  "params": {
+    "drive_recognition": {
+      "name": "drive_recognition",
+      "value": 0.88,
+      "prior": 0.88,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "drive_security": {
+      "name": "drive_security",
+      "value": 0.5,
+      "prior": 0.5,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "drive_control": {
+      "name": "drive_control",
+      "value": 0.5,
+      "prior": 0.5,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "drive_closeness": {
+      "name": "drive_closeness",
+      "value": 0.5,
+      "prior": 0.5,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "drive_autonomy": {
+      "name": "drive_autonomy",
+      "value": 0.92,
+      "prior": 0.92,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "drive_superiority": {
+      "name": "drive_superiority",
+      "value": 0.98,
+      "prior": 0.98,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "drive_stability": {
+      "name": "drive_stability",
+      "value": 0.9,
+      "prior": 0.9,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "drive_meaning": {
+      "name": "drive_meaning",
+      "value": 0.5,
+      "prior": 0.5,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "fear_shame": {
+      "name": "fear_shame",
+      "value": 0.5,
+      "prior": 0.5,
+      "lr": 0.03,
+      "stability": 0.7,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "fear_rejection": {
+      "name": "fear_rejection",
+      "value": 0.5,
+      "prior": 0.5,
+      "lr": 0.03,
+      "stability": 0.7,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "fear_loss_of_control": {
+      "name": "fear_loss_of_control",
+      "value": 0.5,
+      "prior": 0.5,
+      "lr": 0.03,
+      "stability": 0.6,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "fear_helplessness": {
+      "name": "fear_helplessness",
+      "value": 0.4,
+      "prior": 0.4,
+      "lr": 0.03,
+      "stability": 0.6,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "fear_abandonment": {
+      "name": "fear_abandonment",
+      "value": 0.4,
+      "prior": 0.4,
+      "lr": 0.03,
+      "stability": 0.7,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "fear_judgment": {
+      "name": "fear_judgment",
+      "value": 0.5,
+      "prior": 0.5,
+      "lr": 0.03,
+      "stability": 0.6,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "fear_chaos": {
+      "name": "fear_chaos",
+      "value": 0.92,
+      "prior": 0.92,
+      "lr": 0.03,
+      "stability": 0.6,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "fear_failure": {
+      "name": "fear_failure",
+      "value": 0.5,
+      "prior": 0.5,
+      "lr": 0.03,
+      "stability": 0.6,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "planning_depth": {
+      "name": "planning_depth",
+      "value": 0.5,
+      "prior": 0.5,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "analysis_bias": {
+      "name": "analysis_bias",
+      "value": 0.97,
+      "prior": 0.97,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "impulsivity": {
+      "name": "impulsivity",
+      "value": 0.3,
+      "prior": 0.3,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "ambiguity_tolerance": {
+      "name": "ambiguity_tolerance",
+      "value": 0.03,
+      "prior": 0.03,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "category_rigidity": {
+      "name": "category_rigidity",
+      "value": 0.95,
+      "prior": 0.95,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "generalization_bias": {
+      "name": "generalization_bias",
+      "value": 0.3,
+      "prior": 0.3,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "suspicion_bias": {
+      "name": "suspicion_bias",
+      "value": 0.3,
+      "prior": 0.3,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "threat_first": {
+      "name": "threat_first",
+      "value": 0.4,
+      "prior": 0.4,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "hypothesis_switch_speed": {
+      "name": "hypothesis_switch_speed",
+      "value": 0.08,
+      "prior": 0.08,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "hierarchy_sensitivity": {
+      "name": "hierarchy_sensitivity",
+      "value": 0.88,
+      "prior": 0.88,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "approval_seeking": {
+      "name": "approval_seeking",
+      "value": 0.06,
+      "prior": 0.06,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "dominance_tendency": {
+      "name": "dominance_tendency",
+      "value": 0.82,
+      "prior": 0.82,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "vulnerability_concealment": {
+      "name": "vulnerability_concealment",
+      "value": 0.4,
+      "prior": 0.4,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "social_distance_default": {
+      "name": "social_distance_default",
+      "value": 0.82,
+      "prior": 0.82,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "trust_baseline": {
+      "name": "trust_baseline",
+      "value": 0.45,
+      "prior": 0.45,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "mirror_tendency": {
+      "name": "mirror_tendency",
+      "value": 0.03,
+      "prior": 0.03,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "defense_avoidance": {
+      "name": "defense_avoidance",
+      "value": 0.4,
+      "prior": 0.4,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "defense_rationalization": {
+      "name": "defense_rationalization",
+      "value": 0.82,
+      "prior": 0.82,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "defense_aggression": {
+      "name": "defense_aggression",
+      "value": 0.2,
+      "prior": 0.2,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "defense_freeze": {
+      "name": "defense_freeze",
+      "value": 0.3,
+      "prior": 0.3,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "defense_humor": {
+      "name": "defense_humor",
+      "value": 0.12,
+      "prior": 0.12,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "defense_hypercontrol": {
+      "name": "defense_hypercontrol",
+      "value": 0.3,
+      "prior": 0.3,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "baseline_anxiety": {
+      "name": "baseline_anxiety",
+      "value": 0.52,
+      "prior": 0.52,
+      "lr": 0.03,
+      "stability": 0.65,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "baseline_drive": {
+      "name": "baseline_drive",
+      "value": 0.5,
+      "prior": 0.5,
+      "lr": 0.03,
+      "stability": 0.6,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "fatigue_sensitivity": {
+      "name": "fatigue_sensitivity",
+      "value": 0.4,
+      "prior": 0.4,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "stress_recovery_speed": {
+      "name": "stress_recovery_speed",
+      "value": 0.4,
+      "prior": 0.4,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "novelty_reward": {
+      "name": "novelty_reward",
+      "value": 0.4,
+      "prior": 0.4,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "shame_recovery_speed": {
+      "name": "shame_recovery_speed",
+      "value": 0.4,
+      "prior": 0.4,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "pain_memory_weight": {
+      "name": "pain_memory_weight",
+      "value": 0.6,
+      "prior": 0.6,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "shame_memory_weight": {
+      "name": "shame_memory_weight",
+      "value": 0.6,
+      "prior": 0.6,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "success_memory_weight": {
+      "name": "success_memory_weight",
+      "value": 0.5,
+      "prior": 0.5,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "past_influence_decay": {
+      "name": "past_influence_decay",
+      "value": 0.3,
+      "prior": 0.3,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "threat_scan_first": {
+      "name": "threat_scan_first",
+      "value": 0.4,
+      "prior": 0.4,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "blame_self_vs_other": {
+      "name": "blame_self_vs_other",
+      "value": 0.5,
+      "prior": 0.5,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "feel_first": {
+      "name": "feel_first",
+      "value": 0.02,
+      "prior": 0.02,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "justify_vs_plan": {
+      "name": "justify_vs_plan",
+      "value": 0.4,
+      "prior": 0.4,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    },
+    "pessimism_bias": {
+      "name": "pessimism_bias",
+      "value": 0.4,
+      "prior": 0.4,
+      "lr": 0.03,
+      "stability": 0.5,
+      "confidence": 0.3,
+      "updates": 0
+    }
+  }
+}

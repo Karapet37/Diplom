@@ -68,6 +68,13 @@ export function respondCognitiveChat(payload = {}) {
   });
 }
 
+export function respondDirectLLM(payload = {}) {
+  return request('/api/cognitive/chat/direct', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function listCognitivePersonalities() {
   return request('/api/cognitive/personalities');
 }

@@ -1,0 +1,98 @@
+{
+  "nodes": [
+    {
+      "id": "head:катерина",
+      "name": "Катерина",
+      "type": "PERSON",
+      "folder": "/home/karapet/agent_project/memory/heads/катерина",
+      "importance": 0.8,
+      "confidence": 0.85,
+      "frequency": 1,
+      "emotion_vector": {
+        "anger": 0.1,
+        "fear": 0.1,
+        "curiosity": 0.55,
+        "confidence": 0.55,
+        "empathy": 0.45
+      },
+      "facts": [],
+      "context": {
+        "source": "persona_graph",
+        "persona_name": "Катерина",
+        "category": "identity"
+      }
+    },
+    {
+      "id": "trait:катерина:presentation_test",
+      "name": "presentation_test",
+      "type": "CONCEPT",
+      "importance": 0.4,
+      "confidence": 0.8,
+      "frequency": 1,
+      "facts": [],
+      "context": {
+        "source": "persona_graph",
+        "persona_name": "Катерина",
+        "category": "trait"
+      }
+    },
+    {
+      "id": "role:катерина:direct",
+      "name": "direct",
+      "type": "CONCEPT",
+      "importance": 0.46,
+      "confidence": 0.82,
+      "frequency": 1,
+      "facts": [],
+      "context": {
+        "source": "persona_graph",
+        "persona_name": "Катерина",
+        "category": "social_roles"
+      }
+    },
+    {
+      "id": "reaction:катерина:matches_reply_style_to_the_current_s",
+      "name": "matches reply style to the current situation and available evidence",
+      "type": "CONCEPT",
+      "importance": 0.44,
+      "confidence": 0.82,
+      "frequency": 1,
+      "facts": [],
+      "context": {
+        "source": "persona_graph",
+        "persona_name": "Катерина",
+        "category": "reaction_patterns"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "head:катерина",
+      "to": "trait:катерина:presentation_test",
+      "type": "HAS_TRAIT",
+      "weight": 0.9,
+      "confidence": 0.85
+    },
+    {
+      "from": "head:катерина",
+      "to": "role:катерина:direct",
+      "type": "CAN_PLAY_ROLE",
+      "weight": 0.84,
+      "confidence": 0.82
+    },
+    {
+      "from": "head:катерина",
+      "to": "reaction:катерина:matches_reply_style_to_the_current_s",
+      "type": "USES_REACTION_PATTERN",
+      "weight": 0.84,
+      "confidence": 0.82
+    },
+    {
+      "from": "role:катерина:direct",
+      "to": "reaction:катерина:matches_reply_style_to_the_current_s",
+      "type": "EXPRESSED_AS",
+      "weight": 0.61,
+      "confidence": 0.74
+    }
+  ]
+}

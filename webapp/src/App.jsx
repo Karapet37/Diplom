@@ -29,6 +29,7 @@ import {
   reviewCognitiveGraphNode,
   rethinkCognitiveGraphNodes,
   respondCognitiveChat,
+  respondDirectLLM,
   saveSessionMessageAnnotation,
   uploadCognitiveFiles,
   classifySafety,
@@ -41,6 +42,7 @@ import { DiagnosticsSurface } from './components/Operator/DiagnosticsSurface';
 import { FilesIngestionSurface } from './components/Operator/FilesIngestionSurface';
 import { GraphOperatorSurface } from './components/Operator/GraphOperatorSurface';
 import { PersonaInspectionSurface } from './components/Operator/PersonaInspectionSurface';
+import { DirectLLMSurface } from './components/Operator/DirectLLMSurface';
 import { extractNeighborhoodPayload, shortestPathBetween } from './lib/graphView';
 import { createTranslator, LANGUAGE_OPTIONS } from './lib/i18n';
 import { normalizeRethinkPreview } from './lib/operatorFormatters';
@@ -447,6 +449,11 @@ export default function App() {
     if (!resolvedName) {
       setPersonaDetail(null);
       setTrainingExamples([]);
+      return;
+    }
+    // Only fetch detail if persona exists in the registry — avoids 404 for stale session names
+    if (!matchedPersonality) {
+      setPersonaDetail(null);
       return;
     }
     await Promise.all([
@@ -1030,6 +1037,16 @@ export default function App() {
           onRefresh={() => void loadDiagnostics(activeSessionId, activeTrace?.request_id || '')}
           activeTrace={activeTrace}
           onSelectTrace={setActiveTrace}
+          t={t}
+        />
+      );
+    }
+    if (workspace === 'direct') {
+      return (
+        <DirectLLMSurface
+          personas={personalities}
+          language={uiLanguage}
+          onRespondDirectLLM={respondDirectLLM}
           t={t}
         />
       );

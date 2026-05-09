@@ -42,6 +42,7 @@ export function Sidebar({
           <SidebarButton active={workspace === 'persona'} onClick={() => onWorkspaceChange('persona')}>{t('sidebar_persona_workspace')}</SidebarButton>
           <SidebarButton active={workspace === 'files'} onClick={() => onWorkspaceChange('files')}>{t('sidebar_files_workspace')}</SidebarButton>
           <SidebarButton active={workspace === 'diagnostics'} onClick={() => onWorkspaceChange('diagnostics')}>{t('sidebar_diagnostics_workspace')}</SidebarButton>
+          <SidebarButton active={workspace === 'direct'} onClick={() => onWorkspaceChange('direct')}>Direct LLM</SidebarButton>
         </div>
       </section>
 

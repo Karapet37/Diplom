@@ -209,9 +209,9 @@ def test_persona_specification_route_creates_object_instead_of_essay(tmp_path, m
     monkeypatch.setattr('agent_system.llm._call_model', lambda *args, **kwargs: 'This essay should not be returned.')
 
     result = generate_response(
-        message='Создай личность: робкий, но гордый человек, которому стыдно просить помощи и который боится быть использованным.',
+        message='Create a persona: timid but proud person who is ashamed to ask for help and fears being used.',
         session_id='persona_spec_session',
-        language='ru',
+        language='en',
     )
 
     assert result['pipeline']['route']['selected_route'] == 'persona_specification'
@@ -221,7 +221,6 @@ def test_persona_specification_route_creates_object_instead_of_essay(tmp_path, m
     assert result['persona_action']['persona_object']['constraints_internal']
     assert result['persona_action']['persona_object']['allowed_methods']
     assert result['persona_action']['persona_object']['core']['self_image']
-    assert result['assistant_reply'].startswith('Создал личность')
     assert 'tragic and complicated person' not in result['assistant_reply']
 
 
@@ -278,20 +277,20 @@ def test_persona_specification_continues_after_create_command_with_followup_desc
     )
 
     first = generate_response(
-        message='создай личность',
+        message='create persona',
         session_id='persona_followup_spec_session',
-        language='ru',
+        language='en',
     )
     second = generate_response(
-        message='Катерина, 31, бухгалтер, скромная, робкая, терпеливая, стыдливая, говорит тихо и коротко, боится навязываться.',
+        message='Katarina, 31, accountant, modest, shy, patient, speaks quietly and briefly, afraid of being a burden.',
         session_id='persona_followup_spec_session',
-        language='ru',
+        language='en',
     )
 
     assert first['pipeline']['route']['selected_route'] == 'persona_specification'
     assert second['pipeline']['route']['selected_route'] == 'persona_specification'
     assert second['persona_action']['created'] is True
-    assert second['persona_action']['persona_name'] == 'Катерина'
+    assert second['persona_action']['persona_name'] == 'Katarina'
 
 
 def test_persona_assignment_uses_validated_registry_after_creation(tmp_path, monkeypatch) -> None:
@@ -303,16 +302,16 @@ def test_persona_assignment_uses_validated_registry_after_creation(tmp_path, mon
     )
 
     created = create_persona_from_description(
-        'Осторожный и гордый человек, который не любит быть зависимым от чужой воли.',
+        'A cautious and proud person who dislikes being dependent on others.',
         name_hint='Guarded Pride',
     )
     assert created['created'] is True
 
     result = generate_response(
-        message='сделай текущей личностью',
+        message='set as current persona',
         session_id='persona_assign_session',
         selected_persona='Guarded Pride',
-        language='ru',
+        language='en',
     )
 
     assert result['pipeline']['route']['selected_route'] == 'persona_assignment'

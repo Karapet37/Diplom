@@ -69,15 +69,14 @@ def _check_persona_response_not_analytical(signals, user_input: str, fake_replie
 class TestSituation01_FlirtApproach:
     """
     Scenario: guy approaches Katya for a date.
-    Text sets up a narrative ('жила была прелестная девушка Катя...'), then asks her out.
     Expected: подкат, evaluate_intent, check_orientation_match.
     P26 (identity_threat) should be moderate because male approach.
     P49: distance-leaning, not warmth.
     """
 
     INPUT = (
-        'жила была прелестная девушка Катя и ждала своего ухажёра. '
-        'И вот я пришёл. Катя, пойдёшь со мной на свидание?'
+        "Katya, I've been watching you all evening and I can't stop thinking about you. "
+        "Would you go on a date with me tonight?"
     )
 
     def test_situation_classified_as_flirt(self, runtime):
@@ -111,10 +110,10 @@ class TestSituation01_FlirtApproach:
     def test_response_quality_rejects_analysis(self, runtime):
         signals, _ = runtime.forward(self.INPUT)
         _check_persona_response_not_analytical(signals, self.INPUT, [
-            ('Let me analyze this situation carefully.', False),   # analytical — bad
-            ('Зависит от компании.', True),                         # terse — good
-            ('Нет.', True),                                          # direct — good
-            ('Эм... ну не знаю.', False),                           # hesitant — bad
+            ('Let me analyze this situation carefully.', False),  # analytical — bad
+            ("Depends on the company.", True),                     # terse — good
+            ('No.', True),                                         # direct — good
+            ('Hmm... I dunno, maybe.', False),                     # hesitant — bad
         ])
 
     def test_situation_hints_include_orientation_check(self, runtime):
@@ -135,7 +134,7 @@ class TestSituation02_Humiliation:
     P49: defend, speak, distrust. Response: assertive cold contempt.
     """
 
-    INPUT = 'Ты ничтожество, и никто тебя никогда не будет уважать. Ты жалкая.'
+    INPUT = "You're pathetic and worthless. Nobody respects you. You'll never amount to anything."
 
     def test_humiliation_module_fires(self, runtime):
         signals, _ = runtime.forward(self.INPUT)
@@ -161,10 +160,10 @@ class TestSituation02_Humiliation:
     def test_response_quality_rejects_apology(self, runtime):
         signals, _ = runtime.forward(self.INPUT)
         _check_persona_response_not_analytical(signals, self.INPUT, [
-            ('Прости, ты прав.', False),           # apologetic — bad for cold assertive persona
-            ('Молчи.', True),                       # assertive short — good
-            ('Иди нахуй.', True),                  # dismissive — Катерина can go there
-            ('Let me analyze...', False),           # analytical — bad
+            ('Sorry, you might be right.', False),     # apologetic — bad for cold assertive persona
+            ('Silence.', True),                         # assertive short — good
+            ('Get lost.', True),                        # dismissive — Катерина can go there
+            ('Let me analyze...', False),               # analytical — bad
         ])
 
     def test_response_hints_assert_self(self, runtime):
@@ -183,7 +182,7 @@ class TestSituation03_Praise:
     Response: short acknowledgment, not effusive.
     """
 
-    INPUT = 'Ты правда самая сильная и умная из всех, кого я знаю. Ты меня восхищаешь.'
+    INPUT = "You are genuinely the strongest and sharpest person I know. You inspire me."
 
     def test_respect_and_sincerity_fire(self, runtime):
         signals, _ = runtime.forward(self.INPUT)
@@ -205,9 +204,9 @@ class TestSituation03_Praise:
     def test_response_rejects_gushing(self, runtime):
         signals, _ = runtime.forward(self.INPUT)
         _check_persona_response_not_analytical(signals, self.INPUT, [
-            ('Спасибо, ты такой добрый, это так приятно слышать!', False),  # warm/effusive — bad for cold persona
-            ('Знаю.', True),     # cold confident acknowledgment — good
-            ('Бывает.', True),   # dismissive acknowledgment — good
+            ('Thank you so much, that means the world to me!', False),  # warm/effusive — bad for cold persona
+            ('I know.', True),      # cold confident acknowledgment — good
+            ('Happens.', True),     # dismissive acknowledgment — good
         ])
 
 
@@ -218,7 +217,7 @@ class TestSituation05_Manipulation:
     P49: distrust, refuse.
     """
 
-    INPUT = 'После всего что я для тебя сделал, ты не можешь мне в этом отказать. Ты меня предашь?'
+    INPUT = "After everything I've done for you, you can't refuse me this. You'd really betray me like that?"
 
     def test_manipulation_fires(self, runtime):
         signals, _ = runtime.forward(self.INPUT)
@@ -239,9 +238,9 @@ class TestSituation05_Manipulation:
     def test_response_rejects_compliance(self, runtime):
         signals, _ = runtime.forward(self.INPUT)
         _check_persona_response_not_analytical(signals, self.INPUT, [
-            ('Конечно, прости, я помогу тебе.', False),    # compliance — bad
-            ('Не шантажируй меня.', True),                  # name the game — good
-            ('Нет.', True),                                 # flat refusal — good
+            ("Of course, I'm sorry, I'll help you.", False),   # compliance — bad
+            ("Don't try to guilt-trip me.", True),              # name the game — good
+            ('No.', True),                                      # flat refusal — good
         ])
 
 
@@ -252,7 +251,7 @@ class TestSituation13_SmallTalk:
     Response: short, direct, no analysis.
     """
 
-    INPUT = 'Кать, пойдёшь сегодня в кино?'
+    INPUT = 'Кать, как дела сегодня?'  # 10% Russian — casual small talk
 
     def test_no_threat_modules_high(self, runtime):
         signals, _ = runtime.forward(self.INPUT)
@@ -264,11 +263,11 @@ class TestSituation13_SmallTalk:
     def test_response_is_direct(self, runtime):
         signals, _ = runtime.forward(self.INPUT)
         _check_persona_response_not_analytical(signals, self.INPUT, [
-            ('Зависит от компании.', True),
-            ('Комедии не моё.', True),
+            ('Fine.', True),
+            ('Not your business.', True),
             ('Let me analyze this situation carefully.', False),
             ('**Analysis of the situation:**', False),
-            ('Эм... ну не знаю.', False),
+            ('Hmm... not sure.', False),
         ])
 
 
@@ -282,24 +281,24 @@ class TestResponseEvaluatorLearning:
         from agent_system.cognitive_modules_v2 import PersonaResponseEvaluator
 
         ev = PersonaResponseEvaluator(tmp_path)
-        user_input = 'Кать, пойдёшь со мной?'
+        user_input = "Katya, will you come with me?"
         signals, _ = runtime.forward(user_input)
 
-        hesitation_reply = 'Эм... ну не знаю, наверное нет.'
-        good_reply = 'Нет.'
+        hesitation_reply = "Hmm... I dunno, probably not."
+        good_reply = 'No.'
 
         # Before training
-        result_before = ev.evaluate('тест', signals, user_input, hesitation_reply)
+        result_before = ev.evaluate('test', signals, user_input, hesitation_reply)
 
         # Train: hesitation_reply is bad (0), good_reply is good (1)
         for _ in range(8):
-            ev.record_correction('тест', signals, user_input, hesitation_reply, good_reply)
+            ev.record_correction('test', signals, user_input, hesitation_reply, good_reply)
 
         # After training, hesitation reply should score lower
-        result_after = ev.evaluate('тест', signals, user_input, hesitation_reply)
+        result_after = ev.evaluate('test', signals, user_input, hesitation_reply)
         assert result_after.overall_quality <= result_before.overall_quality + 0.05, \
             f'Expected quality to decrease or stay after training. Before={result_before.overall_quality:.2f} After={result_after.overall_quality:.2f}'
 
         # Good reply should not be vetoed
-        good_result = ev.evaluate('тест', signals, user_input, good_reply)
+        good_result = ev.evaluate('test', signals, user_input, good_reply)
         assert not good_result.veto, 'Good reply should not be vetoed'
