@@ -29,7 +29,7 @@ _BASE_FEATURES = 3            # rel_time + speaker + turn_idx_norm
 FEATURE_DIM = P_COUNT + _BASE_FEATURES           # 51 — одна строка
 DELTA_DIM = P_COUNT                               # дельта P-скоров между ходами
 WINDOW_ROW_DIM = FEATURE_DIM + DELTA_DIM         # 99 — строка окна (P + meta + delta)
-_P_IDS = [f'P{i}' for i in range(1, 49)]
+_P_IDS = [f'F{i}' for i in range(1, 49)]
 
 
 # ─── UtteranceRow ─────────────────────────────────────────────────────────────
